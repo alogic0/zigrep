@@ -237,7 +237,7 @@ const Compiler = struct {
 
         var result = try self.compileNode(compiled_hir, branches[0]);
         for (branches[1..]) |branch| {
-            const next = try self.compileNode(compiled_hir, branch);
+            var next = try self.compileNode(compiled_hir, branch);
             const split = try self.emit(.{ .split = .{
                 .out = result.start,
                 .out1 = next.start,

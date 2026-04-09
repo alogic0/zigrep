@@ -46,7 +46,7 @@ pub const Cache = struct {
         if (self.program.prefilter) |prefilter| {
             if (!prefilter.mayMatch(haystack)) return false;
         }
-        if (self.program.ascii_only and std.ascii.isAscii(haystack)) {
+        if (self.program.ascii_only and isAsciiBytes(haystack)) {
             return self.isMatchAscii(haystack);
         }
 
@@ -214,7 +214,9 @@ fn contextFlags(pos: usize, input_len: usize) ContextFlags {
 }
 
 fn transitionKey(cp: u32, flags: ContextFlags) u64 {
-    const flag_bits: u64 = @bitCast(flags);
+    const flag_bits: u64 =
+        (@as(u64, @intFromBool(flags.at_start)) << 1) |
+        @as(u64, @intFromBool(flags.at_end));
     return (@as(u64, cp) << 2) | flag_bits;
 }
 
@@ -222,7 +224,7 @@ fn sortInsts(insts: []nfa.InstPtr) void {
     std.sort.heap(nfa.InstPtr, insts, {}, comptime std.sort.asc(nfa.InstPtr));
 }
 
-fn classMatches(class: nfa.Inst.char_class, cp: u32) bool {
+fn classMatches(class: anytype, cp: u32) bool {
     var matched = false;
     for (class.items) |item| {
         switch (item) {
@@ -241,6 +243,13 @@ fn classMatches(class: nfa.Inst.char_class, cp: u32) bool {
         }
     }
     return if (class.negated) !matched else matched;
+}
+
+fn isAsciiBytes(bytes: []const u8) bool {
+    for (bytes) |byte| {
+        if (!std.ascii.isAscii(byte)) return false;
+    }
+    return true;
 }
 
 fn compileProgram(allocator: std.mem.Allocator, pattern: []const u8) !nfa.Program {

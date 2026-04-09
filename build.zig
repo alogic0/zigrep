@@ -90,6 +90,19 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const bench_exe = b.addExecutable(.{
+        .name = "zigrep-bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/bench.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigrep", .module = mod },
+                .{ .name = "build_options", .module = build_options.createModule() },
+            },
+        }),
+    });
+
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
     // step). By default the install prefix is `zig-out/` but can be overridden
@@ -121,6 +134,10 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }
+
+    const bench_step = b.step("bench", "Run engine benchmarks");
+    const run_bench = b.addRunArtifact(bench_exe);
+    bench_step.dependOn(&run_bench.step);
 
     // Creates an executable that will run `test` blocks from the provided module.
     // Here `mod` needs to define a target, which is why earlier we made sure to

@@ -53,7 +53,7 @@ Build a Zig-native analog of `ripgrep` with:
 - [x] Add a DFA or lazy DFA for non-capturing search
 - [x] Add ASCII-first fast paths
 - [x] Add optional SIMD scanning behind target-feature gates
-- [ ] Add benchmarks for engine-level performance
+- [x] Add benchmarks for engine-level performance
 
 ### 6. Search Tool Plumbing
 
@@ -129,6 +129,10 @@ decoding when the haystack and compiled program are both ASCII-only.
 Completed in the current SIMD fast-path pass: the literal prefilter now has an
 optional SIMD-gated single-byte scan path controlled by a build option, while
 all non-SIMD and non-eligible cases continue to use the normal fallback logic.
+
+Completed in the benchmark pass: `zig build bench` now runs a small engine
+benchmark harness that measures representative prefilter, lazy-DFA, and
+capture-preserving Pike-VM cases and prints CSV-friendly timing output.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
