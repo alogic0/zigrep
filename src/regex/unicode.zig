@@ -39,6 +39,15 @@ pub const CaseFoldMode = enum {
     simple,
 };
 
+pub const CaseFold = struct {
+    canonical: u32,
+    equivalents: []u32,
+
+    pub fn deinit(self: CaseFold, allocator: std.mem.Allocator) void {
+        allocator.free(self.equivalents);
+    }
+};
+
 pub const Decoded = struct {
     cp: u32,
     width: u3,
@@ -144,22 +153,37 @@ pub const Strategy = struct {
         };
     }
 
-    pub fn simpleFold(allocator: std.mem.Allocator, cp: u32, mode: CaseFoldMode) ![]u32 {
-        _ = mode;
+    pub fn foldScalar(cp: u32, mode: CaseFoldMode) u32 {
+        return switch (mode) {
+            .simple => foldScalarSimple(cp),
+        };
+    }
 
-        const lower = std.unicode.toLower(cp);
-        const upper = std.unicode.toUpper(cp);
-        const title = std.unicode.toTitle(cp);
+    pub fn foldedEq(a: u32, b: u32, mode: CaseFoldMode) bool {
+        return foldScalar(a, mode) == foldScalar(b, mode);
+    }
+
+    pub fn foldSet(allocator: std.mem.Allocator, cp: u32, mode: CaseFoldMode) !CaseFold {
+        const canonical = foldScalar(cp, mode);
 
         var folds: std.ArrayList(u32) = .empty;
         errdefer folds.deinit(allocator);
 
         try appendUnique(allocator, &folds, cp);
+        try appendUnique(allocator, &folds, canonical);
+
+        const lower = foldScalar(std.unicode.toLower(cp), mode);
+        const upper = foldScalar(std.unicode.toUpper(cp), mode);
+        const title = foldScalar(std.unicode.toTitle(cp), mode);
+
         try appendUnique(allocator, &folds, lower);
         try appendUnique(allocator, &folds, upper);
         try appendUnique(allocator, &folds, title);
 
-        return folds.toOwnedSlice(allocator);
+        return .{
+            .canonical = canonical,
+            .equivalents = try folds.toOwnedSlice(allocator),
+        };
     }
 };
 
@@ -185,6 +209,14 @@ fn isSeparator(cp: u32) bool {
     return cp == 0x00A0 or cp == 0x1680 or cp == 0x2028 or cp == 0x2029 or cp == 0x202F or cp == 0x205F or cp == 0x3000;
 }
 
+fn foldScalarSimple(cp: u32) u32 {
+    return switch (cp) {
+        // Greek sigma variants share a simple fold bucket.
+        'Σ', 'σ', 'ς' => 'σ',
+        else => std.unicode.toLower(cp),
+    };
+}
+
 fn propertyNameEq(actual: []const u8, canonical: []const u8) bool {
     var actual_index: usize = 0;
     var canonical_index: usize = 0;
@@ -208,11 +240,10 @@ fn isPropertySeparator(byte: u8) bool {
 }
 
 fn appendUnique(allocator: std.mem.Allocator, list: *std.ArrayList(u32), value: u32) !void {
-    _ = allocator;
     for (list.items) |item| {
         if (item == value) return;
     }
-    try list.append(std.heap.page_allocator, value);
+    try list.append(allocator, value);
 }
 
 test "Unicode strategy decodes incrementally without whole-input preprocessing" {
@@ -278,13 +309,24 @@ test "Unicode strategy evaluates property membership" {
 test "Unicode strategy exposes simple case-fold sets" {
     const testing = std.testing;
 
-    const ascii = try Strategy.simpleFold(testing.allocator, 'A', .simple);
-    defer testing.allocator.free(ascii);
-    try testing.expectEqualSlices(u32, &[_]u32{ 'A', 'a' }, ascii);
+    const ascii = try Strategy.foldSet(testing.allocator, 'A', .simple);
+    defer ascii.deinit(testing.allocator);
+    try testing.expectEqual(@as(u32, 'a'), ascii.canonical);
+    try testing.expectEqualSlices(u32, &[_]u32{ 'A', 'a' }, ascii.equivalents);
 
-    const sigma = try Strategy.simpleFold(testing.allocator, 'Σ', .simple);
-    defer testing.allocator.free(sigma);
-    try testing.expect(sigma.len >= 2);
-    try testing.expect(std.mem.indexOfScalar(u32, sigma, 'Σ') != null);
-    try testing.expect(std.mem.indexOfScalar(u32, sigma, 'σ') != null);
+    const sigma = try Strategy.foldSet(testing.allocator, 'Σ', .simple);
+    defer sigma.deinit(testing.allocator);
+    try testing.expectEqual(@as(u32, 'σ'), sigma.canonical);
+    try testing.expect(std.mem.indexOfScalar(u32, sigma.equivalents, 'Σ') != null);
+    try testing.expect(std.mem.indexOfScalar(u32, sigma.equivalents, 'σ') != null);
+    try testing.expect(std.mem.indexOfScalar(u32, sigma.equivalents, 'ς') != null);
+}
+
+test "Unicode strategy performs folded scalar comparison" {
+    const testing = std.testing;
+
+    try testing.expect(Strategy.foldedEq('A', 'a', .simple));
+    try testing.expect(Strategy.foldedEq('Σ', 'σ', .simple));
+    try testing.expect(Strategy.foldedEq('Σ', 'ς', .simple));
+    try testing.expect(!Strategy.foldedEq('A', 'b', .simple));
 }
