@@ -21,7 +21,8 @@ pub const hir = @import("hir.zig");
 pub const Hir = hir.Hir;
 pub const Literal = @import("literal.zig");
 pub const Nfa = @import("nfa.zig");
-pub const Vm = @import("vm.zig");
+pub const vm = @import("vm.zig");
+pub const Vm = vm;
 pub const Dfa = @import("dfa.zig");
 
 pub const CompileOptions = struct {};

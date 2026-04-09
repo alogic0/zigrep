@@ -33,6 +33,10 @@ pub const Node = union(enum) {
     anchor_start,
     anchor_end,
     char_class: CharacterClass,
+    group: struct {
+        index: u32,
+        child: NodeId,
+    },
     concat: []const NodeId,
     alternation: []const NodeId,
     repetition: struct {
@@ -44,6 +48,7 @@ pub const Node = union(enum) {
 pub const Ast = struct {
     nodes: []Node,
     root: NodeId,
+    capture_count: u32,
 
     pub fn deinit(self: Ast, allocator: std.mem.Allocator) void {
         for (self.nodes) |node| {
@@ -82,6 +87,7 @@ pub const Parser = struct {
     lookahead: lexer_mod.SpannedToken,
     nodes: std.ArrayList(Node),
     last_error: ?ParseDiagnostic,
+    capture_count: u32,
 
     pub fn init(allocator: std.mem.Allocator, pattern: []const u8) ParseError!Parser {
         var lex = lexer_mod.Lexer(u8).init(pattern);
@@ -93,6 +99,7 @@ pub const Parser = struct {
             .lookahead = first,
             .nodes = .empty,
             .last_error = null,
+            .capture_count = 0,
         };
     }
 
@@ -108,6 +115,7 @@ pub const Parser = struct {
         return .{
             .nodes = try self.nodes.toOwnedSlice(self.allocator),
             .root = root,
+            .capture_count = self.capture_count,
         };
     }
 
@@ -253,10 +261,15 @@ pub const Parser = struct {
                 if (self.lookahead.token == .question) {
                     return self.fail(error.UnsupportedGroup, group_span);
                 }
+                const group_index = self.capture_count;
+                self.capture_count += 1;
                 const expr = try self.parseAlternation();
                 if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
                 try self.advance();
-                return expr;
+                return self.push(.{ .group = .{
+                    .index = group_index,
+                    .child = expr,
+                } });
             },
             .l_bracket => return self.parseClass(),
             else => return error.UnexpectedToken,
@@ -355,6 +368,7 @@ test "Parser builds an AST for grouped alternation and quantifiers" {
     defer ast.deinit(testing.allocator);
 
     try testing.expect(ast.nodes.len > 0);
+    try testing.expectEqual(@as(u32, 1), ast.capture_count);
     try testing.expectEqual(.concat, std.meta.activeTag(ast.nodes[@intFromEnum(ast.root)]));
 
     const root = ast.nodes[@intFromEnum(ast.root)].concat;
@@ -363,6 +377,7 @@ test "Parser builds an AST for grouped alternation and quantifiers" {
     const repeated = ast.nodes[@intFromEnum(root[0])].repetition;
     try testing.expectEqual(@as(u32, 1), repeated.quantifier.min);
     try testing.expectEqual(@as(?u32, null), repeated.quantifier.max);
+    try testing.expectEqual(.group, std.meta.activeTag(ast.nodes[@intFromEnum(repeated.child)]));
 
     const optional = ast.nodes[@intFromEnum(root[1])].repetition;
     try testing.expectEqual(@as(u32, 0), optional.quantifier.min);
@@ -483,4 +498,19 @@ test "Parser rejects malformed classes and quantifiers with spans" {
         .err = error.InvalidQuantifier,
         .span = .{ .start = 2, .end = 3 },
     }, bad_quantifier.lastError().?);
+}
+
+test "Parser tracks capture groups in source order" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "(ab)(c(d))");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 3), ast.capture_count);
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(.group, std.meta.activeTag(ast.nodes[@intFromEnum(root[0])]));
+    try testing.expectEqual(@as(u32, 0), ast.nodes[@intFromEnum(root[0])].group.index);
+    try testing.expectEqual(.group, std.meta.activeTag(ast.nodes[@intFromEnum(root[1])]));
+    try testing.expectEqual(@as(u32, 1), ast.nodes[@intFromEnum(root[1])].group.index);
 }

@@ -34,7 +34,7 @@ Build a Zig-native analog of `ripgrep` with:
 - [x] Define the first Thompson NFA instruction set
 - [x] Compile HIR into NFA
 - [x] Implement Pike VM execution
-- [ ] Add support for captures only where needed
+- [x] Add support for captures only where needed
 - [x] Add matcher correctness tests
 - [x] Add focused regression tests for edge cases
 
@@ -91,6 +91,10 @@ classes, concatenation, alternation, repetition, dot, and anchors.
 Completed in the latest pass: the Pike VM gained broader correctness and
 regression coverage, including ported ripgrep-inspired tests; this also fixed
 dot semantics so `.` no longer matches newlines by default.
+
+Completed in the current pass: capture groups are preserved through AST/HIR,
+compiled into NFA save instructions, and exposed by the VM as whole-match and
+group spans without changing the default non-capturing search API.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.

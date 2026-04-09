@@ -6,6 +6,25 @@ pub const MatchError = reader.ReaderError || error{
     OutOfMemory,
 };
 
+pub const Capture = struct {
+    start: ?usize = null,
+    end: ?usize = null,
+};
+
+pub const Match = struct {
+    span: Capture,
+    groups: []Capture,
+
+    pub fn deinit(self: Match, allocator: std.mem.Allocator) void {
+        allocator.free(self.groups);
+    }
+};
+
+const Thread = struct {
+    inst_ptr: nfa.InstPtr,
+    slots: []?usize,
+};
+
 pub const MatchEngine = struct {
     allocator: std.mem.Allocator,
 
@@ -14,19 +33,31 @@ pub const MatchEngine = struct {
     }
 
     pub fn isMatch(self: *const MatchEngine, program: nfa.Program, haystack: []const u8) MatchError!bool {
-        if (program.instructions.len == 0) return false;
+        const found = try self.firstMatch(program, haystack);
+        if (found) |match| {
+            match.deinit(self.allocator);
+            return true;
+        }
+        return false;
+    }
 
-        var current: std.ArrayList(nfa.InstPtr) = .empty;
-        defer current.deinit(self.allocator);
+    pub fn firstMatch(self: *const MatchEngine, program: nfa.Program, haystack: []const u8) MatchError!?Match {
+        if (program.instructions.len == 0) return null;
 
-        var next: std.ArrayList(nfa.InstPtr) = .empty;
-        defer next.deinit(self.allocator);
+        var current: std.ArrayList(Thread) = .empty;
+        defer self.deinitThreadList(&current);
+
+        var next: std.ArrayList(Thread) = .empty;
+        defer self.deinitThreadList(&next);
 
         var visited = try self.allocator.alloc(bool, program.instructions.len);
         defer self.allocator.free(visited);
 
+        const start_slots = try self.allocSlots(program.slot_count);
+        defer self.allocator.free(start_slots);
+
         @memset(visited, false);
-        if (try self.addThread(program, &current, &visited, program.start, 0, haystack.len)) return true;
+        if (try self.addThread(program, &current, &visited, program.start, start_slots, 0, haystack.len)) |match| return match;
 
         var input = reader.CodePointReader(u8).init(haystack);
         while (true) {
@@ -34,89 +65,154 @@ pub const MatchEngine = struct {
             const cp = (try input.next()) orelse break;
             const end = input.pos;
 
-            next.clearRetainingCapacity();
+            self.clearThreadList(&next);
             @memset(visited, false);
 
-            for (current.items) |inst_ptr| {
-                if (try self.step(program, &next, &visited, inst_ptr, cp, end, haystack.len)) return true;
+            for (current.items) |thread| {
+                if (try self.step(program, &next, &visited, thread, cp, end, haystack.len)) |match| return match;
             }
+            self.clearThreadList(&current);
 
-            std.mem.swap(std.ArrayList(nfa.InstPtr), &current, &next);
+            std.mem.swap(std.ArrayList(Thread), &current, &next);
 
             @memset(visited, false);
             if (start != end) {
-                if (try self.addThread(program, &current, &visited, program.start, end, haystack.len)) return true;
+                const restart_slots = try self.allocSlots(program.slot_count);
+                defer self.allocator.free(restart_slots);
+                if (try self.addThread(program, &current, &visited, program.start, restart_slots, end, haystack.len)) |match| return match;
             }
         }
 
-        return false;
+        return null;
     }
 
     fn step(
         self: *const MatchEngine,
         program: nfa.Program,
-        list: *std.ArrayList(nfa.InstPtr),
+        list: *std.ArrayList(Thread),
         visited: []bool,
-        inst_ptr: nfa.InstPtr,
+        thread: Thread,
         cp: u32,
         next_pos: usize,
         input_len: usize,
-    ) MatchError!bool {
-        switch (program.instructions[inst_ptr]) {
+    ) MatchError!?Match {
+        switch (program.instructions[thread.inst_ptr]) {
             .literal => |literal| {
-                if (literal.value != cp) return false;
-                return self.addThread(program, list, visited, literal.out.?, next_pos, input_len);
+                if (literal.value != cp) return null;
+                return self.addThread(program, list, visited, literal.out.?, thread.slots, next_pos, input_len);
             },
             .char_class => |class| {
-                if (!classMatches(class, cp)) return false;
-                return self.addThread(program, list, visited, class.out.?, next_pos, input_len);
+                if (!classMatches(class, cp)) return null;
+                return self.addThread(program, list, visited, class.out.?, thread.slots, next_pos, input_len);
             },
             .any => |any| {
-                if (cp == '\n') return false;
-                return self.addThread(program, list, visited, any.out.?, next_pos, input_len);
+                if (cp == '\n') return null;
+                return self.addThread(program, list, visited, any.out.?, thread.slots, next_pos, input_len);
             },
-            else => return false,
+            else => return null,
         }
     }
 
     fn addThread(
         self: *const MatchEngine,
         program: nfa.Program,
-        list: *std.ArrayList(nfa.InstPtr),
+        list: *std.ArrayList(Thread),
         visited: []bool,
         inst_ptr: nfa.InstPtr,
+        slots: []const ?usize,
         pos: usize,
         input_len: usize,
-    ) MatchError!bool {
-        if (visited[inst_ptr]) return false;
+    ) MatchError!?Match {
+        if (visited[inst_ptr]) return null;
         visited[inst_ptr] = true;
 
         switch (program.instructions[inst_ptr]) {
+            .save => |save| {
+                const updated_slots = try self.cloneSlots(slots);
+                defer self.allocator.free(updated_slots);
+                updated_slots[save.slot] = pos;
+                return self.addThread(program, list, visited, save.out.?, updated_slots, pos, input_len);
+            },
             .split => |split| {
                 if (split.out) |out| {
-                    if (try self.addThread(program, list, visited, out, pos, input_len)) return true;
+                    if (try self.addThread(program, list, visited, out, slots, pos, input_len)) |match| return match;
                 }
                 if (split.out1) |out1| {
-                    if (try self.addThread(program, list, visited, out1, pos, input_len)) return true;
+                    if (try self.addThread(program, list, visited, out1, slots, pos, input_len)) |match| return match;
                 }
-                return false;
+                return null;
             },
             .anchor_start => |anchor| {
-                if (pos != 0) return false;
-                return self.addThread(program, list, visited, anchor.out.?, pos, input_len);
+                if (pos != 0) return null;
+                return self.addThread(program, list, visited, anchor.out.?, slots, pos, input_len);
             },
             .anchor_end => |anchor| {
-                if (pos != input_len) return false;
-                return self.addThread(program, list, visited, anchor.out.?, pos, input_len);
+                if (pos != input_len) return null;
+                return self.addThread(program, list, visited, anchor.out.?, slots, pos, input_len);
             },
-            .match => return true,
+            .match => return try self.buildMatch(program, slots),
             .literal, .char_class, .any => {
-                try list.append(self.allocator, inst_ptr);
-                return false;
+                if (!hasThread(list.items, inst_ptr)) {
+                    try list.append(self.allocator, .{
+                        .inst_ptr = inst_ptr,
+                        .slots = try self.cloneSlots(slots),
+                    });
+                }
+                return null;
             },
         }
     }
+
+    fn allocSlots(self: *const MatchEngine, slot_count: u32) MatchError![]?usize {
+        const slots = try self.allocator.alloc(?usize, slot_count);
+        @memset(slots, null);
+        return slots;
+    }
+
+    fn cloneSlots(self: *const MatchEngine, slots: []const ?usize) MatchError![]?usize {
+        const cloned = try self.allocator.alloc(?usize, slots.len);
+        @memcpy(cloned, slots);
+        return cloned;
+    }
+
+    fn buildMatch(self: *const MatchEngine, program: nfa.Program, slots: []const ?usize) MatchError!Match {
+        const groups = try self.allocator.alloc(Capture, program.capture_count);
+        errdefer self.allocator.free(groups);
+
+        for (groups, 0..) |*group, index| {
+            const base = 2 * (index + 1);
+            group.* = .{
+                .start = slots[base],
+                .end = slots[base + 1],
+            };
+        }
+
+        return .{
+            .span = .{
+                .start = slots[0],
+                .end = slots[1],
+            },
+            .groups = groups,
+        };
+    }
+
+    fn clearThreadList(self: *const MatchEngine, list: *std.ArrayList(Thread)) void {
+        for (list.items) |thread| self.allocator.free(thread.slots);
+        list.clearRetainingCapacity();
+    }
+
+    fn deinitThreadList(self: *const MatchEngine, list: *std.ArrayList(Thread)) void {
+        self.clearThreadList(list);
+        list.deinit(self.allocator);
+    }
 };
+
+fn hasThread(threads: []const Thread, inst_ptr: nfa.InstPtr) bool {
+    for (threads) |thread| {
+        if (thread.inst_ptr == inst_ptr) return true;
+    }
+    return false;
+}
 
 fn classMatches(class: nfa.Inst.char_class, cp: u32) bool {
     var matched = false;
@@ -260,14 +356,38 @@ test "VM handles escaped metacharacters literally" {
 }
 
 test "VM ripgrep multiline dot_no_newline regression" {
-    // Ported from ripgrep tests/multiline.rs: dot_no_newline.
     try expectNoMatch("of this world.+detective work", "of this world\nin the province of detective work");
     try expectMatch("of this world.+detective work", "of this world and detective work");
 }
 
 test "VM ripgrep regression 93 adapted to supported syntax" {
-    // Ported from ripgrep tests/regression.rs issue 93, replacing \d with [0-9].
     try expectMatch("([0-9]{1,3}\\.){3}[0-9]{1,3}", "192.168.1.1");
     try expectMatch("([0-9]{1,3}\\.){3}[0-9]{1,3}", "prefix 10.0.0.42 suffix");
     try expectNoMatch("([0-9]{1,3}\\.){3}[0-9]{1,3}", "192.168.1");
+}
+
+test "VM returns whole-match and capture spans" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "(ab)(c+)");
+    defer program.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    const found = (try engine.firstMatch(program, "zzabccyy")).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(Capture{ .start = 2, .end = 6 }, found.span);
+    try testing.expectEqual(@as(usize, 2), found.groups.len);
+    try testing.expectEqual(Capture{ .start = 2, .end = 4 }, found.groups[0]);
+    try testing.expectEqual(Capture{ .start = 4, .end = 6 }, found.groups[1]);
+}
+
+test "VM returns null when no capture match exists" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "(ab)+");
+    defer program.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect((try engine.firstMatch(program, "zzz")) == null);
 }

@@ -18,6 +18,10 @@ pub const Node = union(enum) {
     anchor_start,
     anchor_end,
     char_class: CharacterClass,
+    group: struct {
+        index: u32,
+        child: NodeId,
+    },
     concat: []const NodeId,
     alternation: []const NodeId,
     repetition: struct {
@@ -40,6 +44,7 @@ pub const FastPath = union(enum) {
 pub const Hir = struct {
     nodes: []Node,
     root: NodeId,
+    capture_count: u32,
     literals: []literal_mod.LiteralSequence,
     prefix: Prefix,
     fast_path: FastPath,
@@ -86,6 +91,7 @@ pub fn lower(allocator: std.mem.Allocator, ast: parser.Ast) LowerError!Hir {
     return .{
         .nodes = try nodes.toOwnedSlice(allocator),
         .root = root,
+        .capture_count = ast.capture_count,
         .literals = literals,
         .prefix = prefix,
         .fast_path = if (prefix.bytes.len == 0)
@@ -113,6 +119,10 @@ fn lowerNode(
         .char_class => |class| .{ .char_class = .{
             .negated = class.negated,
             .items = try dupClassItems(allocator, class.items),
+        } },
+        .group => |group| .{ .group = .{
+            .index = group.index,
+            .child = try lowerNode(allocator, ast, group.child, out),
         } },
         .concat => |children| .{ .concat = try lowerChildren(allocator, ast, children, out) },
         .alternation => |branches| .{ .alternation = try lowerChildren(allocator, ast, branches, out) },
@@ -245,6 +255,7 @@ test "HIR lowering preserves shape and extracts prefix analysis" {
     const hir = try lower(testing.allocator, ast);
     defer hir.deinit(testing.allocator);
 
+    try testing.expectEqual(@as(u32, 0), hir.capture_count);
     try testing.expectEqual(.alternation, std.meta.activeTag(hir.nodes[@intFromEnum(hir.root)]));
     try testing.expectEqualStrings("ab", hir.prefix.bytes);
     try testing.expect(!hir.prefix.exact);
@@ -266,4 +277,22 @@ test "HIR lowering detects exact literal matches" {
     try testing.expect(hir.prefix.exact);
     try testing.expectEqualStrings("literal", hir.prefix.bytes);
     try testing.expectEqual(.exact_literal, std.meta.activeTag(hir.fast_path));
+}
+
+test "HIR lowering preserves capture groups" {
+    const testing = std.testing;
+
+    var p = try parser.Parser.init(testing.allocator, "(ab)(c)");
+    const ast = try p.parse();
+    defer ast.deinit(testing.allocator);
+
+    const hir = try lower(testing.allocator, ast);
+    defer hir.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 2), hir.capture_count);
+    const root = hir.nodes[@intFromEnum(hir.root)].concat;
+    try testing.expectEqual(.group, std.meta.activeTag(hir.nodes[@intFromEnum(root[0])]));
+    try testing.expectEqual(@as(u32, 0), hir.nodes[@intFromEnum(root[0])].group.index);
+    try testing.expectEqual(.group, std.meta.activeTag(hir.nodes[@intFromEnum(root[1])]));
+    try testing.expectEqual(@as(u32, 1), hir.nodes[@intFromEnum(root[1])].group.index);
 }

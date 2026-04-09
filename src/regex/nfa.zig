@@ -14,6 +14,10 @@ pub const PatchRef = struct {
 };
 
 pub const Inst = union(enum) {
+    save: struct {
+        slot: u32,
+        out: ?InstPtr = null,
+    },
     literal: struct {
         value: u32,
         out: ?InstPtr = null,
@@ -42,6 +46,8 @@ pub const Inst = union(enum) {
 pub const Program = struct {
     instructions: []Inst,
     start: InstPtr,
+    capture_count: u32,
+    slot_count: u32,
 
     pub fn deinit(self: Program, allocator: std.mem.Allocator) void {
         for (self.instructions) |inst| {
@@ -74,12 +80,22 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir) CompileE
     var fragment = try compiler.compileNode(compiled_hir, compiled_hir.root);
     defer fragment.outs.deinit(allocator);
 
+    const end_save = try compiler.emit(.{ .save = .{ .slot = 1 } });
+    try compiler.patch(fragment.outs.items, end_save);
+
     const match_index = try compiler.emit(.match);
-    try compiler.patch(fragment.outs.items, match_index);
+    try compiler.patch(&[_]PatchRef{.{ .inst = end_save, .slot = .out }}, match_index);
+
+    const start_save = try compiler.emit(.{ .save = .{
+        .slot = 0,
+        .out = fragment.start,
+    } });
 
     return .{
         .instructions = try compiler.instructions.toOwnedSlice(allocator),
-        .start = fragment.start,
+        .start = start_save,
+        .capture_count = compiled_hir.capture_count,
+        .slot_count = 2 * (compiled_hir.capture_count + 1),
     };
 }
 
@@ -95,6 +111,7 @@ const Compiler = struct {
             .anchor_start => self.compileAnchorStart(),
             .anchor_end => self.compileAnchorEnd(),
             .char_class => |class| self.compileClass(class),
+            .group => |group| self.compileGroup(compiled_hir, group.index, group.child),
             .concat => |children| self.compileConcat(compiled_hir, children),
             .alternation => |branches| self.compileAlternation(compiled_hir, branches),
             .repetition => |rep| self.compileRepetition(compiled_hir, rep.child, rep.quantifier),
@@ -147,6 +164,34 @@ const Compiler = struct {
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
         return .{ .start = index, .outs = outs };
+    }
+
+    fn compileGroup(
+        self: *Compiler,
+        compiled_hir: hir_mod.Hir,
+        group_index: u32,
+        child: hir_mod.NodeId,
+    ) CompileError!Fragment {
+        var body = try self.compileNode(compiled_hir, child);
+        const start_slot = 2 * (group_index + 1);
+        const end_slot = start_slot + 1;
+
+        const end_save = try self.emit(.{ .save = .{ .slot = end_slot } });
+        try self.patch(body.outs.items, end_save);
+        body.outs.deinit(self.allocator);
+
+        var outs: std.ArrayList(PatchRef) = .empty;
+        try outs.append(self.allocator, .{ .inst = end_save, .slot = .out });
+
+        const start_save = try self.emit(.{ .save = .{
+            .slot = start_slot,
+            .out = body.start,
+        } });
+
+        return .{
+            .start = start_save,
+            .outs = outs,
+        };
     }
 
     fn compileConcat(self: *Compiler, compiled_hir: hir_mod.Hir, children: []const hir_mod.NodeId) CompileError!Fragment {
@@ -285,6 +330,7 @@ const Compiler = struct {
         for (outs) |patch_ref| {
             const inst = &self.instructions.items[patch_ref.inst];
             switch (inst.*) {
+                .save => |*save| save.out = target,
                 .literal => |*literal| literal.out = target,
                 .char_class => |*class| class.out = target,
                 .any => |*any| any.out = target,
@@ -310,22 +356,18 @@ test "NFA compiles concatenation and alternation into Thompson instructions" {
     const program = try compile(testing.allocator, lowered);
     defer program.deinit(testing.allocator);
 
-    try testing.expectEqual(.split, std.meta.activeTag(program.instructions[program.start]));
-    const start_split = program.instructions[program.start].split;
-    try testing.expect(start_split.out != null);
-    try testing.expect(start_split.out1 != null);
+    try testing.expectEqual(.save, std.meta.activeTag(program.instructions[program.start]));
+    try testing.expectEqual(@as(u32, 0), program.instructions[program.start].save.slot);
 
-    const left = program.instructions[start_split.out.?];
-    const right = program.instructions[start_split.out1.?];
-    try testing.expectEqual(.literal, std.meta.activeTag(left));
-    try testing.expectEqual(.literal, std.meta.activeTag(right));
-
-    const left_next = left.literal.out.?;
-    try testing.expectEqualDeep(Inst{ .literal = .{
-        .value = 'b',
-        .out = @intCast(program.instructions.len - 1),
-    } }, program.instructions[left_next]);
-    try testing.expectEqual(.match, std.meta.activeTag(program.instructions[program.instructions.len - 1]));
+    var saw_split = false;
+    for (program.instructions) |inst| {
+        if (std.meta.activeTag(inst) == .split) {
+            saw_split = true;
+            break;
+        }
+    }
+    try testing.expect(saw_split);
+    try testing.expectEqual(.match, std.meta.activeTag(program.instructions[program.instructions.len - 2]));
 }
 
 test "NFA compiles bounded and unbounded repetition" {
@@ -338,8 +380,7 @@ test "NFA compiles bounded and unbounded repetition" {
     const program = try compile(testing.allocator, lowered);
     defer program.deinit(testing.allocator);
 
-    try testing.expect(program.instructions.len >= 6);
-    try testing.expectEqual(.literal, std.meta.activeTag(program.instructions[program.start]));
+    try testing.expect(program.instructions.len >= 8);
 
     var saw_split = false;
     for (program.instructions) |inst| {
@@ -349,5 +390,25 @@ test "NFA compiles bounded and unbounded repetition" {
         }
     }
     try testing.expect(saw_split);
-    try testing.expectEqual(.match, std.meta.activeTag(program.instructions[program.instructions.len - 1]));
+    try testing.expectEqual(.match, std.meta.activeTag(program.instructions[program.instructions.len - 2]));
+}
+
+test "NFA emits save instructions for capture groups" {
+    const testing = std.testing;
+    const regex = @import("root.zig");
+
+    const lowered = try regex.compile(testing.allocator, "(ab)c", .{});
+    defer lowered.deinit(testing.allocator);
+
+    const program = try compile(testing.allocator, lowered);
+    defer program.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 1), program.capture_count);
+    try testing.expectEqual(@as(u32, 4), program.slot_count);
+
+    var save_count: usize = 0;
+    for (program.instructions) |inst| {
+        if (std.meta.activeTag(inst) == .save) save_count += 1;
+    }
+    try testing.expectEqual(@as(usize, 4), save_count);
 }
