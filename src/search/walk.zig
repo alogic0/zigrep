@@ -26,7 +26,9 @@ pub const Entry = struct {
 
 pub const WalkError = error{
     OutOfMemory,
-} || std.fs.Dir.OpenError || std.fs.Dir.StatFileError || std.fs.Dir.AccessError || std.fs.Dir.Iterator.Error;
+} || std.fs.Dir.OpenError || std.fs.Dir.StatFileError || std.fs.Dir.AccessError || std.fs.Dir.Iterator.Error || std.fs.Dir.RealPathError;
+
+const VisitedDirs = std.StringHashMapUnmanaged(void);
 
 pub fn collectFiles(
     allocator: std.mem.Allocator,
@@ -54,6 +56,9 @@ pub fn walk(
     options: WalkOptions,
     visitor: anytype,
 ) WalkError!void {
+    var visited_dirs: VisitedDirs = .empty;
+    defer deinitVisitedDirs(allocator, &visited_dirs);
+
     const root_kind = try classifyPath(root_path);
     switch (root_kind) {
         .file => {
@@ -64,9 +69,9 @@ pub fn walk(
                 .depth = 0,
             });
         },
-        .directory => try walkDir(allocator, root_path, options, 0, visitor),
+        .directory => try walkDir(allocator, root_path, options, 0, &visited_dirs, visitor),
         .symlink => if (options.follow_symlinks) {
-            try walkFollowedPath(allocator, root_path, options, 0, visitor);
+            try walkFollowedPath(allocator, root_path, options, 0, &visited_dirs, visitor);
         },
         .other => {},
     }
@@ -95,8 +100,11 @@ fn walkDir(
     dir_path: []const u8,
     options: WalkOptions,
     depth: usize,
+    visited_dirs: *VisitedDirs,
     visitor: anytype,
 ) WalkError!void {
+    if (!try rememberVisitedDir(allocator, visited_dirs, dir_path)) return;
+
     var dir = try std.fs.cwd().openDir(dir_path, .{ .iterate = true });
     defer dir.close();
 
@@ -123,11 +131,11 @@ fn walkDir(
                 if (options.max_depth) |max_depth| {
                     if (child_depth > max_depth) continue;
                 }
-                try walkDir(allocator, child_path, options, child_depth, visitor);
+                try walkDir(allocator, child_path, options, child_depth, visited_dirs, visitor);
             },
             .symlink => {
                 if (options.follow_symlinks) {
-                    try walkFollowedPath(allocator, child_path, options, child_depth, visitor);
+                    try walkFollowedPath(allocator, child_path, options, child_depth, visited_dirs, visitor);
                 }
             },
             .other => {},
@@ -140,6 +148,7 @@ fn walkFollowedPath(
     path: []const u8,
     options: WalkOptions,
     depth: usize,
+    visited_dirs: *VisitedDirs,
     visitor: anytype,
 ) WalkError!void {
     const kind = try classifyPath(path);
@@ -156,10 +165,33 @@ fn walkFollowedPath(
             if (options.max_depth) |max_depth| {
                 if (depth > max_depth) return;
             }
-            try walkDir(allocator, path, options, depth, visitor);
+            try walkDir(allocator, path, options, depth, visited_dirs, visitor);
         },
         else => {},
     }
+}
+
+fn rememberVisitedDir(
+    allocator: std.mem.Allocator,
+    visited_dirs: *VisitedDirs,
+    dir_path: []const u8,
+) WalkError!bool {
+    const canonical = try std.fs.cwd().realpathAlloc(allocator, dir_path);
+    errdefer allocator.free(canonical);
+
+    const gop = try visited_dirs.getOrPut(allocator, canonical);
+    if (gop.found_existing) {
+        allocator.free(canonical);
+        return false;
+    }
+    gop.value_ptr.* = {};
+    return true;
+}
+
+fn deinitVisitedDirs(allocator: std.mem.Allocator, visited_dirs: *VisitedDirs) void {
+    var it = visited_dirs.keyIterator();
+    while (it.next()) |key| allocator.free(key.*);
+    visited_dirs.deinit(allocator);
 }
 
 fn classifyPath(path: []const u8) WalkError!EntryKind {
@@ -238,4 +270,33 @@ test "walk honors max depth and hidden filtering" {
     }
 
     try testing.expectEqual(@as(usize, 3), with_hidden.len);
+}
+
+test "walk follow mode avoids symlink directory cycles" {
+    const testing = std.testing;
+    const builtin = @import("builtin");
+
+    switch (builtin.os.tag) {
+        .windows, .wasi => return,
+        else => {},
+    }
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("root/sub");
+    try tmp.dir.writeFile(.{ .sub_path = "root/sub/file.txt", .data = "loop safe" });
+    try tmp.dir.symLink("..", "root/sub/parent-link", .{ .is_directory = true });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, "root");
+    defer testing.allocator.free(root_path);
+
+    const entries = try collectFiles(testing.allocator, root_path, .{ .follow_symlinks = true });
+    defer {
+        for (entries) |entry| entry.deinit(testing.allocator);
+        testing.allocator.free(entries);
+    }
+
+    try testing.expectEqual(@as(usize, 1), entries.len);
+    try testing.expect(std.mem.endsWith(u8, entries[0].path, "file.txt"));
 }
