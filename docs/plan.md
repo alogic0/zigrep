@@ -12,22 +12,22 @@ Build a Zig-native analog of `ripgrep` with:
 
 ### 1. Syntax Foundation
 
-- [ ] Extend the parser to support the intended regex subset
-- [ ] Add character classes
-- [ ] Add escape handling needed for search use cases
-- [ ] Add counted repetition like `{m,n}`
-- [ ] Add span-aware parse errors
-- [ ] Reject unsupported PCRE-style constructs explicitly
-- [ ] Add parser tests for valid and invalid syntax
+- [x] Extend the parser to support the intended regex subset
+- [x] Add character classes
+- [x] Add escape handling needed for search use cases
+- [x] Add counted repetition like `{m,n}`
+- [x] Add span-aware parse errors
+- [x] Reject unsupported PCRE-style constructs explicitly
+- [x] Add parser tests for valid and invalid syntax
 
 ### 2. HIR and Analysis
 
-- [ ] Introduce a normalized HIR layer
-- [ ] Lower AST into HIR
-- [ ] Add literal extraction
-- [ ] Add prefix analysis
-- [ ] Add detection for fast-path opportunities
-- [ ] Add tests for HIR lowering and analysis
+- [x] Introduce a normalized HIR layer
+- [x] Lower AST into HIR
+- [x] Add literal extraction
+- [x] Add prefix analysis
+- [x] Add detection for fast-path opportunities
+- [x] Add tests for HIR lowering and analysis
 
 ### 3. Core Matcher
 
@@ -76,8 +76,13 @@ Build a Zig-native analog of `ripgrep` with:
 
 ## Current Priority
 
-- [ ] Finish the syntax layer
-- [ ] Introduce HIR as the compiler boundary
+- [x] Finish the syntax layer
+- [x] Introduce HIR as the compiler boundary
+
+Completed in this pass: the parser now handles counted repetition, character
+classes, common escapes, and span-carrying diagnostics for unsupported syntax;
+`compile` now lowers AST into HIR and exposes literal/prefix fast-path analysis
+as the public compiler boundary.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.

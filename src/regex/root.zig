@@ -15,8 +15,10 @@ pub const Ast = parser.Ast;
 pub const Node = parser.Node;
 pub const NodeId = parser.NodeId;
 pub const ParseError = parser.ParseError;
+pub const ParseDiagnostic = parser.ParseDiagnostic;
 
-pub const Hir = @import("hir.zig");
+pub const hir = @import("hir.zig");
+pub const Hir = hir.Hir;
 pub const Literal = @import("literal.zig");
 pub const Nfa = @import("nfa.zig");
 pub const Vm = @import("vm.zig");
@@ -24,7 +26,9 @@ pub const Dfa = @import("dfa.zig");
 
 pub const CompileOptions = struct {};
 
-pub fn compile(allocator: @import("std").mem.Allocator, pattern: []const u8, _: CompileOptions) ParseError!Ast {
+pub fn compile(allocator: @import("std").mem.Allocator, pattern: []const u8, _: CompileOptions) (ParseError || error{OutOfMemory})!Hir {
     var p = try Parser.init(allocator, pattern);
-    return p.parse();
+    const parsed = try p.parse();
+    defer parsed.deinit(allocator);
+    return hir.lower(allocator, parsed);
 }
