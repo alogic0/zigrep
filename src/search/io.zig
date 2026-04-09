@@ -31,7 +31,7 @@ pub const OwnedBuffer = struct {
 pub const ReadBuffer = union(enum) {
     owned: OwnedBuffer,
     mapped: struct {
-        bytes: []align(std.mem.page_size) const u8,
+        bytes: []align(std.heap.page_size_min) const u8,
     },
 
     pub fn bytes(self: ReadBuffer) []const u8 {
@@ -110,10 +110,10 @@ fn readFileBuffered(
     defer file.close();
 
     const chunk_size = @max(buffer_size, 256);
-    var source_buffer = try allocator.alloc(u8, chunk_size);
+    const source_buffer = try allocator.alloc(u8, chunk_size);
     defer allocator.free(source_buffer);
 
-    var reader = file.reader(&source_buffer);
+    var reader = file.reader(source_buffer);
     const source = &reader.interface;
 
     var contents: std.ArrayList(u8) = .empty;
@@ -123,7 +123,7 @@ fn readFileBuffered(
     defer allocator.free(scratch);
 
     while (true) {
-        const read_len = try source.read(scratch);
+        const read_len = try source.readSliceShort(scratch);
         if (read_len == 0) break;
         try contents.appendSlice(allocator, scratch[0..read_len]);
     }

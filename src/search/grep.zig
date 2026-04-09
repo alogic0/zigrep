@@ -24,6 +24,42 @@ pub const MatchReport = struct {
     match_span: Span,
 };
 
+pub const Searcher = struct {
+    allocator: std.mem.Allocator,
+    engine: regex.Vm.MatchEngine,
+    program: regex.Nfa.Program,
+
+    pub fn init(
+        allocator: std.mem.Allocator,
+        pattern: []const u8,
+        options: SearchOptions,
+    ) SearchError!Searcher {
+        if (options.case_insensitive) return error.UnsupportedCaseInsensitive;
+
+        var hir = try regex.compile(allocator, pattern, .{});
+        defer hir.deinit(allocator);
+
+        return .{
+            .allocator = allocator,
+            .engine = regex.Vm.MatchEngine.init(allocator),
+            .program = try regex.Nfa.compile(allocator, hir),
+        };
+    }
+
+    pub fn deinit(self: *Searcher) void {
+        self.program.deinit(self.allocator);
+    }
+
+    pub fn reportFirstMatch(self: *Searcher, path: []const u8, haystack: []const u8) SearchError!?MatchReport {
+        const found = try self.engine.firstMatch(self.program, haystack);
+        if (found) |match| {
+            defer match.deinit(self.allocator);
+            return buildReport(path, haystack, match.span);
+        }
+        return null;
+    }
+};
+
 pub fn reportFirstMatch(
     allocator: std.mem.Allocator,
     pattern: []const u8,
@@ -31,22 +67,9 @@ pub fn reportFirstMatch(
     haystack: []const u8,
     options: SearchOptions,
 ) SearchError!?MatchReport {
-    if (options.case_insensitive) return error.UnsupportedCaseInsensitive;
-
-    var hir = try regex.compile(allocator, pattern, .{});
-    defer hir.deinit(allocator);
-
-    const program = try regex.Nfa.compile(allocator, hir);
-    defer program.deinit(allocator);
-
-    var engine = regex.Vm.MatchEngine.init(allocator);
-    const found = try engine.firstMatch(program, haystack);
-    if (found) |match| {
-        defer match.deinit(allocator);
-        return buildReport(path, haystack, match.span);
-    }
-
-    return null;
+    var searcher = try Searcher.init(allocator, pattern, options);
+    defer searcher.deinit();
+    return searcher.reportFirstMatch(path, haystack);
 }
 
 fn buildReport(path: []const u8, haystack: []const u8, span: regex.Vm.Capture) MatchReport {

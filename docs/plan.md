@@ -63,7 +63,7 @@ Build a Zig-native analog of `ripgrep` with:
 - [x] Add buffered I/O strategy
 - [x] Add mmap strategy where appropriate
 - [x] Add match reporting
-- [ ] Add a first usable CLI
+- [x] Add a first usable CLI
 
 ### 7. Parallelism and Polish
 
@@ -159,6 +159,11 @@ Completed in the current search-reporting pass: `src/search/grep.zig` now
 compiles patterns through the existing regex pipeline and reports the first
 match with file path, line number, byte column, line text, and absolute byte
 span data, backed by focused tests for line extraction and no-match behavior.
+
+Completed in the current CLI pass: `src/main.zig` now provides a first usable
+recursive search command that accepts `PATTERN [PATH...]`, supports a small set
+of practical flags, skips binary files by default, reuses one compiled regex
+across files, and prints line-oriented match output.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.

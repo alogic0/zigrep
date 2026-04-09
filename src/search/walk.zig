@@ -26,7 +26,7 @@ pub const Entry = struct {
 
 pub const WalkError = error{
     OutOfMemory,
-} || std.fs.Dir.OpenError || std.fs.Dir.StatFileError || std.fs.Dir.AccessError || std.fs.Dir.IteratorError;
+} || std.fs.Dir.OpenError || std.fs.Dir.StatFileError || std.fs.Dir.AccessError || std.fs.Dir.Iterator.Error;
 
 pub fn collectFiles(
     allocator: std.mem.Allocator,
@@ -40,6 +40,7 @@ pub fn collectFiles(
     }
 
     try walk(allocator, root_path, options, Walker{
+        .allocator = allocator,
         .context = &files,
         .visitFn = collectFileEntry,
     });
@@ -57,7 +58,6 @@ pub fn walk(
     switch (root_kind) {
         .file => {
             const owned = try allocator.dupe(u8, root_path);
-            defer allocator.free(owned);
             try visitor.visit(.{
                 .path = owned,
                 .kind = .file,
@@ -73,20 +73,21 @@ pub fn walk(
 }
 
 const Walker = struct {
+    allocator: std.mem.Allocator,
     context: *std.ArrayList(Entry),
-    visitFn: *const fn (*std.ArrayList(Entry), Entry) anyerror!void,
+    visitFn: *const fn (std.mem.Allocator, *std.ArrayList(Entry), Entry) WalkError!void,
 
-    fn visit(self: Walker, entry: Entry) !void {
-        try self.visitFn(self.context, entry);
+    fn visit(self: Walker, entry: Entry) WalkError!void {
+        try self.visitFn(self.allocator, self.context, entry);
     }
 };
 
-fn collectFileEntry(files: *std.ArrayList(Entry), entry: Entry) !void {
+fn collectFileEntry(allocator: std.mem.Allocator, files: *std.ArrayList(Entry), entry: Entry) WalkError!void {
     if (entry.kind != .file) {
-        entry.deinit(files.allocator);
+        entry.deinit(allocator);
         return;
     }
-    try files.append(files.allocator, entry);
+    try files.append(allocator, entry);
 }
 
 fn walkDir(
@@ -112,7 +113,6 @@ fn walkDir(
         switch (kind) {
             .file => {
                 const owned = try allocator.dupe(u8, child_path);
-                defer allocator.free(owned);
                 try visitor.visit(.{
                     .path = owned,
                     .kind = .file,
@@ -146,7 +146,6 @@ fn walkFollowedPath(
     switch (kind) {
         .file => {
             const owned = try allocator.dupe(u8, path);
-            defer allocator.free(owned);
             try visitor.visit(.{
                 .path = owned,
                 .kind = .file,
