@@ -41,7 +41,7 @@ Build a Zig-native analog of `ripgrep` with:
 ### 4. Unicode Boundary Layer
 
 - [x] Define the internal interface in `src/regex/unicode.zig`
-- [ ] Add Unicode property lookup support
+- [x] Add Unicode property lookup support
 - [ ] Add case folding support
 - [ ] Add Unicode-aware boundary semantics as needed
 - [x] Keep matching byte-oriented in the hot path
@@ -100,6 +100,11 @@ Completed in the newest pass: `src/regex/unicode.zig` now defines the internal
 Unicode boundary interface with incremental scalar decoding, category/boundary
 hooks, and case-fold entry points designed to stay byte-oriented in the hot
 path instead of requiring whole-input preprocessing.
+
+Completed in the current Unicode pass: the Unicode layer now supports stable
+named property lookup with aliases and direct code point membership checks,
+providing an internal API for future regex property syntax without changing the
+incremental matcher model.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
