@@ -50,6 +50,7 @@ pub const Program = struct {
     capture_count: u32,
     slot_count: u32,
     prefilter: ?literal_mod.Prefilter,
+    ascii_only: bool,
 
     pub fn deinit(self: Program, allocator: std.mem.Allocator) void {
         for (self.instructions) |inst| {
@@ -100,7 +101,26 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir) CompileE
         .capture_count = compiled_hir.capture_count,
         .slot_count = 2 * (compiled_hir.capture_count + 1),
         .prefilter = try literal_mod.duplicatePrefilter(allocator, compiled_hir.literals),
+        .ascii_only = isAsciiOnly(compiler.instructions.items),
     };
+}
+
+fn isAsciiOnly(instructions: []const Inst) bool {
+    for (instructions) |inst| {
+        switch (inst) {
+            .literal => |literal| if (literal.value > 0x7f) return false,
+            .char_class => |class| {
+                for (class.items) |item| {
+                    switch (item) {
+                        .literal => |literal| if (literal > 0x7f) return false,
+                        .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+    return true;
 }
 
 const Compiler = struct {
@@ -410,10 +430,24 @@ test "NFA emits save instructions for capture groups" {
     try testing.expectEqual(@as(u32, 1), program.capture_count);
     try testing.expectEqual(@as(u32, 4), program.slot_count);
     try testing.expect(program.prefilter != null);
+    try testing.expect(program.ascii_only);
 
     var save_count: usize = 0;
     for (program.instructions) |inst| {
         if (std.meta.activeTag(inst) == .save) save_count += 1;
     }
     try testing.expectEqual(@as(usize, 4), save_count);
+}
+
+test "NFA marks non-ASCII programs as not ASCII-only" {
+    const testing = std.testing;
+    const regex = @import("root.zig");
+
+    const lowered = try regex.compile(testing.allocator, "©", .{});
+    defer lowered.deinit(testing.allocator);
+
+    const program = try compile(testing.allocator, lowered);
+    defer program.deinit(testing.allocator);
+
+    try testing.expect(!program.ascii_only);
 }

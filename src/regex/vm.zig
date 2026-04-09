@@ -53,6 +53,9 @@ pub const MatchEngine = struct {
         if (program.prefilter) |prefilter| {
             if (!prefilter.mayMatch(haystack)) return null;
         }
+        if (program.ascii_only and std.ascii.isAscii(haystack)) {
+            return self.firstMatchAscii(program, haystack);
+        }
 
         var current: std.ArrayList(Thread) = .empty;
         defer self.deinitThreadList(&current);
@@ -91,6 +94,42 @@ pub const MatchEngine = struct {
                 defer self.allocator.free(restart_slots);
                 if (try self.addThread(program, &current, &visited, program.start, restart_slots, end, haystack.len)) |match| return match;
             }
+        }
+
+        return null;
+    }
+
+    fn firstMatchAscii(self: *const MatchEngine, program: nfa.Program, haystack: []const u8) MatchError!?Match {
+        var current: std.ArrayList(Thread) = .empty;
+        defer self.deinitThreadList(&current);
+
+        var next: std.ArrayList(Thread) = .empty;
+        defer self.deinitThreadList(&next);
+
+        var visited = try self.allocator.alloc(bool, program.instructions.len);
+        defer self.allocator.free(visited);
+
+        const start_slots = try self.allocSlots(program.slot_count);
+        defer self.allocator.free(start_slots);
+
+        @memset(visited, false);
+        if (try self.addThread(program, &current, &visited, program.start, start_slots, 0, haystack.len)) |match| return match;
+
+        for (haystack, 0..) |byte, index| {
+            self.clearThreadList(&next);
+            @memset(visited, false);
+
+            for (current.items) |thread| {
+                if (try self.step(program, &next, &visited, thread, byte, index + 1, haystack.len)) |match| return match;
+            }
+            self.clearThreadList(&current);
+
+            std.mem.swap(std.ArrayList(Thread), &current, &next);
+
+            @memset(visited, false);
+            const restart_slots = try self.allocSlots(program.slot_count);
+            defer self.allocator.free(restart_slots);
+            if (try self.addThread(program, &current, &visited, program.start, restart_slots, index + 1, haystack.len)) |match| return match;
         }
 
         return null;
@@ -427,4 +466,21 @@ test "VM boolean search uses the non-capturing lazy DFA path" {
     var engine = MatchEngine.init(testing.allocator);
     try testing.expect(try engine.isMatch(program, "xxcccc"));
     try testing.expect(!(try engine.isMatch(program, "xyz")));
+}
+
+test "VM uses the ASCII-first capture path for ASCII-safe programs" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "(ab)(cd+)");
+    defer program.deinit(testing.allocator);
+
+    try testing.expect(program.ascii_only);
+
+    var engine = MatchEngine.init(testing.allocator);
+    const found = (try engine.firstMatch(program, "zzabcdddyy")).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(Capture{ .start = 2, .end = 7 }, found.span);
+    try testing.expectEqual(Capture{ .start = 2, .end = 4 }, found.groups[0]);
+    try testing.expectEqual(Capture{ .start = 4, .end = 7 }, found.groups[1]);
 }

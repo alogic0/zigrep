@@ -46,6 +46,9 @@ pub const Cache = struct {
         if (self.program.prefilter) |prefilter| {
             if (!prefilter.mayMatch(haystack)) return false;
         }
+        if (self.program.ascii_only and std.ascii.isAscii(haystack)) {
+            return self.isMatchAscii(haystack);
+        }
 
         var current = try self.startState(0, haystack.len);
         if (self.states.items[current].is_match) return true;
@@ -58,6 +61,18 @@ pub const Cache = struct {
             _ = start;
 
             current = try self.nextState(current, cp, end, haystack.len);
+            if (self.states.items[current].is_match) return true;
+        }
+
+        return false;
+    }
+
+    fn isMatchAscii(self: *Cache, haystack: []const u8) Error!bool {
+        var current = try self.startState(0, haystack.len);
+        if (self.states.items[current].is_match) return true;
+
+        for (haystack, 0..) |byte, index| {
+            current = try self.nextState(current, byte, index + 1, haystack.len);
             if (self.states.items[current].is_match) return true;
         }
 
@@ -270,4 +285,19 @@ test "Lazy DFA handles anchors and restart semantics" {
     defer search_cache.deinit();
 
     try testing.expect(try search_cache.isMatch("hay needle stack"));
+}
+
+test "Lazy DFA uses the ASCII-first path for ASCII-safe programs" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "abc.*xyz");
+    defer program.deinit(testing.allocator);
+
+    try testing.expect(program.ascii_only);
+
+    var cache = Cache.init(testing.allocator, &program);
+    defer cache.deinit();
+
+    try testing.expect(try cache.isMatch("123abc---xyz456"));
+    try testing.expect(!(try cache.isMatch("123abc---xy©")));
 }

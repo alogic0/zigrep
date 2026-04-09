@@ -21,6 +21,15 @@ pub const Prefilter = struct {
         }
         return false;
     }
+
+    pub fn isAscii(self: Prefilter) bool {
+        for (self.required) |literal| {
+            for (literal.bytes) |byte| {
+                if (!std.ascii.isAscii(byte)) return false;
+            }
+        }
+        return true;
+    }
 };
 
 pub fn duplicatePrefilter(
@@ -68,4 +77,16 @@ test "duplicatePrefilter copies literal bytes" {
 
     try testing.expectEqual(@as(usize, 1), prefilter.required.len);
     try testing.expectEqualStrings("ab", prefilter.required[0].bytes);
+}
+
+test "Prefilter detects ASCII-only literals" {
+    const testing = std.testing;
+
+    try testing.expect((Prefilter{
+        .required = &[_]LiteralSequence{.{ .bytes = "ascii" }},
+    }).isAscii());
+
+    try testing.expect(!(Prefilter{
+        .required = &[_]LiteralSequence{.{ .bytes = "©" }},
+    }).isAscii());
 }
