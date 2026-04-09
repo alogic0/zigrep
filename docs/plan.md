@@ -62,7 +62,7 @@ Build a Zig-native analog of `ripgrep` with:
 - [x] Add binary-file detection
 - [x] Add buffered I/O strategy
 - [x] Add mmap strategy where appropriate
-- [ ] Add match reporting
+- [x] Add match reporting
 - [ ] Add a first usable CLI
 
 ### 7. Parallelism and Polish
@@ -154,6 +154,11 @@ a stable buffered read path without committing yet to mmap-backed reads.
 Completed in the latest search-I/O pass: `src/search/io.zig` now supports a
 mapped-file read strategy with fallback to buffered reads for empty or
 non-mappable files, all behind the same read result abstraction.
+
+Completed in the current search-reporting pass: `src/search/grep.zig` now
+compiles patterns through the existing regex pipeline and reports the first
+match with file path, line number, byte column, line text, and absolute byte
+span data, backed by focused tests for line extraction and no-match behavior.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
