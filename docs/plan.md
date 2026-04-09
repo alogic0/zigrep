@@ -67,7 +67,7 @@ Build a Zig-native analog of `ripgrep` with:
 
 ### 7. Parallelism and Polish
 
-- [ ] Add parallel file search
+- [x] Add parallel file search
 - [ ] Add work scheduling strategy
 - [ ] Add configuration flags and CLI polish
 - [ ] Add benchmarks on realistic corpora
@@ -164,6 +164,11 @@ Completed in the current CLI pass: `src/main.zig` now provides a first usable
 recursive search command that accepts `PATTERN [PATH...]`, supports a small set
 of practical flags, skips binary files by default, reuses one compiled regex
 across files, and prints line-oriented match output.
+
+Completed in the current parallel-search pass: the CLI now processes files in
+parallel with a bounded thread pool, preserves output order by storing one
+formatted result per file slot, and falls back to the existing sequential path
+when parallelism would not help, with focused coverage for multi-file output.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.

@@ -13,6 +13,7 @@ const CliOptions = struct {
     follow_symlinks: bool = false,
     skip_binary: bool = true,
     read_strategy: zigrep.search.io.ReadStrategy = .mmap,
+    parallel_jobs: ?usize = null,
 };
 
 const ParseResult = union(enum) {
@@ -137,12 +138,9 @@ fn runSearch(
     stdout: *std.Io.Writer,
     options: CliOptions,
 ) !u8 {
-    var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{});
-    defer searcher.deinit();
-
     var matched = false;
     for (options.paths) |path| {
-        if (try searchPath(allocator, stdout, &searcher, path, options)) {
+        if (try searchPath(allocator, stdout, path, options)) {
             matched = true;
         }
     }
@@ -152,7 +150,6 @@ fn runSearch(
 fn searchPath(
     allocator: std.mem.Allocator,
     stdout: *std.Io.Writer,
-    searcher: *zigrep.search.grep.Searcher,
     root_path: []const u8,
     options: CliOptions,
 ) !bool {
@@ -164,6 +161,27 @@ fn searchPath(
         for (entries) |entry| entry.deinit(allocator);
         allocator.free(entries);
     }
+
+    if (shouldParallelize(options, entries.len)) {
+        return searchEntriesParallel(stdout, entries, options);
+    }
+    return searchEntriesSequential(allocator, stdout, entries, options);
+}
+
+fn shouldParallelize(options: CliOptions, entry_count: usize) bool {
+    if (entry_count <= 1) return false;
+    const jobs = options.parallel_jobs orelse (std.Thread.getCpuCount() catch 1);
+    return jobs > 1;
+}
+
+fn searchEntriesSequential(
+    allocator: std.mem.Allocator,
+    stdout: *std.Io.Writer,
+    entries: []const zigrep.search.walk.Entry,
+    options: CliOptions,
+) !bool {
+    var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{});
+    defer searcher.deinit();
 
     var matched = false;
     for (entries) |entry| {
@@ -182,6 +200,119 @@ fn searchPath(
         }
     }
 
+    return matched;
+}
+
+fn searchEntriesParallel(
+    stdout: *std.Io.Writer,
+    entries: []const zigrep.search.walk.Entry,
+    options: CliOptions,
+) !bool {
+    const worker_allocator = std.heap.smp_allocator;
+    const worker_count = @min(options.parallel_jobs orelse (std.Thread.getCpuCount() catch 1), entries.len);
+    if (worker_count <= 1) {
+        return searchEntriesSequential(worker_allocator, stdout, entries, options);
+    }
+
+    const Context = struct {
+        entries: []const zigrep.search.walk.Entry,
+        options: CliOptions,
+        next_index: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+        result_lines: []?[]u8,
+        first_error: ?anyerror = null,
+        error_mutex: std.Thread.Mutex = .{},
+
+        fn setError(self: *@This(), err: anyerror) void {
+            self.error_mutex.lock();
+            defer self.error_mutex.unlock();
+            if (self.first_error == null) self.first_error = err;
+        }
+
+        fn runWorker(self: *@This()) void {
+            var searcher = zigrep.search.grep.Searcher.init(std.heap.smp_allocator, self.options.pattern, .{}) catch |err| {
+                self.setError(err);
+                return;
+            };
+            defer searcher.deinit();
+
+            while (true) {
+                if (self.first_error != null) return;
+
+                const index = self.next_index.fetchAdd(1, .monotonic);
+                if (index >= self.entries.len) return;
+
+                const entry = self.entries[index];
+                self.processEntry(&searcher, index, entry) catch |err| {
+                    self.setError(err);
+                    return;
+                };
+            }
+        }
+
+        fn processEntry(
+            self: *@This(),
+            searcher: *zigrep.search.grep.Searcher,
+            index: usize,
+            entry: zigrep.search.walk.Entry,
+        ) !void {
+            if (self.options.skip_binary) {
+                if (try zigrep.search.io.detectBinaryFile(entry.path, .{}) == .binary) return;
+            }
+
+            const buffer = try zigrep.search.io.readFile(std.heap.smp_allocator, entry.path, .{
+                .strategy = self.options.read_strategy,
+            });
+            defer buffer.deinit(std.heap.smp_allocator);
+
+            if (try searcher.reportFirstMatch(entry.path, buffer.bytes())) |report| {
+                self.result_lines[index] = try std.fmt.allocPrint(std.heap.smp_allocator, "{s}:{d}:{d}:{s}\n", .{
+                    report.path,
+                    report.line_number,
+                    report.column_number,
+                    report.line,
+                });
+            }
+        }
+    };
+
+    const result_lines = try worker_allocator.alloc(?[]u8, entries.len);
+    defer worker_allocator.free(result_lines);
+    @memset(result_lines, null);
+
+    var pool: std.Thread.Pool = undefined;
+    try pool.init(.{
+        .allocator = worker_allocator,
+        .n_jobs = worker_count,
+    });
+    defer pool.deinit();
+
+    var wait_group: std.Thread.WaitGroup = .{};
+    var context = Context{
+        .entries = entries,
+        .options = options,
+        .result_lines = result_lines,
+    };
+
+    for (0..worker_count) |_| {
+        pool.spawnWg(&wait_group, Context.runWorker, .{&context});
+    }
+    wait_group.wait();
+
+    if (context.first_error) |err| {
+        for (result_lines) |maybe_line| {
+            if (maybe_line) |line| std.heap.smp_allocator.free(line);
+        }
+        return err;
+    }
+
+    var matched = false;
+    for (result_lines) |maybe_line| {
+        if (maybe_line) |line| {
+            defer std.heap.smp_allocator.free(line);
+            try stdout.writeAll(line);
+            matched = true;
+        }
+    }
     return matched;
 }
 
@@ -290,4 +421,40 @@ test "runCli returns 1 when nothing matches" {
     try testing.expectEqual(@as(u8, 1), exit_code);
     try testing.expectEqualStrings("", stdout_capture.written());
     try testing.expectEqualStrings("", stderr_capture.written());
+}
+
+test "runSearch reports matches across files on the parallel path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "two.txt",
+        .data = "needle two\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "three.txt",
+        .data = "no hit here\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stdout_capture.deinit();
+
+    const exit_code = try runSearch(testing.allocator, &stdout_capture.writer, .{
+        .pattern = "needle",
+        .paths = &.{root_path},
+        .parallel_jobs = 2,
+    });
+
+    try testing.expectEqual(@as(u8, 0), exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt:1:1:needle two"));
 }
