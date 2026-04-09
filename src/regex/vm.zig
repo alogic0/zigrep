@@ -1,5 +1,6 @@
 const std = @import("std");
 const reader = @import("../reader.zig");
+const dfa = @import("dfa.zig");
 const nfa = @import("nfa.zig");
 
 pub const MatchError = reader.ReaderError || error{
@@ -33,6 +34,12 @@ pub const MatchEngine = struct {
     }
 
     pub fn isMatch(self: *const MatchEngine, program: nfa.Program, haystack: []const u8) MatchError!bool {
+        if (program.capture_count == 0) {
+            var cache = dfa.Cache.init(self.allocator, &program);
+            defer cache.deinit();
+            return cache.isMatch(haystack);
+        }
+
         const found = try self.firstMatch(program, haystack);
         if (found) |match| {
             match.deinit(self.allocator);
@@ -407,4 +414,17 @@ test "VM prefilter rejects haystacks without the required literal" {
     var engine = MatchEngine.init(testing.allocator);
     try testing.expect((try engine.firstMatch(program, "zzz")) == null);
     try testing.expect(try engine.isMatch(program, "needle then hay"));
+}
+
+test "VM boolean search uses the non-capturing lazy DFA path" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "ab|c+");
+    defer program.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 0), program.capture_count);
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect(try engine.isMatch(program, "xxcccc"));
+    try testing.expect(!(try engine.isMatch(program, "xyz")));
 }

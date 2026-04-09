@@ -50,7 +50,7 @@ Build a Zig-native analog of `ripgrep` with:
 ### 5. Fast Path
 
 - [x] Add literal prefilters ahead of the full matcher
-- [ ] Add a DFA or lazy DFA for non-capturing search
+- [x] Add a DFA or lazy DFA for non-capturing search
 - [ ] Add ASCII-first fast paths
 - [ ] Add optional SIMD scanning behind target-feature gates
 - [ ] Add benchmarks for engine-level performance
@@ -117,6 +117,10 @@ incremental boundary queries and rejection of offsets that land inside a scalar.
 Completed in the first fast-path pass: compiled regex programs now carry a
 required-literal prefilter derived from HIR analysis, and the VM rejects
 haystacks that cannot contain that literal before running full NFA execution.
+
+Completed in the current fast-path pass: boolean non-capturing search now uses
+a lazy DFA cache over NFA state sets, while capture-bearing queries continue to
+use the Pike VM path that preserves match spans.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
