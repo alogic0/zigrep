@@ -5,6 +5,11 @@ pub const ReadStrategy = enum {
     mmap,
 };
 
+pub const ReadOptions = struct {
+    strategy: ReadStrategy = .buffered,
+    buffer_size: usize = 16 * 1024,
+};
+
 pub const BinaryDecision = enum {
     text,
     binary,
@@ -14,6 +19,25 @@ pub const BinaryOptions = struct {
     sample_limit: usize = 1024,
     control_threshold: usize = 8,
 };
+
+pub const OwnedBuffer = struct {
+    bytes: []u8,
+
+    pub fn deinit(self: OwnedBuffer, allocator: std.mem.Allocator) void {
+        allocator.free(self.bytes);
+    }
+};
+
+pub fn readFileOwned(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    options: ReadOptions,
+) !OwnedBuffer {
+    return switch (options.strategy) {
+        .buffered => readFileBuffered(allocator, path, options.buffer_size),
+        .mmap => readFileBuffered(allocator, path, options.buffer_size),
+    };
+}
 
 pub fn detectBinary(bytes: []const u8, options: BinaryOptions) BinaryDecision {
     const sample_len = @min(bytes.len, options.sample_limit);
@@ -40,6 +64,36 @@ pub fn detectBinaryFile(path: []const u8, options: BinaryOptions) !BinaryDecisio
 
     const read_len = try file.readAll(buffer);
     return detectBinary(buffer[0..read_len], options);
+}
+
+fn readFileBuffered(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    buffer_size: usize,
+) !OwnedBuffer {
+    var file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+
+    const chunk_size = @max(buffer_size, 256);
+    var source_buffer = try allocator.alloc(u8, chunk_size);
+    defer allocator.free(source_buffer);
+
+    var reader = file.reader(&source_buffer);
+    const source = &reader.interface;
+
+    var contents: std.ArrayList(u8) = .empty;
+    defer contents.deinit(allocator);
+
+    var scratch = try allocator.alloc(u8, chunk_size);
+    defer allocator.free(scratch);
+
+    while (true) {
+        const read_len = try source.read(scratch);
+        if (read_len == 0) break;
+        try contents.appendSlice(allocator, scratch[0..read_len]);
+    }
+
+    return .{ .bytes = try contents.toOwnedSlice(allocator) };
 }
 
 fn isSuspiciousControl(byte: u8) bool {
@@ -75,4 +129,29 @@ test "binary detector obeys sampling limits" {
     try testing.expectEqual(BinaryDecision.binary, detectBinary(&bytes, .{
         .sample_limit = bytes.len,
     }));
+}
+
+test "buffered I/O reads whole files into owned buffers" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "line one\nline two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const file_path = try std.fs.path.join(testing.allocator, &.{ root_path, "sample.txt" });
+    defer testing.allocator.free(file_path);
+
+    const buffer = try readFileOwned(testing.allocator, file_path, .{
+        .strategy = .buffered,
+        .buffer_size = 8,
+    });
+    defer buffer.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("line one\nline two\n", buffer.bytes);
 }
