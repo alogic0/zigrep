@@ -95,6 +95,9 @@ Regex and CLI scope are documented in:
 
 - [docs/supported-syntax.md](/home/oleg/prog/zigrep/docs/supported-syntax.md)
 
+That document also explains the `--buffered` and `--mmap` options in
+non-technical terms.
+
 ## Project Notes
 
 Almost all parts of this project were developed with AI-assisted code writing and review.

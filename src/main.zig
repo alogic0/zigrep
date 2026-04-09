@@ -452,8 +452,8 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --hidden              include hidden files
         \\  --follow              follow symlinks
         \\  --text                search binary files too
-        \\  --buffered            force buffered file reads
-        \\  --mmap                prefer mmap-backed file reads
+        \\  --buffered            use the simpler file-reading method
+        \\  --mmap                use the faster file-reading method when possible
         \\  -j, --threads N       use up to N worker threads
         \\  --max-depth N         limit recursive walk depth
         \\  -H, --with-filename   always print the file path

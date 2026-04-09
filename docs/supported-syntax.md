@@ -67,6 +67,17 @@ The current CLI supports:
 - Output toggles with `-H`/`--with-filename`, `--no-filename`, `-n`/`--line-number`, `--no-line-number`, `--column`, and `--no-column`
 - `--` to terminate flag parsing
 
+For non-technical users:
+
+- `--buffered` means "use the simpler, safer read method for every file"
+- `--mmap` means "use the faster read method when possible"
+
+Practical guidance:
+
+- use `--buffered` if you want the most conservative behavior
+- use `--mmap` if you want normal fast behavior on regular files
+- if you are unsure, the default behavior is already reasonable for typical use
+
 Output is line-oriented. When enabled, prefixes are emitted in this order:
 
 - file path
