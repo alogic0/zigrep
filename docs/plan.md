@@ -31,8 +31,8 @@ Build a Zig-native analog of `ripgrep` with:
 
 ### 3. Core Matcher
 
-- [ ] Define the first Thompson NFA instruction set
-- [ ] Compile HIR into NFA
+- [x] Define the first Thompson NFA instruction set
+- [x] Compile HIR into NFA
 - [ ] Implement Pike VM execution
 - [ ] Add support for captures only where needed
 - [ ] Add matcher correctness tests
@@ -83,6 +83,10 @@ Completed in this pass: the parser now handles counted repetition, character
 classes, common escapes, and span-carrying diagnostics for unsupported syntax;
 `compile` now lowers AST into HIR and exposes literal/prefix fast-path analysis
 as the public compiler boundary.
+
+Completed in the next pass: the first Thompson NFA instruction set now exists
+in `src/regex/nfa.zig`, and HIR lowers into that program form for literals,
+classes, concatenation, alternation, repetition, dot, and anchors.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
