@@ -260,7 +260,8 @@ fn searchEntriesSequential(
         });
         defer buffer.deinit(allocator);
 
-        if (try reportFileMatch(&searcher, entry.path, buffer.bytes())) |report| {
+        if (try reportFileMatch(allocator, &searcher, entry.path, buffer.bytes(), !options.skip_binary)) |report| {
+            defer report.deinit(allocator);
             try printReport(stdout, report, options.output);
             matched = true;
         }
@@ -334,7 +335,8 @@ fn searchEntriesParallel(
             });
             defer buffer.deinit(std.heap.smp_allocator);
 
-            if (try reportFileMatch(searcher, entry.path, buffer.bytes())) |report| {
+            if (try reportFileMatch(std.heap.smp_allocator, searcher, entry.path, buffer.bytes(), !self.options.skip_binary)) |report| {
+                defer report.deinit(std.heap.smp_allocator);
                 self.result_lines[index] = try formatReport(std.heap.smp_allocator, report, self.options.output);
             }
         }
@@ -389,14 +391,62 @@ fn printReport(stdout: *std.Io.Writer, report: zigrep.search.grep.MatchReport, o
 }
 
 fn reportFileMatch(
+    allocator: std.mem.Allocator,
     searcher: *zigrep.search.grep.Searcher,
     path: []const u8,
     bytes: []const u8,
+    allow_lossy_invalid_utf8: bool,
 ) !?zigrep.search.grep.MatchReport {
     return searcher.reportFirstMatch(path, bytes) catch |err| switch (err) {
-        error.InvalidUtf8 => null,
+        error.InvalidUtf8 => if (!allow_lossy_invalid_utf8) null else {
+            const sanitized = try sanitizeInvalidUtf8Lossy(allocator, bytes);
+            defer allocator.free(sanitized);
+            if (try searcher.reportFirstMatch(path, sanitized)) |report| {
+                const owned_line = try allocator.dupe(u8, report.line);
+                var stable = report;
+                stable.line = owned_line;
+                stable.owned_line = owned_line;
+                return stable;
+            }
+            return null;
+        },
         else => err,
     };
+}
+
+fn sanitizeInvalidUtf8Lossy(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    var sanitized = try allocator.alloc(u8, bytes.len);
+    var read_index: usize = 0;
+    var write_index: usize = 0;
+
+    while (read_index < bytes.len) {
+        const sequence_len = std.unicode.utf8ByteSequenceLength(bytes[read_index]) catch {
+            sanitized[write_index] = '?';
+            read_index += 1;
+            write_index += 1;
+            continue;
+        };
+        if (read_index + sequence_len > bytes.len) {
+            sanitized[write_index] = '?';
+            read_index += 1;
+            write_index += 1;
+            continue;
+        }
+
+        const sequence = bytes[read_index .. read_index + sequence_len];
+        _ = std.unicode.utf8Decode(sequence) catch {
+            sanitized[write_index] = '?';
+            read_index += 1;
+            write_index += 1;
+            continue;
+        };
+
+        @memcpy(sanitized[write_index .. write_index + sequence_len], sequence);
+        read_index += sequence_len;
+        write_index += sequence_len;
+    }
+
+    return sanitized;
 }
 
 fn formatReport(
@@ -803,6 +853,28 @@ test "runCli skips invalid UTF-8 files instead of aborting the whole search" {
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "good.txt:1:1:needle here"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stderr, 1, "InvalidUtf8"));
+}
+
+test "runCli text mode retries invalid UTF-8 files through lossy sanitizing" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "bad.bin",
+        .data = "xx\xffneedleyy",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "bad.bin:1:4:xx?needleyy"));
+    try testing.expectEqualStrings("", run.stderr);
 }
 
 test "runCli output toggles apply across the end-to-end path" {

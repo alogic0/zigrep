@@ -20,8 +20,13 @@ pub const MatchReport = struct {
     // Columns stay byte-oriented to match the rest of the current search layer.
     column_number: usize,
     line: []const u8,
+    owned_line: ?[]u8 = null,
     line_span: Span,
     match_span: Span,
+
+    pub fn deinit(self: MatchReport, allocator: std.mem.Allocator) void {
+        if (self.owned_line) |line| allocator.free(line);
+    }
 };
 
 pub const Searcher = struct {

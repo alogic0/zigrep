@@ -78,6 +78,12 @@ Practical guidance:
 - use `--mmap` if you want normal fast behavior on regular files
 - if you are unsure, the default behavior is already reasonable for typical use
 
+Current `--text` note:
+
+- `--text` disables binary-file skipping and tries to search the file anyway
+- if a file contains invalid UTF-8 bytes, the current implementation replaces those bad bytes with `?` during matching so the search can continue
+- this is a practical fallback, not full ripgrep-compatible encoding behavior
+
 Output is line-oriented. When enabled, prefixes are emitted in this order:
 
 - file path
