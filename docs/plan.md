@@ -69,7 +69,7 @@ Build a Zig-native analog of `ripgrep` with:
 
 - [x] Add parallel file search
 - [x] Add work scheduling strategy
-- [ ] Add configuration flags and CLI polish
+- [x] Add configuration flags and CLI polish
 - [ ] Add benchmarks on realistic corpora
 - [ ] Add end-to-end integration tests
 - [ ] Add documentation for supported syntax and non-goals
@@ -174,6 +174,12 @@ Completed in the current scheduling pass: `src/search/schedule.zig` now owns
 the basic file-search scheduling policy, deciding when to stay serial, how many
 workers to use, and how large each claimed work chunk should be; the CLI now
 consumes that plan instead of embedding ad hoc scheduling decisions in `main`.
+
+Completed in the current CLI-polish pass: the command-line interface now
+supports explicit worker-count and max-depth flags, output-format toggles for
+filenames/line numbers/columns, `--` to terminate flag parsing, clearer usage
+text, and validation for numeric flag values instead of silently accepting bad
+input.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.

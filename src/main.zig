@@ -4,6 +4,14 @@ const zigrep = @import("zigrep");
 const CliError = error{
     MissingPattern,
     UnknownFlag,
+    MissingFlagValue,
+    InvalidFlagValue,
+};
+
+const OutputOptions = struct {
+    with_filename: bool = true,
+    line_number: bool = true,
+    column_number: bool = true,
 };
 
 const CliOptions = struct {
@@ -14,6 +22,8 @@ const CliOptions = struct {
     skip_binary: bool = true,
     read_strategy: zigrep.search.io.ReadStrategy = .mmap,
     parallel_jobs: ?usize = null,
+    max_depth: ?usize = null,
+    output: OutputOptions = .{},
 };
 
 const ParseResult = union(enum) {
@@ -80,16 +90,27 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var follow_symlinks = false;
     var skip_binary = true;
     var read_strategy: zigrep.search.io.ReadStrategy = .mmap;
+    var parallel_jobs: ?usize = null;
+    var max_depth: ?usize = null;
+    var output: OutputOptions = .{};
     var pattern: ?[]const u8 = null;
     var paths = std.ArrayList([]const u8).empty;
     defer paths.deinit(allocator);
+    var stop_parsing_flags = false;
 
-    for (argv[1..]) |arg| {
+    var index: usize = 1;
+    while (index < argv.len) : (index += 1) {
+        const arg = argv[index];
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             return .help;
         }
 
-        if (pattern == null and arg.len > 0 and arg[0] == '-') {
+        if (!stop_parsing_flags and pattern == null and std.mem.eql(u8, arg, "--")) {
+            stop_parsing_flags = true;
+            continue;
+        }
+
+        if (!stop_parsing_flags and pattern == null and arg.len > 0 and arg[0] == '-') {
             if (std.mem.eql(u8, arg, "--hidden")) {
                 include_hidden = true;
                 continue;
@@ -108,6 +129,42 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "--mmap")) {
                 read_strategy = .mmap;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-j") or std.mem.eql(u8, arg, "--threads")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                parallel_jobs = try parsePositiveUsize(argv[index]);
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--max-depth")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                max_depth = try parseNonNegativeUsize(argv[index]);
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-H") or std.mem.eql(u8, arg, "--with-filename")) {
+                output.with_filename = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--no-filename")) {
+                output.with_filename = false;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "--line-number")) {
+                output.line_number = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--no-line-number")) {
+                output.line_number = false;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--column")) {
+                output.column_number = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--no-column")) {
+                output.column_number = false;
                 continue;
             }
             return error.UnknownFlag;
@@ -130,6 +187,9 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .follow_symlinks = follow_symlinks,
         .skip_binary = skip_binary,
         .read_strategy = read_strategy,
+        .parallel_jobs = parallel_jobs,
+        .max_depth = max_depth,
+        .output = output,
     } };
 }
 
@@ -156,6 +216,7 @@ fn searchPath(
     const entries = try zigrep.search.walk.collectFiles(allocator, root_path, .{
         .include_hidden = options.include_hidden,
         .follow_symlinks = options.follow_symlinks,
+        .max_depth = options.max_depth,
     });
     defer {
         for (entries) |entry| entry.deinit(allocator);
@@ -192,7 +253,7 @@ fn searchEntriesSequential(
         defer buffer.deinit(allocator);
 
         if (try searcher.reportFirstMatch(entry.path, buffer.bytes())) |report| {
-            try printReport(stdout, report);
+            try printReport(stdout, report, options.output);
             matched = true;
         }
     }
@@ -266,12 +327,7 @@ fn searchEntriesParallel(
             defer buffer.deinit(std.heap.smp_allocator);
 
             if (try searcher.reportFirstMatch(entry.path, buffer.bytes())) |report| {
-                self.result_lines[index] = try std.fmt.allocPrint(std.heap.smp_allocator, "{s}:{d}:{d}:{s}\n", .{
-                    report.path,
-                    report.line_number,
-                    report.column_number,
-                    report.line,
-                });
+                self.result_lines[index] = try formatReport(std.heap.smp_allocator, report, self.options.output);
             }
         }
     };
@@ -318,19 +374,75 @@ fn searchEntriesParallel(
     return matched;
 }
 
-fn printReport(stdout: *std.Io.Writer, report: zigrep.search.grep.MatchReport) !void {
-    try stdout.print("{s}:{d}:{d}:{s}\n", .{
-        report.path,
-        report.line_number,
-        report.column_number,
-        report.line,
-    });
+fn printReport(stdout: *std.Io.Writer, report: zigrep.search.grep.MatchReport, output: OutputOptions) !void {
+    const line = try formatReport(std.heap.smp_allocator, report, output);
+    defer std.heap.smp_allocator.free(line);
+    try stdout.writeAll(line);
+}
+
+fn formatReport(
+    allocator: std.mem.Allocator,
+    report: zigrep.search.grep.MatchReport,
+    output: OutputOptions,
+) ![]u8 {
+    var buffer: std.Io.Writer.Allocating = .init(allocator);
+    defer buffer.deinit();
+
+    var wrote_prefix = false;
+    if (output.with_filename) {
+        try buffer.writer.print("{s}", .{report.path});
+        wrote_prefix = true;
+    }
+    if (output.line_number) {
+        if (wrote_prefix) {
+            try buffer.writer.writeByte(':');
+        }
+        try buffer.writer.print("{d}", .{report.line_number});
+        wrote_prefix = true;
+    }
+    if (output.column_number) {
+        if (wrote_prefix) {
+            try buffer.writer.writeByte(':');
+        }
+        try buffer.writer.print("{d}", .{report.column_number});
+        wrote_prefix = true;
+    }
+    if (wrote_prefix) {
+        try buffer.writer.writeByte(':');
+    }
+    try buffer.writer.print("{s}\n", .{report.line});
+    return try allocator.dupe(u8, buffer.written());
+}
+
+fn parsePositiveUsize(arg: []const u8) CliError!usize {
+    const value = parseNonNegativeUsize(arg) catch return error.InvalidFlagValue;
+    if (value == 0) return error.InvalidFlagValue;
+    return value;
+}
+
+fn parseNonNegativeUsize(arg: []const u8) CliError!usize {
+    return std.fmt.parseUnsigned(usize, arg, 10) catch error.InvalidFlagValue;
 }
 
 fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
     try writer.print(
-        \\usage: {s} [--hidden] [--follow] [--text] [--buffered|--mmap] PATTERN [PATH...]
+        \\usage: {s} [FLAGS] PATTERN [PATH...]
         \\search recursively for PATTERN starting at each PATH, or "." when omitted
+        \\  -h, --help            show this help
+        \\  --hidden              include hidden files
+        \\  --follow              follow symlinks
+        \\  --text                search binary files too
+        \\  --buffered            force buffered file reads
+        \\  --mmap                prefer mmap-backed file reads
+        \\  -j, --threads N       use up to N worker threads
+        \\  --max-depth N         limit recursive walk depth
+        \\  -H, --with-filename   always print the file path
+        \\  --no-filename         suppress the file path prefix
+        \\  -n, --line-number     print line numbers
+        \\  --no-line-number      suppress line numbers
+        \\  --column              print match columns
+        \\  --no-column           suppress match columns
+        \\  --                    stop parsing flags
         \\
     , .{argv0});
 }
@@ -353,9 +465,64 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(!opts.follow_symlinks);
             try testing.expect(opts.skip_binary);
             try testing.expectEqual(zigrep.search.io.ReadStrategy.mmap, opts.read_strategy);
+            try testing.expectEqual(@as(?usize, null), opts.parallel_jobs);
+            try testing.expectEqual(@as(?usize, null), opts.max_depth);
+            try testing.expect(opts.output.with_filename);
+            try testing.expect(opts.output.line_number);
+            try testing.expect(opts.output.column_number);
         },
         .help => unreachable,
     }
+}
+
+test "parseArgs accepts numeric and formatting flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-j",
+        "4",
+        "--max-depth",
+        "2",
+        "--no-filename",
+        "--no-column",
+        "--",
+        "-literal",
+        "src",
+    });
+    defer switch (parsed) {
+        .run => |opts| testing.allocator.free(opts.paths),
+        .help => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("-literal", opts.pattern);
+            try testing.expectEqual(@as(?usize, 4), opts.parallel_jobs);
+            try testing.expectEqual(@as(?usize, 2), opts.max_depth);
+            try testing.expect(!opts.output.with_filename);
+            try testing.expect(opts.output.line_number);
+            try testing.expect(!opts.output.column_number);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help => unreachable,
+    }
+}
+
+test "parseArgs rejects invalid numeric flags" {
+    const testing = std.testing;
+
+    try testing.expectError(error.InvalidFlagValue, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-j",
+        "0",
+        "needle",
+    }));
+    try testing.expectError(error.MissingFlagValue, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--max-depth",
+    }));
 }
 
 test "runCli reports matches and skips binary files by default" {
@@ -471,4 +638,26 @@ test "search scheduler keeps tiny workloads on the sequential path" {
     try testing.expect(!schedule.parallel);
     try testing.expectEqual(@as(usize, 1), schedule.worker_count);
     try testing.expectEqual(@as(usize, 1), schedule.chunk_size);
+}
+
+test "formatReport obeys output toggles" {
+    const testing = std.testing;
+
+    const report: zigrep.search.grep.MatchReport = .{
+        .path = "sample.txt",
+        .line_number = 3,
+        .column_number = 7,
+        .line = "matched line",
+        .line_span = .{ .start = 0, .end = 12 },
+        .match_span = .{ .start = 0, .end = 6 },
+    };
+
+    const line = try formatReport(testing.allocator, report, .{
+        .with_filename = false,
+        .line_number = true,
+        .column_number = false,
+    });
+    defer testing.allocator.free(line);
+
+    try testing.expectEqualStrings("3:matched line\n", line);
 }
