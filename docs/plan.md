@@ -59,7 +59,7 @@ Build a Zig-native analog of `ripgrep` with:
 
 - [x] Add recursive directory walking
 - [x] Add ignore-file handling
-- [ ] Add binary-file detection
+- [x] Add binary-file detection
 - [ ] Add buffered I/O strategy
 - [ ] Add mmap strategy where appropriate
 - [ ] Add match reporting
@@ -142,6 +142,10 @@ Completed in the current search-plumbing pass: `src/search/ignore.zig` now
 compiles simple ignore-file rules with comments, negation, anchored patterns,
 directory-only rules, and last-match semantics, with tests covering the basic
 matching behavior needed for later walker integration.
+
+Completed in the latest search-plumbing pass: `src/search/io.zig` now provides
+sample-based binary detection for in-memory buffers and files, using NUL/control
+byte heuristics suitable for later grep/file-selection integration.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
