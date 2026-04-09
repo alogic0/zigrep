@@ -57,7 +57,7 @@ Build a Zig-native analog of `ripgrep` with:
 
 ### 6. Search Tool Plumbing
 
-- [ ] Add recursive directory walking
+- [x] Add recursive directory walking
 - [ ] Add ignore-file handling
 - [ ] Add binary-file detection
 - [ ] Add buffered I/O strategy
@@ -133,6 +133,10 @@ all non-SIMD and non-eligible cases continue to use the normal fallback logic.
 Completed in the benchmark pass: `zig build bench` now runs a small engine
 benchmark harness that measures representative prefilter, lazy-DFA, and
 capture-preserving Pike-VM cases and prints CSV-friendly timing output.
+
+Completed in the first search-plumbing pass: `src/search/walk.zig` now provides
+a recursive file walker with depth limits and hidden-file filtering, backed by
+tests that cover nested traversal and shallow walk behavior.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
