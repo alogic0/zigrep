@@ -40,12 +40,12 @@ Build a Zig-native analog of `ripgrep` with:
 
 ### 4. Unicode Boundary Layer
 
-- [ ] Define the internal interface in `src/regex/unicode.zig`
+- [x] Define the internal interface in `src/regex/unicode.zig`
 - [ ] Add Unicode property lookup support
 - [ ] Add case folding support
 - [ ] Add Unicode-aware boundary semantics as needed
-- [ ] Keep matching byte-oriented in the hot path
-- [ ] Avoid whole-input decode-first designs
+- [x] Keep matching byte-oriented in the hot path
+- [x] Avoid whole-input decode-first designs
 
 ### 5. Fast Path
 
@@ -95,6 +95,11 @@ dot semantics so `.` no longer matches newlines by default.
 Completed in the current pass: capture groups are preserved through AST/HIR,
 compiled into NFA save instructions, and exposed by the VM as whole-match and
 group spans without changing the default non-capturing search API.
+
+Completed in the newest pass: `src/regex/unicode.zig` now defines the internal
+Unicode boundary interface with incremental scalar decoding, category/boundary
+hooks, and case-fold entry points designed to stay byte-oriented in the hot
+path instead of requiring whole-input preprocessing.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
