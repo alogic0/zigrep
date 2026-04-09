@@ -94,3 +94,8 @@ Then run:
 Regex and CLI scope are documented in:
 
 - [docs/supported-syntax.md](/home/oleg/prog/zigrep/docs/supported-syntax.md)
+
+## Project Notes
+
+Almost all parts of this project were developed with AI-assisted code writing and review.
+Final design and code decisions remain project-owned.
