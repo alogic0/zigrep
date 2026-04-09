@@ -1,0 +1,23 @@
+const std = @import("std");
+const regex_mod = @import("regex/root.zig");
+
+pub const regex = regex_mod;
+pub const search = @import("search/root.zig");
+pub const reader = regex_mod.reader;
+pub const decoder = reader;
+pub const lexer = regex_mod.lexer;
+pub const Parser = regex_mod.Parser;
+pub const Ast = regex_mod.Ast;
+pub const Node = regex_mod.Node;
+pub const NodeId = regex_mod.NodeId;
+pub const ParseError = regex_mod.ParseError;
+
+pub const CompileOptions = regex_mod.CompileOptions;
+
+pub fn compile(allocator: std.mem.Allocator, pattern: []const u8, _: CompileOptions) ParseError!Ast {
+    return regex_mod.compile(allocator, pattern, .{});
+}
+
+test {
+    std.testing.refAllDecls(@This());
+}
