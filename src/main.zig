@@ -162,16 +162,13 @@ fn searchPath(
         allocator.free(entries);
     }
 
-    if (shouldParallelize(options, entries.len)) {
-        return searchEntriesParallel(stdout, entries, options);
+    const schedule = zigrep.search.schedule.plan(entries.len, .{
+        .requested_jobs = options.parallel_jobs,
+    });
+    if (schedule.parallel) {
+        return searchEntriesParallel(stdout, entries, options, schedule);
     }
     return searchEntriesSequential(allocator, stdout, entries, options);
-}
-
-fn shouldParallelize(options: CliOptions, entry_count: usize) bool {
-    if (entry_count <= 1) return false;
-    const jobs = options.parallel_jobs orelse (std.Thread.getCpuCount() catch 1);
-    return jobs > 1;
 }
 
 fn searchEntriesSequential(
@@ -207,16 +204,17 @@ fn searchEntriesParallel(
     stdout: *std.Io.Writer,
     entries: []const zigrep.search.walk.Entry,
     options: CliOptions,
+    schedule: zigrep.search.schedule.Plan,
 ) !bool {
     const worker_allocator = std.heap.smp_allocator;
-    const worker_count = @min(options.parallel_jobs orelse (std.Thread.getCpuCount() catch 1), entries.len);
-    if (worker_count <= 1) {
+    if (schedule.worker_count <= 1) {
         return searchEntriesSequential(worker_allocator, stdout, entries, options);
     }
 
     const Context = struct {
         entries: []const zigrep.search.walk.Entry,
         options: CliOptions,
+        schedule: zigrep.search.schedule.Plan,
         next_index: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
         result_lines: []?[]u8,
         first_error: ?anyerror = null,
@@ -238,14 +236,17 @@ fn searchEntriesParallel(
             while (true) {
                 if (self.first_error != null) return;
 
-                const index = self.next_index.fetchAdd(1, .monotonic);
-                if (index >= self.entries.len) return;
+                const start = self.next_index.fetchAdd(self.schedule.chunk_size, .monotonic);
+                if (start >= self.entries.len) return;
 
-                const entry = self.entries[index];
-                self.processEntry(&searcher, index, entry) catch |err| {
-                    self.setError(err);
-                    return;
-                };
+                const end = @min(start + self.schedule.chunk_size, self.entries.len);
+                for (start..end) |index| {
+                    const entry = self.entries[index];
+                    self.processEntry(&searcher, index, entry) catch |err| {
+                        self.setError(err);
+                        return;
+                    };
+                }
             }
         }
 
@@ -282,7 +283,7 @@ fn searchEntriesParallel(
     var pool: std.Thread.Pool = undefined;
     try pool.init(.{
         .allocator = worker_allocator,
-        .n_jobs = worker_count,
+        .n_jobs = schedule.worker_count,
     });
     defer pool.deinit();
 
@@ -290,10 +291,11 @@ fn searchEntriesParallel(
     var context = Context{
         .entries = entries,
         .options = options,
+        .schedule = schedule,
         .result_lines = result_lines,
     };
 
-    for (0..worker_count) |_| {
+    for (0..schedule.worker_count) |_| {
         pool.spawnWg(&wait_group, Context.runWorker, .{&context});
     }
     wait_group.wait();
@@ -457,4 +459,16 @@ test "runSearch reports matches across files on the parallel path" {
     try testing.expectEqual(@as(u8, 0), exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:1:1:needle one"));
     try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt:1:1:needle two"));
+}
+
+test "search scheduler keeps tiny workloads on the sequential path" {
+    const testing = std.testing;
+
+    const schedule = zigrep.search.schedule.plan(1, .{
+        .requested_jobs = 8,
+    });
+
+    try testing.expect(!schedule.parallel);
+    try testing.expectEqual(@as(usize, 1), schedule.worker_count);
+    try testing.expectEqual(@as(usize, 1), schedule.chunk_size);
 }

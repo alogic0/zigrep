@@ -68,7 +68,7 @@ Build a Zig-native analog of `ripgrep` with:
 ### 7. Parallelism and Polish
 
 - [x] Add parallel file search
-- [ ] Add work scheduling strategy
+- [x] Add work scheduling strategy
 - [ ] Add configuration flags and CLI polish
 - [ ] Add benchmarks on realistic corpora
 - [ ] Add end-to-end integration tests
@@ -169,6 +169,11 @@ Completed in the current parallel-search pass: the CLI now processes files in
 parallel with a bounded thread pool, preserves output order by storing one
 formatted result per file slot, and falls back to the existing sequential path
 when parallelism would not help, with focused coverage for multi-file output.
+
+Completed in the current scheduling pass: `src/search/schedule.zig` now owns
+the basic file-search scheduling policy, deciding when to stay serial, how many
+workers to use, and how large each claimed work chunk should be; the CLI now
+consumes that plan instead of embedding ad hoc scheduling decisions in `main`.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
