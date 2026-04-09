@@ -106,19 +106,18 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var index: usize = 1;
     while (index < argv.len) : (index += 1) {
         const arg = argv[index];
-        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-            return .help;
-        }
-        if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
-            return .version;
-        }
-
         if (!stop_parsing_flags and pattern == null and std.mem.eql(u8, arg, "--")) {
             stop_parsing_flags = true;
             continue;
         }
 
         if (!stop_parsing_flags and pattern == null and arg.len > 0 and arg[0] == '-') {
+            if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+                return .help;
+            }
+            if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+                return .version;
+            }
             if (std.mem.eql(u8, arg, "--hidden")) {
                 include_hidden = true;
                 continue;
@@ -584,6 +583,44 @@ test "parseArgs accepts version flag" {
     switch (parsed) {
         .version => {},
         else => return error.TestExpectedEqual,
+    }
+}
+
+test "parseArgs treats version-like args as positional after the pattern starts" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "needle", "--version" });
+    defer switch (parsed) {
+        .run => |opts| testing.allocator.free(opts.paths),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("needle", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("--version", opts.paths[0]);
+        },
+        .help, .version => return error.TestExpectedEqual,
+    }
+}
+
+test "parseArgs treats help-like args as positional after terminator" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--", "--help" });
+    defer switch (parsed) {
+        .run => |opts| testing.allocator.free(opts.paths),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("--help", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings(".", opts.paths[0]);
+        },
+        .help, .version => return error.TestExpectedEqual,
     }
 }
 
