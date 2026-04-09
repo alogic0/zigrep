@@ -43,7 +43,7 @@ Build a Zig-native analog of `ripgrep` with:
 - [x] Define the internal interface in `src/regex/unicode.zig`
 - [x] Add Unicode property lookup support
 - [x] Add case folding support
-- [ ] Add Unicode-aware boundary semantics as needed
+- [x] Add Unicode-aware boundary semantics as needed
 - [x] Keep matching byte-oriented in the hot path
 - [x] Avoid whole-input decode-first designs
 
@@ -109,6 +109,10 @@ incremental matcher model.
 Completed in the newest Unicode pass: the Unicode layer now exposes explicit
 case-fold support with canonical folded scalars, fold-set generation, and
 folded scalar comparison hooks that later matcher work can consume directly.
+
+Completed in the current Unicode boundary pass: the Unicode layer now supports
+word and line boundary checks at byte offsets in UTF-8 input, including
+incremental boundary queries and rejection of offsets that land inside a scalar.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.

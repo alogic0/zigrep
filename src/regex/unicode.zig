@@ -153,6 +153,25 @@ pub const Strategy = struct {
         };
     }
 
+    pub fn boundaryAt(bytes: []const u8, offset: usize, kind: BoundaryKind) Error!bool {
+        if (offset > bytes.len) return error.InvalidUtf8;
+        const before = try scalarBefore(bytes, offset);
+        const after = try scalarAtOrAfter(bytes, offset);
+        return boundary(before, after, kind);
+    }
+
+    pub fn lineStart(bytes: []const u8, offset: usize) Error!bool {
+        if (offset > bytes.len) return error.InvalidUtf8;
+        const before = try scalarBefore(bytes, offset);
+        return before == null or before.? == '\n';
+    }
+
+    pub fn lineEnd(bytes: []const u8, offset: usize) Error!bool {
+        if (offset > bytes.len) return error.InvalidUtf8;
+        const after = try scalarAtOrAfter(bytes, offset);
+        return after == null or after.? == '\n';
+    }
+
     pub fn foldScalar(cp: u32, mode: CaseFoldMode) u32 {
         return switch (mode) {
             .simple => foldScalarSimple(cp),
@@ -205,6 +224,27 @@ fn decodeAt(bytes: []const u8, offset: usize) Error!Decoded {
     };
 }
 
+fn scalarAtOrAfter(bytes: []const u8, offset: usize) Error!?u32 {
+    if (offset == bytes.len) return null;
+    const decoded = try decodeAt(bytes, offset);
+    return decoded.cp;
+}
+
+fn scalarBefore(bytes: []const u8, offset: usize) Error!?u32 {
+    if (offset == 0) return null;
+
+    var start = offset - 1;
+    var steps: u8 = 0;
+    while (start > 0 and isUtf8Continuation(bytes[start])) : (start -= 1) {
+        steps += 1;
+        if (steps > 3) return error.InvalidUtf8;
+    }
+
+    const decoded = try decodeAt(bytes, start);
+    if (start + decoded.width != offset) return error.InvalidUtf8;
+    return decoded.cp;
+}
+
 fn isSeparator(cp: u32) bool {
     return cp == 0x00A0 or cp == 0x1680 or cp == 0x2028 or cp == 0x2029 or cp == 0x202F or cp == 0x205F or cp == 0x3000;
 }
@@ -244,6 +284,10 @@ fn appendUnique(allocator: std.mem.Allocator, list: *std.ArrayList(u32), value: 
         if (item == value) return;
     }
     try list.append(allocator, value);
+}
+
+fn isUtf8Continuation(byte: u8) bool {
+    return (byte & 0b1100_0000) == 0b1000_0000;
 }
 
 test "Unicode strategy decodes incrementally without whole-input preprocessing" {
@@ -329,4 +373,30 @@ test "Unicode strategy performs folded scalar comparison" {
     try testing.expect(Strategy.foldedEq('Σ', 'σ', .simple));
     try testing.expect(Strategy.foldedEq('Σ', 'ς', .simple));
     try testing.expect(!Strategy.foldedEq('A', 'b', .simple));
+}
+
+test "Unicode strategy evaluates boundaries at byte offsets" {
+    const testing = std.testing;
+
+    const text = "éclair x\nβeta";
+    const e_accent_end = "é".len;
+    const space_offset = "éclair".len;
+    const line_break_offset = "éclair x".len;
+    const beta_offset = "éclair x\n".len;
+
+    try testing.expect(try Strategy.boundaryAt(text, 0, .word));
+    try testing.expect(!(try Strategy.boundaryAt(text, e_accent_end, .word)));
+    try testing.expect(try Strategy.boundaryAt(text, space_offset, .word));
+    try testing.expect(try Strategy.boundaryAt(text, line_break_offset, .line));
+    try testing.expect(try Strategy.lineStart(text, 0));
+    try testing.expect(!(try Strategy.lineStart(text, space_offset)));
+    try testing.expect(try Strategy.lineStart(text, beta_offset));
+    try testing.expect(try Strategy.lineEnd(text, line_break_offset));
+}
+
+test "Unicode strategy rejects invalid boundary offsets inside UTF-8 scalars" {
+    const testing = std.testing;
+
+    const text = "©";
+    try testing.expectError(error.InvalidUtf8, Strategy.boundaryAt(text, 1, .word));
 }
