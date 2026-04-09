@@ -321,10 +321,10 @@ pub const Parser = struct {
                 try self.advance();
                 return ']';
             } else return error.UnterminatedClass,
-            .anchor_start => if (first) {
+            .anchor_start => {
                 try self.advance();
                 return '^';
-            } else return error.UnexpectedToken,
+            },
             else => return error.UnexpectedToken,
         }
     }
@@ -446,4 +446,41 @@ test "Parser records spans for unsupported groups and trailing input" {
         .err = error.TrailingInput,
         .span = .{ .start = 1, .end = 2 },
     }, trailing_parser.lastError().?);
+}
+
+test "Parser supports escaped metacharacters and class edge literals" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "\\^\\$\\[\\]\\(\\)\\|\\?\\+\\*\\{\\}\\\\[-^\\]]");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    try testing.expectEqual(.concat, std.meta.activeTag(ast.nodes[@intFromEnum(ast.root)]));
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 14), root.len);
+
+    const class = ast.nodes[@intFromEnum(root[13])].char_class;
+    try testing.expect(!class.negated);
+    try testing.expectEqual(@as(usize, 3), class.items.len);
+    try testing.expectEqualDeep(ClassItem{ .literal = '-' }, class.items[0]);
+    try testing.expectEqualDeep(ClassItem{ .literal = '^' }, class.items[1]);
+    try testing.expectEqualDeep(ClassItem{ .literal = ']' }, class.items[2]);
+}
+
+test "Parser rejects malformed classes and quantifiers with spans" {
+    const testing = std.testing;
+
+    var empty_class = try Parser.init(testing.allocator, "[]");
+    try testing.expectError(error.EmptyClass, empty_class.parse());
+    try testing.expectEqualDeep(ParseDiagnostic{
+        .err = error.EmptyClass,
+        .span = .{ .start = 1, .end = 2 },
+    }, empty_class.lastError().?);
+
+    var bad_quantifier = try Parser.init(testing.allocator, "a{,2}");
+    try testing.expectError(error.InvalidQuantifier, bad_quantifier.parse());
+    try testing.expectEqualDeep(ParseDiagnostic{
+        .err = error.InvalidQuantifier,
+        .span = .{ .start = 2, .end = 3 },
+    }, bad_quantifier.lastError().?);
 }

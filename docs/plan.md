@@ -33,10 +33,10 @@ Build a Zig-native analog of `ripgrep` with:
 
 - [x] Define the first Thompson NFA instruction set
 - [x] Compile HIR into NFA
-- [ ] Implement Pike VM execution
+- [x] Implement Pike VM execution
 - [ ] Add support for captures only where needed
-- [ ] Add matcher correctness tests
-- [ ] Add focused regression tests for edge cases
+- [x] Add matcher correctness tests
+- [x] Add focused regression tests for edge cases
 
 ### 4. Unicode Boundary Layer
 
@@ -87,6 +87,10 @@ as the public compiler boundary.
 Completed in the next pass: the first Thompson NFA instruction set now exists
 in `src/regex/nfa.zig`, and HIR lowers into that program form for literals,
 classes, concatenation, alternation, repetition, dot, and anchors.
+
+Completed in the latest pass: the Pike VM gained broader correctness and
+regression coverage, including ported ripgrep-inspired tests; this also fixed
+dot semantics so `.` no longer matches newlines by default.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
