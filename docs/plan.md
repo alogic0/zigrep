@@ -72,7 +72,7 @@ Build a Zig-native analog of `ripgrep` with:
 - [x] Add configuration flags and CLI polish
 - [x] Add benchmarks on realistic corpora
 - [x] Add end-to-end integration tests
-- [ ] Add documentation for supported syntax and non-goals
+- [x] Add documentation for supported syntax and non-goals
 
 ## Current Priority
 
@@ -190,6 +190,11 @@ Completed in the current integration-test pass: the CLI test suite now covers
 end-to-end searches over temporary directory trees, including recursive depth
 limits, binary skipping versus `--text`, output-format toggles, and consistency
 between sequential and parallel execution paths.
+
+Completed in the current documentation pass: `docs/supported-syntax.md` now
+describes the implemented regex subset, current CLI surface, and explicit
+non-goals so the user-facing scope matches the actual engine instead of the
+broader design notes.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
