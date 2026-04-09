@@ -28,14 +28,49 @@ pub const OwnedBuffer = struct {
     }
 };
 
+pub const ReadBuffer = union(enum) {
+    owned: OwnedBuffer,
+    mapped: struct {
+        bytes: []align(std.mem.page_size) const u8,
+    },
+
+    pub fn bytes(self: ReadBuffer) []const u8 {
+        return switch (self) {
+            .owned => |buffer| buffer.bytes,
+            .mapped => |mapping| mapping.bytes,
+        };
+    }
+
+    pub fn deinit(self: ReadBuffer, allocator: std.mem.Allocator) void {
+        switch (self) {
+            .owned => |buffer| buffer.deinit(allocator),
+            .mapped => |mapping| std.posix.munmap(mapping.bytes),
+        }
+    }
+};
+
 pub fn readFileOwned(
     allocator: std.mem.Allocator,
     path: []const u8,
     options: ReadOptions,
 ) !OwnedBuffer {
+    const buffer = try readFile(allocator, path, options);
+    return switch (buffer) {
+        .owned => |owned| owned,
+        .mapped => |mapping| .{
+            .bytes = try allocator.dupe(u8, mapping.bytes),
+        },
+    };
+}
+
+pub fn readFile(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    options: ReadOptions,
+) !ReadBuffer {
     return switch (options.strategy) {
-        .buffered => readFileBuffered(allocator, path, options.buffer_size),
-        .mmap => readFileBuffered(allocator, path, options.buffer_size),
+        .buffered => .{ .owned = try readFileBuffered(allocator, path, options.buffer_size) },
+        .mmap => try readFileMapped(allocator, path, options.buffer_size),
     };
 }
 
@@ -96,6 +131,30 @@ fn readFileBuffered(
     return .{ .bytes = try contents.toOwnedSlice(allocator) };
 }
 
+fn readFileMapped(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    buffer_size: usize,
+) !ReadBuffer {
+    var file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+
+    const stat = try file.stat();
+    if (stat.kind != .file or stat.size == 0) {
+        return .{ .owned = try readFileBuffered(allocator, path, buffer_size) };
+    }
+
+    const mapped = try std.posix.mmap(
+        null,
+        @intCast(stat.size),
+        std.posix.PROT.READ,
+        .{ .TYPE = .PRIVATE },
+        file.handle,
+        0,
+    );
+    return .{ .mapped = .{ .bytes = mapped } };
+}
+
 fn isSuspiciousControl(byte: u8) bool {
     if (byte == '\n' or byte == '\r' or byte == '\t' or byte == '\x0c') return false;
     return byte < 0x20 or byte == 0x7f;
@@ -154,4 +213,53 @@ test "buffered I/O reads whole files into owned buffers" {
     defer buffer.deinit(testing.allocator);
 
     try testing.expectEqualStrings("line one\nline two\n", buffer.bytes);
+}
+
+test "mmap strategy exposes mapped bytes for non-empty files" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "mapped.txt",
+        .data = "mapped contents\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const file_path = try std.fs.path.join(testing.allocator, &.{ root_path, "mapped.txt" });
+    defer testing.allocator.free(file_path);
+
+    const buffer = try readFile(testing.allocator, file_path, .{
+        .strategy = .mmap,
+    });
+    defer buffer.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("mapped contents\n", buffer.bytes());
+}
+
+test "mmap strategy falls back for empty files" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "empty.txt",
+        .data = "",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const file_path = try std.fs.path.join(testing.allocator, &.{ root_path, "empty.txt" });
+    defer testing.allocator.free(file_path);
+
+    const buffer = try readFile(testing.allocator, file_path, .{
+        .strategy = .mmap,
+    });
+    defer buffer.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("", buffer.bytes());
+    try testing.expectEqual(.owned, std.meta.activeTag(buffer));
 }

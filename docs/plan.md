@@ -61,7 +61,7 @@ Build a Zig-native analog of `ripgrep` with:
 - [x] Add ignore-file handling
 - [x] Add binary-file detection
 - [x] Add buffered I/O strategy
-- [ ] Add mmap strategy where appropriate
+- [x] Add mmap strategy where appropriate
 - [ ] Add match reporting
 - [ ] Add a first usable CLI
 
@@ -150,6 +150,10 @@ byte heuristics suitable for later grep/file-selection integration.
 Completed in the current search-I/O pass: `src/search/io.zig` now exposes an
 owned-buffer file reader behind the read-strategy API, giving later grep logic
 a stable buffered read path without committing yet to mmap-backed reads.
+
+Completed in the latest search-I/O pass: `src/search/io.zig` now supports a
+mapped-file read strategy with fallback to buffered reads for empty or
+non-mappable files, all behind the same read result abstraction.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
