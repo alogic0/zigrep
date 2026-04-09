@@ -16,6 +16,9 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+    const simd_prefilter = b.option(bool, "simd_prefilter", "Enable optional SIMD-style literal prefilter scanning") orelse false;
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "simd_prefilter", simd_prefilter);
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -39,6 +42,9 @@ pub fn build(b: *std.Build) void {
         // Later on we'll use this module as the root module of a test executable
         // which requires us to specify a target.
         .target = target,
+        .imports = &.{
+            .{ .name = "build_options", .module = build_options.createModule() },
+        },
     });
 
     // Here we define an executable. An executable needs to have a root module
@@ -79,6 +85,7 @@ pub fn build(b: *std.Build) void {
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
                 .{ .name = "zigrep", .module = mod },
+                .{ .name = "build_options", .module = build_options.createModule() },
             },
         }),
     });

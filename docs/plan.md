@@ -52,7 +52,7 @@ Build a Zig-native analog of `ripgrep` with:
 - [x] Add literal prefilters ahead of the full matcher
 - [x] Add a DFA or lazy DFA for non-capturing search
 - [x] Add ASCII-first fast paths
-- [ ] Add optional SIMD scanning behind target-feature gates
+- [x] Add optional SIMD scanning behind target-feature gates
 - [ ] Add benchmarks for engine-level performance
 
 ### 6. Search Tool Plumbing
@@ -125,6 +125,10 @@ use the Pike VM path that preserves match spans.
 Completed in the newest fast-path pass: ASCII-safe regex programs now take
 byte-oriented fast paths in both the lazy DFA and Pike VM, skipping UTF-8
 decoding when the haystack and compiled program are both ASCII-only.
+
+Completed in the current SIMD fast-path pass: the literal prefilter now has an
+optional SIMD-gated single-byte scan path controlled by a build option, while
+all non-SIMD and non-eligible cases continue to use the normal fallback logic.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
