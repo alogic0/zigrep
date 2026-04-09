@@ -447,6 +447,37 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
     , .{argv0});
 }
 
+const CapturedCliRun = struct {
+    exit_code: u8,
+    stdout: []u8,
+    stderr: []u8,
+
+    fn deinit(self: CapturedCliRun, allocator: std.mem.Allocator) void {
+        allocator.free(self.stdout);
+        allocator.free(self.stderr);
+    }
+};
+
+fn runCliCaptured(allocator: std.mem.Allocator, argv: []const []const u8) !CapturedCliRun {
+    var stdout_capture: std.Io.Writer.Allocating = .init(allocator);
+    defer stdout_capture.deinit();
+    var stderr_capture: std.Io.Writer.Allocating = .init(allocator);
+    defer stderr_capture.deinit();
+
+    const exit_code = try runCli(
+        allocator,
+        &stdout_capture.writer,
+        &stderr_capture.writer,
+        argv,
+    );
+
+    return .{
+        .exit_code = exit_code,
+        .stdout = try allocator.dupe(u8, stdout_capture.written()),
+        .stderr = try allocator.dupe(u8, stderr_capture.written()),
+    };
+}
+
 test "parseArgs defaults to current directory search" {
     const testing = std.testing;
 
@@ -543,22 +574,13 @@ test "runCli reports matches and skips binary files by default" {
     const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
     defer testing.allocator.free(root_path);
 
-    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer stdout_capture.deinit();
-    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer stderr_capture.deinit();
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer run.deinit(testing.allocator);
 
-    const exit_code = try runCli(
-        testing.allocator,
-        &stdout_capture.writer,
-        &stderr_capture.writer,
-        &.{ "zigrep", "needle", root_path },
-    );
-
-    try testing.expectEqual(@as(u8, 0), exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "match.txt:2:1:needle here"));
-    try testing.expect(!std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "binary.bin"));
-    try testing.expectEqualStrings("", stderr_capture.written());
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "match.txt:2:1:needle here"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "binary.bin"));
+    try testing.expectEqualStrings("", run.stderr);
 }
 
 test "runCli returns 1 when nothing matches" {
@@ -575,21 +597,12 @@ test "runCli returns 1 when nothing matches" {
     const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
     defer testing.allocator.free(root_path);
 
-    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer stdout_capture.deinit();
-    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer stderr_capture.deinit();
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer run.deinit(testing.allocator);
 
-    const exit_code = try runCli(
-        testing.allocator,
-        &stdout_capture.writer,
-        &stderr_capture.writer,
-        &.{ "zigrep", "needle", root_path },
-    );
-
-    try testing.expectEqual(@as(u8, 1), exit_code);
-    try testing.expectEqualStrings("", stdout_capture.written());
-    try testing.expectEqualStrings("", stderr_capture.written());
+    try testing.expectEqual(@as(u8, 1), run.exit_code);
+    try testing.expectEqualStrings("", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
 }
 
 test "runSearch reports matches across files on the parallel path" {
@@ -660,4 +673,129 @@ test "formatReport obeys output toggles" {
     defer testing.allocator.free(line);
 
     try testing.expectEqualStrings("3:matched line\n", line);
+}
+
+test "runCli honors max depth in recursive search" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("nested/deeper");
+    try tmp.dir.writeFile(.{
+        .sub_path = "root.txt",
+        .data = "needle root\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "nested/child.txt",
+        .data = "needle child\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "nested/deeper/grandchild.txt",
+        .data = "needle grandchild\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const shallow = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--max-depth",
+        "1",
+        "needle",
+        root_path,
+    });
+    defer shallow.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), shallow.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, shallow.stdout, 1, "root.txt:1:1:needle root"));
+    try testing.expect(std.mem.containsAtLeast(u8, shallow.stdout, 1, "child.txt:1:1:needle child"));
+    try testing.expect(!std.mem.containsAtLeast(u8, shallow.stdout, 1, "grandchild.txt"));
+}
+
+test "runCli can search binary files when text mode is enabled" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "payload.bin",
+        .data = "aa\x00needle\x00bb",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const skipped = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer skipped.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), skipped.exit_code);
+
+    const searched = try runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "needle", root_path });
+    defer searched.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), searched.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, searched.stdout, 1, "payload.bin:1:4:aa"));
+}
+
+test "runCli output toggles apply across the end-to-end path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "prefix needle suffix\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--no-filename",
+        "--no-column",
+        "needle",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("1:prefix needle suffix\n", run.stdout);
+}
+
+test "runCli parallel and sequential modes produce the same output set" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{ .sub_path = "a.txt", .data = "needle a\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "b.txt", .data = "needle b\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "c.txt", .data = "needle c\n" });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const sequential = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-j",
+        "1",
+        "needle",
+        root_path,
+    });
+    defer sequential.deinit(testing.allocator);
+
+    const parallel = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-j",
+        "4",
+        "needle",
+        root_path,
+    });
+    defer parallel.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), sequential.exit_code);
+    try testing.expectEqual(@as(u8, 0), parallel.exit_code);
+    try testing.expectEqualStrings(sequential.stdout, parallel.stdout);
 }

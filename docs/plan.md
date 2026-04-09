@@ -71,7 +71,7 @@ Build a Zig-native analog of `ripgrep` with:
 - [x] Add work scheduling strategy
 - [x] Add configuration flags and CLI polish
 - [x] Add benchmarks on realistic corpora
-- [ ] Add end-to-end integration tests
+- [x] Add end-to-end integration tests
 - [ ] Add documentation for supported syntax and non-goals
 
 ## Current Priority
@@ -185,6 +185,11 @@ Completed in the current corpus-benchmark pass: `src/bench.zig` now keeps the
 existing synthetic engine cases and adds repository-backed corpus runs over
 `src/` and `docs/`, including both sequential and parallel search scenarios, so
 `zig build bench` reports timings against more realistic file-search workloads.
+
+Completed in the current integration-test pass: the CLI test suite now covers
+end-to-end searches over temporary directory trees, including recursive depth
+limits, binary skipping versus `--text`, output-format toggles, and consistency
+between sequential and parallel execution paths.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.
