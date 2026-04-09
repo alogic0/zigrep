@@ -93,7 +93,7 @@ Then run:
 
 Regex and CLI scope are documented in:
 
-- [docs/supported-syntax.md](/home/oleg/prog/zigrep/docs/supported-syntax.md)
+- [docs/supported-syntax.md](docs/supported-syntax.md)
 
 That document also explains the `--buffered` and `--mmap` options in
 non-technical terms.
