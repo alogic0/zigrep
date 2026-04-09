@@ -7,6 +7,7 @@ const std = @import("std");
 // build runner to parallelize the build automatically (and the cache system to
 // know when a step doesn't need to be re-run).
 pub fn build(b: *std.Build) void {
+    const app_version = "0.1.0";
     // Standard target options allow the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -19,6 +20,7 @@ pub fn build(b: *std.Build) void {
     const simd_prefilter = b.option(bool, "simd_prefilter", "Enable optional SIMD-style literal prefilter scanning") orelse false;
     const build_options = b.addOptions();
     build_options.addOption(bool, "simd_prefilter", simd_prefilter);
+    build_options.addOption([]const u8, "app_version", app_version);
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`

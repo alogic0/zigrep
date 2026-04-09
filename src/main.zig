@@ -28,6 +28,7 @@ const CliOptions = struct {
 
 const ParseResult = union(enum) {
     help,
+    version,
     run: CliOptions,
 };
 
@@ -68,12 +69,16 @@ fn runCli(
     const parsed = try parseArgs(allocator, argv);
     defer switch (parsed) {
         .run => |opts| allocator.free(opts.paths),
-        .help => {},
+        .help, .version => {},
     };
 
     switch (parsed) {
         .help => {
             try writeUsage(stdout, argv[0]);
+            return 0;
+        },
+        .version => {
+            try stdout.print("zigrep {s}\n", .{zigrep.app_version});
             return 0;
         },
         .run => |opts| {
@@ -103,6 +108,9 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         const arg = argv[index];
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             return .help;
+        }
+        if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+            return .version;
         }
 
         if (!stop_parsing_flags and pattern == null and std.mem.eql(u8, arg, "--")) {
@@ -252,7 +260,7 @@ fn searchEntriesSequential(
         });
         defer buffer.deinit(allocator);
 
-        if (try searcher.reportFirstMatch(entry.path, buffer.bytes())) |report| {
+        if (try reportFileMatch(&searcher, entry.path, buffer.bytes())) |report| {
             try printReport(stdout, report, options.output);
             matched = true;
         }
@@ -326,7 +334,7 @@ fn searchEntriesParallel(
             });
             defer buffer.deinit(std.heap.smp_allocator);
 
-            if (try searcher.reportFirstMatch(entry.path, buffer.bytes())) |report| {
+            if (try reportFileMatch(searcher, entry.path, buffer.bytes())) |report| {
                 self.result_lines[index] = try formatReport(std.heap.smp_allocator, report, self.options.output);
             }
         }
@@ -380,6 +388,17 @@ fn printReport(stdout: *std.Io.Writer, report: zigrep.search.grep.MatchReport, o
     try stdout.writeAll(line);
 }
 
+fn reportFileMatch(
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+) !?zigrep.search.grep.MatchReport {
+    return searcher.reportFirstMatch(path, bytes) catch |err| switch (err) {
+        error.InvalidUtf8 => null,
+        else => err,
+    };
+}
+
 fn formatReport(
     allocator: std.mem.Allocator,
     report: zigrep.search.grep.MatchReport,
@@ -429,6 +448,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\usage: {s} [FLAGS] PATTERN [PATH...]
         \\search recursively for PATTERN starting at each PATH, or "." when omitted
         \\  -h, --help            show this help
+        \\  -V, --version         show program version
         \\  --hidden              include hidden files
         \\  --follow              follow symlinks
         \\  --text                search binary files too
@@ -484,7 +504,7 @@ test "parseArgs defaults to current directory search" {
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "needle" });
     defer switch (parsed) {
         .run => |opts| testing.allocator.free(opts.paths),
-        .help => {},
+        .help, .version => {},
     };
 
     switch (parsed) {
@@ -503,6 +523,17 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(opts.output.column_number);
         },
         .help => unreachable,
+        .version => unreachable,
+    }
+}
+
+test "parseArgs accepts version flag" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--version" });
+    switch (parsed) {
+        .version => {},
+        else => return error.TestExpectedEqual,
     }
 }
 
@@ -523,7 +554,7 @@ test "parseArgs accepts numeric and formatting flags" {
     });
     defer switch (parsed) {
         .run => |opts| testing.allocator.free(opts.paths),
-        .help => {},
+        .help, .version => {},
     };
 
     switch (parsed) {
@@ -537,7 +568,7 @@ test "parseArgs accepts numeric and formatting flags" {
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("src", opts.paths[0]);
         },
-        .help => unreachable,
+        .help, .version => unreachable,
     }
 }
 
@@ -602,6 +633,17 @@ test "runCli returns 1 when nothing matches" {
 
     try testing.expectEqual(@as(u8, 1), run.exit_code);
     try testing.expectEqualStrings("", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli prints version and exits successfully" {
+    const testing = std.testing;
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--version" });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("zigrep " ++ zigrep.app_version ++ "\n", run.stdout);
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -735,6 +777,32 @@ test "runCli can search binary files when text mode is enabled" {
     defer searched.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), searched.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, searched.stdout, 1, "payload.bin:1:4:aa"));
+}
+
+test "runCli skips invalid UTF-8 files instead of aborting the whole search" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "good.txt",
+        .data = "needle here\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "bad.bin",
+        .data = "xx\xffneedleyy",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "good.txt:1:1:needle here"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stderr, 1, "InvalidUtf8"));
 }
 
 test "runCli output toggles apply across the end-to-end path" {

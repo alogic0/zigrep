@@ -243,6 +243,14 @@ pub const Parser = struct {
                 try self.advance();
                 return self.push(.{ .literal = cp });
             },
+            .comma => {
+                try self.advance();
+                return self.push(.{ .literal = ',' });
+            },
+            .hyphen => {
+                try self.advance();
+                return self.push(.{ .literal = '-' });
+            },
             .dot => {
                 try self.advance();
                 return self.push(.dot);
@@ -344,7 +352,7 @@ pub const Parser = struct {
 
     fn canStartPrimary(self: *const Parser) bool {
         return switch (self.lookahead.token) {
-            .literal, .dot, .anchor_start, .anchor_end, .l_paren, .l_bracket => true,
+            .literal, .comma, .hyphen, .dot, .anchor_start, .anchor_end, .l_paren, .l_bracket => true,
             else => false,
         };
     }
@@ -480,6 +488,28 @@ test "Parser supports escaped metacharacters and class edge literals" {
     try testing.expectEqualDeep(ClassItem{ .literal = '-' }, class.items[0]);
     try testing.expectEqualDeep(ClassItem{ .literal = '^' }, class.items[1]);
     try testing.expectEqualDeep(ClassItem{ .literal = ']' }, class.items[2]);
+}
+
+test "Parser treats comma and hyphen as literals outside special contexts" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "a,b-c");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 6), ast.nodes.len);
+    const root = ast.nodes[@intFromEnum(ast.root)];
+    const children = switch (root) {
+        .concat => |children| children,
+        else => return error.TestUnexpectedResult,
+    };
+
+    try testing.expectEqual(@as(usize, 5), children.len);
+    try testing.expectEqualDeep(Node{ .literal = 'a' }, ast.nodes[@intFromEnum(children[0])]);
+    try testing.expectEqualDeep(Node{ .literal = ',' }, ast.nodes[@intFromEnum(children[1])]);
+    try testing.expectEqualDeep(Node{ .literal = 'b' }, ast.nodes[@intFromEnum(children[2])]);
+    try testing.expectEqualDeep(Node{ .literal = '-' }, ast.nodes[@intFromEnum(children[3])]);
+    try testing.expectEqualDeep(Node{ .literal = 'c' }, ast.nodes[@intFromEnum(children[4])]);
 }
 
 test "Parser rejects malformed classes and quantifiers with spans" {

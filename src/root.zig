@@ -1,8 +1,10 @@
 const std = @import("std");
 const regex_mod = @import("regex/root.zig");
+const build_options = @import("build_options");
 
 pub const regex = regex_mod;
 pub const search = @import("search/root.zig");
+pub const app_version = build_options.app_version;
 pub const reader = regex_mod.reader;
 pub const decoder = reader;
 pub const lexer = regex_mod.lexer;
