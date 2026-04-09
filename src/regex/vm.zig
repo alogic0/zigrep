@@ -43,6 +43,9 @@ pub const MatchEngine = struct {
 
     pub fn firstMatch(self: *const MatchEngine, program: nfa.Program, haystack: []const u8) MatchError!?Match {
         if (program.instructions.len == 0) return null;
+        if (program.prefilter) |prefilter| {
+            if (!prefilter.mayMatch(haystack)) return null;
+        }
 
         var current: std.ArrayList(Thread) = .empty;
         defer self.deinitThreadList(&current);
@@ -390,4 +393,18 @@ test "VM returns null when no capture match exists" {
 
     var engine = MatchEngine.init(testing.allocator);
     try testing.expect((try engine.firstMatch(program, "zzz")) == null);
+}
+
+test "VM prefilter rejects haystacks without the required literal" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "needle.*hay");
+    defer program.deinit(testing.allocator);
+
+    try testing.expect(program.prefilter != null);
+    try testing.expect(!program.prefilter.?.mayMatch("zzz"));
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect((try engine.firstMatch(program, "zzz")) == null);
+    try testing.expect(try engine.isMatch(program, "needle then hay"));
 }

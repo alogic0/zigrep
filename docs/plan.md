@@ -49,7 +49,7 @@ Build a Zig-native analog of `ripgrep` with:
 
 ### 5. Fast Path
 
-- [ ] Add literal prefilters ahead of the full matcher
+- [x] Add literal prefilters ahead of the full matcher
 - [ ] Add a DFA or lazy DFA for non-capturing search
 - [ ] Add ASCII-first fast paths
 - [ ] Add optional SIMD scanning behind target-feature gates
@@ -113,6 +113,10 @@ folded scalar comparison hooks that later matcher work can consume directly.
 Completed in the current Unicode boundary pass: the Unicode layer now supports
 word and line boundary checks at byte offsets in UTF-8 input, including
 incremental boundary queries and rejection of offsets that land inside a scalar.
+
+Completed in the first fast-path pass: compiled regex programs now carry a
+required-literal prefilter derived from HIR analysis, and the VM rejects
+haystacks that cannot contain that literal before running full NFA execution.
 
 These two items should happen before serious matcher work, otherwise the engine
 will churn as syntax and internal representation keep changing.

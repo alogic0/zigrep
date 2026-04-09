@@ -1,5 +1,6 @@
 const std = @import("std");
 const hir_mod = @import("hir.zig");
+const literal_mod = @import("literal.zig");
 
 pub const InstPtr = u32;
 
@@ -48,6 +49,7 @@ pub const Program = struct {
     start: InstPtr,
     capture_count: u32,
     slot_count: u32,
+    prefilter: ?literal_mod.Prefilter,
 
     pub fn deinit(self: Program, allocator: std.mem.Allocator) void {
         for (self.instructions) |inst| {
@@ -56,6 +58,7 @@ pub const Program = struct {
                 else => {},
             }
         }
+        if (self.prefilter) |prefilter| prefilter.deinit(allocator);
         allocator.free(self.instructions);
     }
 };
@@ -96,6 +99,7 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir) CompileE
         .start = start_save,
         .capture_count = compiled_hir.capture_count,
         .slot_count = 2 * (compiled_hir.capture_count + 1),
+        .prefilter = try literal_mod.duplicatePrefilter(allocator, compiled_hir.literals),
     };
 }
 
@@ -405,6 +409,7 @@ test "NFA emits save instructions for capture groups" {
 
     try testing.expectEqual(@as(u32, 1), program.capture_count);
     try testing.expectEqual(@as(u32, 4), program.slot_count);
+    try testing.expect(program.prefilter != null);
 
     var save_count: usize = 0;
     for (program.instructions) |inst| {
