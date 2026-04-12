@@ -74,6 +74,7 @@ The current CLI supports:
 - Count-only output with `-c` or `--count`
 - Matching-file output with `-l` or `--files-with-matches`
 - Non-matching-file output with `-L` or `--files-without-match`
+- Inverted line selection with `-v` or `--invert-match`
 - Match-only output with `-o` or `--only-matching`
 - Newline-delimited JSON output with `--json`
 - NUL-delimited path output with `--null` for file-path reporting modes
@@ -88,6 +89,14 @@ The current CLI supports:
 - in normal output, that limits printed matching lines
 - with `--count`, that limits the counted matching lines too
 - with `--only-matching`, `zigrep` still prints every match occurrence from the first `N` matching lines
+
+`--invert-match` note:
+
+- `-v` or `--invert-match` selects non-matching lines instead of matching lines
+- with normal output, it prints the lines that do not match the pattern
+- with `--count`, it counts non-matching lines
+- with `--files-with-matches` and `--files-without-match`, it uses the inverted line-selection semantics
+- `--invert-match` is currently rejected with `--only-matching` and with context output
 
 Context mode note:
 
@@ -203,7 +212,6 @@ The current search tool does not yet implement:
 - stdin search
 - replacement/substitution
 - multiline output formatting
-- inverted-match mode
 - full ripgrep flag compatibility
 
 ## Performance Model

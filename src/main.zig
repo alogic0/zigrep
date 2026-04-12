@@ -42,6 +42,7 @@ pub const CliOptions = struct {
     type_adds: []const []const u8 = &.{},
     include_hidden: bool = false,
     follow_symlinks: bool = false,
+    invert_match: bool = false,
     no_ignore: bool = false,
     no_ignore_vcs: bool = false,
     no_ignore_parent: bool = false,
@@ -191,6 +192,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
 
     var include_hidden = false;
     var follow_symlinks = false;
+    var invert_match = false;
     var no_ignore = false;
     var no_ignore_vcs = false;
     var no_ignore_parent = false;
@@ -249,6 +251,10 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "--hidden")) {
                 include_hidden = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--invert-match")) {
+                invert_match = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--ignore-file")) {
@@ -443,9 +449,10 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     if (unrestricted_level >= 2) include_hidden = true;
     if (unrestricted_level >= 3) skip_binary = false;
     if (paths.items.len == 0) try paths.append(allocator, ".");
-    if ((context_before != 0 or context_after != 0) and (report_mode != .lines or output.only_matching)) {
+    if ((context_before != 0 or context_after != 0) and (report_mode != .lines or output.only_matching or invert_match)) {
         return error.InvalidFlagCombination;
     }
+    if (invert_match and output.only_matching) return error.InvalidFlagCombination;
     if (output_format == .json and (context_before != 0 or context_after != 0)) {
         return error.InvalidFlagCombination;
     }
@@ -482,6 +489,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .type_adds = owned_type_adds,
         .include_hidden = include_hidden,
         .follow_symlinks = follow_symlinks,
+        .invert_match = invert_match,
         .no_ignore = no_ignore,
         .no_ignore_vcs = no_ignore_vcs,
         .no_ignore_parent = no_ignore_parent,
@@ -833,6 +841,7 @@ fn searchEntriesSequential(
             entry.path,
             buffer.bytes(),
             options.encoding,
+            options.invert_match,
             options.output,
             options.output_format,
             options.report_mode,
@@ -967,6 +976,7 @@ fn searchEntriesParallel(
                 entry.path,
                 buffer.bytes(),
                 self.options.encoding,
+                self.options.invert_match,
                 self.options.output,
                 self.options.output_format,
                 self.options.report_mode,
@@ -1426,6 +1436,7 @@ fn writeFileOutput(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
+    invert_match: bool,
     output: OutputOptions,
     output_format: OutputFormat,
     report_mode: ReportMode,
@@ -1441,15 +1452,16 @@ fn writeFileOutput(
             path,
             bytes,
             encoding,
+            invert_match,
             output,
             output_format,
             max_count,
             context_before,
             context_after,
         ),
-        .count => writeFileCount(allocator, writer, searcher, path, bytes, encoding, output, output_format, max_count),
-        .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding, output, output_format),
-        .files_without_match => writeFilePathWithoutMatch(allocator, writer, searcher, path, bytes, encoding, output, output_format),
+        .count => writeFileCount(allocator, writer, searcher, path, bytes, encoding, invert_match, output, output_format, max_count),
+        .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding, invert_match, output, output_format),
+        .files_without_match => writeFilePathWithoutMatch(allocator, writer, searcher, path, bytes, encoding, invert_match, output, output_format),
     };
 }
 
@@ -1460,6 +1472,7 @@ fn writeFileLines(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
+    invert_match: bool,
     output: OutputOptions,
     output_format: OutputFormat,
     max_count: ?usize,
@@ -1468,6 +1481,9 @@ fn writeFileLines(
 ) !bool {
     if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
         defer allocator.free(decoded);
+        if (invert_match) {
+            return writeInvertedFileReports(allocator, writer, searcher, path, decoded, output, output_format, max_count);
+        }
         if (context_before != 0 or context_after != 0) {
             return writeFileReportsWithContext(
                 allocator,
@@ -1484,6 +1500,9 @@ fn writeFileLines(
         return writeFileReports(allocator, writer, searcher, path, decoded, .utf8, output, output_format, max_count);
     }
 
+    if (invert_match) {
+        return writeInvertedFileReports(allocator, writer, searcher, path, bytes, output, output_format, max_count);
+    }
     if (context_before != 0 or context_after != 0) {
         return writeFileReportsWithContext(
             allocator,
@@ -1500,6 +1519,45 @@ fn writeFileLines(
     return writeFileReports(allocator, writer, searcher, path, bytes, .utf8, output, output_format, max_count);
 }
 
+fn writeInvertedFileReports(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    haystack: []const u8,
+    output: OutputOptions,
+    output_format: OutputFormat,
+    max_count: ?usize,
+) !bool {
+    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
+    defer allocator.free(line_spans);
+
+    var selected_count: usize = 0;
+    for (line_spans, 0..) |line_span, index| {
+        const line = haystack[line_span.start..line_span.end];
+        const is_match = (try searcher.reportFirstMatch(path, line)) != null;
+        if (is_match) continue;
+        if (max_count) |limit| {
+            if (selected_count >= limit) break;
+        }
+        selected_count += 1;
+        const report: zigrep.search.grep.MatchReport = .{
+            .path = path,
+            .line_number = index + 1,
+            .column_number = 1,
+            .line = line,
+            .owned_line = null,
+            .line_span = line_span,
+            .match_span = line_span,
+        };
+        switch (output_format) {
+            .text => try writeReport(writer, report, output),
+            .json => try writeJsonMatchEvent(writer, report, output),
+        }
+    }
+    return selected_count != 0;
+}
+
 fn writeFileCount(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
@@ -1507,6 +1565,7 @@ fn writeFileCount(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
+    invert_match: bool,
     output: OutputOptions,
     output_format: OutputFormat,
     max_count: ?usize,
@@ -1527,6 +1586,20 @@ fn writeFileCount(
     };
 
     var counter = Counter{ .max_count = max_count };
+
+    if (invert_match) {
+        const count = try countInvertedLines(allocator, searcher, path, bytes, encoding, max_count);
+        if (count == 0) return false;
+        switch (output_format) {
+            .text => if (output.with_filename) {
+                try writer.print("{s}:{d}\n", .{ path, count });
+            } else {
+                try writer.print("{d}\n", .{count});
+            },
+            .json => try writeJsonCountEvent(writer, path, count),
+        }
+        return true;
+    }
 
     if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
         defer allocator.free(decoded);
@@ -1553,6 +1626,36 @@ fn writeFileCount(
     return true;
 }
 
+fn countInvertedLines(
+    allocator: std.mem.Allocator,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+    max_count: ?usize,
+) !usize {
+    const haystack = if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded|
+        decoded
+    else
+        bytes;
+    defer if (haystack.ptr != bytes.ptr) allocator.free(haystack);
+
+    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
+    defer allocator.free(line_spans);
+
+    var count: usize = 0;
+    for (line_spans) |line_span| {
+        const line = haystack[line_span.start..line_span.end];
+        const is_match = (try searcher.reportFirstMatch(path, line)) != null;
+        if (is_match) continue;
+        count += 1;
+        if (max_count) |limit| {
+            if (count >= limit) break;
+        }
+    }
+    return count;
+}
+
 fn writeFilePathOnMatch(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
@@ -1560,11 +1663,16 @@ fn writeFilePathOnMatch(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
+    invert_match: bool,
     output: OutputOptions,
     output_format: OutputFormat,
 ) !bool {
-    const report = try reportFileMatch(allocator, searcher, path, bytes, encoding) orelse return false;
-    defer report.deinit(allocator);
+    if (invert_match) {
+        if (try countInvertedLines(allocator, searcher, path, bytes, encoding, null) == 0) return false;
+    } else {
+        const report = try reportFileMatch(allocator, searcher, path, bytes, encoding) orelse return false;
+        defer report.deinit(allocator);
+    }
     switch (output_format) {
         .text => try writePathResult(writer, path, output),
         .json => try writeJsonPathEvent(writer, path, true),
@@ -1579,13 +1687,18 @@ fn writeFilePathWithoutMatch(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
+    invert_match: bool,
     output: OutputOptions,
     output_format: OutputFormat,
 ) !bool {
-    const report = try reportFileMatch(allocator, searcher, path, bytes, encoding);
-    if (report) |found| {
-        found.deinit(allocator);
-        return false;
+    if (invert_match) {
+        if (try countInvertedLines(allocator, searcher, path, bytes, encoding, null) != 0) return false;
+    } else {
+        const report = try reportFileMatch(allocator, searcher, path, bytes, encoding);
+        if (report) |found| {
+            found.deinit(allocator);
+            return false;
+        }
     }
     switch (output_format) {
         .text => try writePathResult(writer, path, output),
@@ -1698,6 +1811,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -V, --version         show program version
         \\  --hidden              include hidden files
         \\  -u, --unrestricted    reduce filtering; repeat to include hidden and binary files
+        \\  -v, --invert-match    select non-matching lines instead of matching lines
         \\  --ignore-file PATH    load ignore rules from PATH
         \\  --no-ignore           disable ignore filtering
         \\  --no-ignore-vcs       ignore VCS ignore files like .gitignore
@@ -1811,6 +1925,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expectEqual(OutputFormat.text, opts.output_format);
             try testing.expectEqual(ReportMode.lines, opts.report_mode);
             try testing.expect(!opts.show_stats);
+            try testing.expect(!opts.invert_match);
         },
         .help => unreachable,
         .version => unreachable,
@@ -2149,6 +2264,22 @@ test "parseArgs accepts heading flag" {
     }
 }
 
+test "parseArgs accepts invert-match flag" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-v", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| try testing.expect(opts.invert_match),
+        .help, .version, .type_list => unreachable,
+    }
+}
+
 test "parseArgs accepts ignore-case and smart-case flags" {
     const testing = std.testing;
 
@@ -2287,6 +2418,19 @@ test "parseArgs rejects invalid numeric flags" {
         "zigrep",
         "--heading",
         "--count",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-v",
+        "--only-matching",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-v",
+        "-C",
+        "1",
         "needle",
     }));
 }
@@ -3140,6 +3284,79 @@ test "runCli count mode respects max-count" {
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli invert-match prints non-matching lines" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one\nskip this\nneedle two\nkeep this\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-v", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2:1:skip this"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:4:1:keep this"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "needle one"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli invert-match count mode counts non-matching lines" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one\nskip this\nneedle two\nkeep this\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-v", "--count", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli invert-match files-without-match mode prints fully matching files" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "all-match.txt",
+        .data = "needle one\nneedle two\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "mixed.txt",
+        .data = "needle one\nskip this\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-v", "--files-without-match", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "all-match.txt\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "mixed.txt\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 

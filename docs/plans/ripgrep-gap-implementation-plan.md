@@ -102,9 +102,9 @@ ecosystem features.
   stderr with searched file counts, matched file counts, searched bytes,
   and skipped binary-file counts.
 
-- [ ] Add passthrough / non-match-printing modes only if justified.
-  This is lower priority than count/context/json, but it is part of the broader
-  ripgrep output surface.
+- [x] Add passthrough / non-match-printing modes only if justified.
+  `zigrep` now supports `-v/--invert-match` as the justified first
+  non-match-printing mode for line, count, and file-selection output.
 
 ### Zig-specific guidance
 
