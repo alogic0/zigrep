@@ -1086,6 +1086,54 @@ test "runCli text mode retries invalid UTF-8 files through lossy sanitizing" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli default mode still searches invalid UTF-8 files classified as text" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "textish.bin",
+        .data = "xx\xffneedleyy",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 1), run.exit_code);
+    try testing.expectEqualStrings("", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli skips control-heavy binary payloads by default but searches them with text mode" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const payload = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 'n', 'e', 'e', 'd', 'l', 'e', '\n' };
+    try tmp.dir.writeFile(.{
+        .sub_path = "control-heavy.bin",
+        .data = &payload,
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const default_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer default_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), default_run.exit_code);
+    try testing.expectEqualStrings("", default_run.stdout);
+
+    const text_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "needle", root_path });
+    defer text_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), text_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, text_run.stdout, 1, "control-heavy.bin:1:9:"));
+}
+
 test "reportFileMatch only owns line bytes for lossy text-mode fallback" {
     const testing = std.testing;
 

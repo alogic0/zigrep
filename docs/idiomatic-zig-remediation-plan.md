@@ -48,11 +48,11 @@ encoding behavior without rewriting the whole architecture around generic
 ## Priority 5: Encoding And Byte-Oriented Search Work
 
 - [ ] Keep [docs/rg-binary-encoding-plan.md](/home/oleg/prog/zigrep/docs/rg-binary-encoding-plan.md) as the main long-term roadmap
-- [ ] Add more regression tests around invalid UTF-8 under default mode and `--text`
-- [ ] Add more regression tests around binary-file heuristics
+- [x] Add more regression tests around invalid UTF-8 under default mode and `--text`
+- [x] Add more regression tests around binary-file heuristics
 - [ ] Design a true byte-oriented search path
 - [ ] Define regex semantics for invalid UTF-8 input
-- [ ] Add BOM detection
+- [x] Add BOM detection
 - [ ] Add UTF-16LE and UTF-16BE decoding support
 - [ ] Add explicit encoding configuration
 - [ ] Normalize output behavior for non-UTF-8 matches
@@ -101,3 +101,8 @@ encoding behavior without rewriting the whole architecture around generic
 - The current line-number path intentionally does not build a line index yet,
   because the CLI still reports only the first match per file.
 - Buffered and mmap-backed reads now have explicit report-equivalence coverage.
+- Priority 5 regression coverage now pins down the current behavior for invalid
+  UTF-8 text-like files and for control-byte-heavy binary heuristics under
+  default mode versus `--text`.
+- The search I/O layer now has explicit BOM detection for UTF-8, UTF-16LE, and
+  UTF-16BE inputs, which gives the later encoding work a concrete entry point.

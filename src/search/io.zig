@@ -20,6 +20,13 @@ pub const BinaryOptions = struct {
     control_threshold: usize = 8,
 };
 
+pub const Bom = enum {
+    none,
+    utf8,
+    utf16_le,
+    utf16_be,
+};
+
 pub const OwnedBuffer = struct {
     bytes: []u8,
 
@@ -87,6 +94,13 @@ pub fn detectBinary(bytes: []const u8, options: BinaryOptions) BinaryDecision {
         }
     }
     return .text;
+}
+
+pub fn detectBom(bytes: []const u8) Bom {
+    if (std.mem.startsWith(u8, bytes, "\xef\xbb\xbf")) return .utf8;
+    if (std.mem.startsWith(u8, bytes, "\xff\xfe")) return .utf16_le;
+    if (std.mem.startsWith(u8, bytes, "\xfe\xff")) return .utf16_be;
+    return .none;
 }
 
 pub fn detectBinaryFile(path: []const u8, options: BinaryOptions) !BinaryDecision {
@@ -188,6 +202,34 @@ test "binary detector obeys sampling limits" {
     try testing.expectEqual(BinaryDecision.binary, detectBinary(&bytes, .{
         .sample_limit = bytes.len,
     }));
+}
+
+test "binary detector does not treat isolated invalid UTF-8 bytes as binary by themselves" {
+    const testing = std.testing;
+
+    try testing.expectEqual(BinaryDecision.text, detectBinary("xx\xffneedleyy", .{}));
+}
+
+test "binary detector threshold controls suspicious control-byte classification" {
+    const testing = std.testing;
+
+    const bytes = [_]u8{ 1, 2, 3, 'n', 'e', 'e', 'd', 'l', 'e' };
+    try testing.expectEqual(BinaryDecision.text, detectBinary(&bytes, .{
+        .control_threshold = 4,
+    }));
+    try testing.expectEqual(BinaryDecision.binary, detectBinary(&bytes, .{
+        .control_threshold = 3,
+    }));
+}
+
+test "BOM detector recognizes common Unicode BOMs" {
+    const testing = std.testing;
+
+    try testing.expectEqual(Bom.utf8, detectBom("\xef\xbb\xbfhello"));
+    try testing.expectEqual(Bom.utf16_le, detectBom("\xff\xfeh\x00i\x00"));
+    try testing.expectEqual(Bom.utf16_be, detectBom("\xfe\xff\x00h\x00i"));
+    try testing.expectEqual(Bom.none, detectBom("plain text"));
+    try testing.expectEqual(Bom.none, detectBom(""));
 }
 
 test "buffered I/O reads whole files into owned buffers" {
