@@ -142,3 +142,12 @@ encoding behavior without rewriting the whole architecture around generic
   files instead of silently degrading those planner-covered cases to no-match,
   which removes another practical false-negative path without widening the
   lossy retry itself.
+- Literal-only UTF-8 classes now ride the same raw-byte planner too, so cases
+  like `[ж]` and `[жё]{2}` no longer fall through to the lossy retry or to
+  default-mode no-match just because the file also contains unrelated invalid
+  bytes. Unicode ranges and negated non-ASCII classes remain outside the
+  planner for now.
+- Small positive UTF-8 ranges now ride that planner too, so practical cases
+  like `[а-я]` no longer fall through to the lossy retry or to default-mode
+  no-match. The remaining class gap is now concentrated in negated non-ASCII
+  classes and larger Unicode ranges.

@@ -171,6 +171,13 @@ pub const Searcher = struct {
             .end = found.span.end,
         });
     }
+
+    pub fn hasBytePlan(self: *const Searcher) bool {
+        return switch (self.byte_plan) {
+            .none => false,
+            .single, .alternation => true,
+        };
+    }
 };
 
 pub fn reportFirstMatch(
@@ -214,6 +221,7 @@ const AnchoredLiteralMode = enum {
 };
 
 const BytePlanError = std.mem.Allocator.Error;
+const max_expanded_byte_class_range: u32 = 256;
 
 fn extractByteSearchPlan(allocator: std.mem.Allocator, hir: regex.Hir) BytePlanError!ByteSearchPlan {
     return switch (hir.nodes[@intFromEnum(hir.root)]) {
@@ -254,15 +262,22 @@ fn extractBytePattern(
             break :blk pattern;
         },
         .literal, .dot, .char_class, .repetition => blk: {
+            var keep_terms = false;
             var terms: std.ArrayList(ByteTerm) = .empty;
             defer terms.deinit(allocator);
-            errdefer for (terms.items) |term| term.deinit(allocator);
+            defer {
+                if (!keep_terms) {
+                    for (terms.items) |term| term.deinit(allocator);
+                }
+            }
             var literal_bytes: std.ArrayList(u8) = .empty;
             defer literal_bytes.deinit(allocator);
 
             if (!(try appendNodeToByteTerms(allocator, nodes, root, &terms, &literal_bytes))) break :blk null;
             try flushLiteralTerm(allocator, &terms, &literal_bytes);
             if (terms.items.len == 0) break :blk null;
+
+            keep_terms = true;
 
             break :blk .{
                 .mode = .contains,
@@ -297,9 +312,14 @@ fn extractBytePattern(
                 };
             }
 
+            var keep_terms = false;
             var terms: std.ArrayList(ByteTerm) = .empty;
             defer terms.deinit(allocator);
-            errdefer for (terms.items) |term| term.deinit(allocator);
+            defer {
+                if (!keep_terms) {
+                    for (terms.items) |term| term.deinit(allocator);
+                }
+            }
 
             var literal_bytes: std.ArrayList(u8) = .empty;
             defer literal_bytes.deinit(allocator);
@@ -309,6 +329,8 @@ fn extractBytePattern(
             }
             try flushLiteralTerm(allocator, &terms, &literal_bytes);
             if (terms.items.len == 0) break :blk null;
+
+            keep_terms = true;
 
             break :blk .{
                 .mode = if (prefix_anchor and suffix_anchor)
@@ -343,8 +365,7 @@ fn appendNodeToByteTerms(
             return true;
         },
         .literal => |cp| {
-            if (cp > 0x7f) return false;
-            try literal_bytes.append(allocator, @as(u8, @intCast(cp)));
+            try appendCodePointUtf8(allocator, literal_bytes, cp);
             return true;
         },
         .dot => {
@@ -353,19 +374,25 @@ fn appendNodeToByteTerms(
             return true;
         },
         .char_class => |class| {
-            if (!isAsciiClass(class)) return false;
             try flushLiteralTerm(allocator, terms, literal_bytes);
-            const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
-            @memcpy(duped_items, class.items);
-            try terms.append(allocator, .{
-                .atom = .{
-                    .class = .{
-                        .negated = class.negated,
-                        .items = duped_items,
+            if (isAsciiClass(class)) {
+                const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
+                @memcpy(duped_items, class.items);
+                try terms.append(allocator, .{
+                    .atom = .{
+                        .class = .{
+                            .negated = class.negated,
+                            .items = duped_items,
+                        },
                     },
-                },
-            });
-            return true;
+                });
+                return true;
+            }
+            if (try classToByteTerm(allocator, class)) |term| {
+                try terms.append(allocator, term);
+                return true;
+            }
+            return false;
         },
         .repetition => |rep| {
             if (try extractRepeatableByteTerm(allocator, nodes, rep.child, rep.quantifier)) |term| {
@@ -419,10 +446,7 @@ fn extractRepeatableByteTerm(
     }
 
     const atom = switch (nodes[@intFromEnum(node_id)]) {
-        .literal => |cp| if (cp <= 0x7f)
-            ByteAtom{ .literal = try allocator.dupe(u8, &[_]u8{@as(u8, @intCast(cp))}) }
-        else
-            return null,
+        .literal => |cp| ByteAtom{ .literal = try dupeCodePointUtf8(allocator, cp) },
         .concat => |children| blk: {
             var pattern = try extractBytePattern(allocator, nodes, node_id) orelse return null;
             defer pattern.deinit(allocator);
@@ -451,15 +475,21 @@ fn extractRepeatableByteTerm(
         },
         .dot => ByteAtom.any_byte,
         .char_class => |class| blk: {
-            if (!isAsciiClass(class)) return null;
-            const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
-            @memcpy(duped_items, class.items);
-            break :blk ByteAtom{
-                .class = .{
-                    .negated = class.negated,
-                    .items = duped_items,
-                },
-            };
+            if (isAsciiClass(class)) {
+                const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
+                @memcpy(duped_items, class.items);
+                break :blk ByteAtom{
+                    .class = .{
+                        .negated = class.negated,
+                        .items = duped_items,
+                    },
+                };
+            }
+            if (try classToByteTerm(allocator, class)) |term| {
+                if (term.min != 1 or term.max == null or term.max.? != 1) return null;
+                break :blk term.atom;
+            }
+            return null;
         },
         else => return null,
     };
@@ -503,6 +533,55 @@ fn extractAlternationByteTerm(
     };
 }
 
+fn classToByteTerm(
+    allocator: std.mem.Allocator,
+    class: regex.hir.CharacterClass,
+) BytePlanError!?ByteTerm {
+    if (class.negated) return null;
+    if (class.items.len == 0) return null;
+
+    var patterns: std.ArrayList(BytePattern) = .empty;
+    defer patterns.deinit(allocator);
+    errdefer for (patterns.items) |pattern| pattern.deinit(allocator);
+
+    for (class.items) |item| {
+        switch (item) {
+            .literal => |cp| try patterns.append(allocator, try bytePatternForLiteralCodePoint(allocator, cp)),
+            .range => |range| {
+                const span = range.end - range.start + 1;
+                if (span > max_expanded_byte_class_range) return null;
+
+                var cp = range.start;
+                while (cp <= range.end) : (cp += 1) {
+                    try patterns.append(allocator, try bytePatternForLiteralCodePoint(allocator, cp));
+                }
+            },
+        }
+    }
+
+    return .{
+        .atom = .{ .alternation = try patterns.toOwnedSlice(allocator) },
+        .min = 1,
+        .max = 1,
+    };
+}
+
+fn bytePatternForLiteralCodePoint(
+    allocator: std.mem.Allocator,
+    cp: u32,
+) BytePlanError!BytePattern {
+    const terms = try allocator.alloc(ByteTerm, 1);
+    terms[0] = .{
+        .atom = .{
+            .literal = try dupeCodePointUtf8(allocator, cp),
+        },
+    };
+    return .{
+        .mode = .contains,
+        .terms = terms,
+    };
+}
+
 fn wrapPatternWithCapture(
     allocator: std.mem.Allocator,
     pattern: BytePattern,
@@ -527,6 +606,24 @@ fn flushLiteralTerm(
 ) BytePlanError!void {
     if (literal_bytes.items.len == 0) return;
     try terms.append(allocator, .{ .atom = .{ .literal = try literal_bytes.toOwnedSlice(allocator) } });
+}
+
+fn appendCodePointUtf8(
+    allocator: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    cp: u32,
+) BytePlanError!void {
+    var buf: [4]u8 = undefined;
+    const scalar: u21 = @intCast(cp);
+    const len = std.unicode.utf8Encode(scalar, &buf) catch unreachable;
+    try out.appendSlice(allocator, buf[0..len]);
+}
+
+fn dupeCodePointUtf8(allocator: std.mem.Allocator, cp: u32) BytePlanError![]u8 {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(allocator);
+    try appendCodePointUtf8(allocator, &bytes, cp);
+    return bytes.toOwnedSlice(allocator);
 }
 
 fn findByteAlternationSpan(patterns: []const BytePattern, haystack: []const u8) ?Span {
@@ -954,6 +1051,71 @@ test "Searcher can report exact literal matches on invalid UTF-8 through byte fa
     try testing.expectEqual(Span{ .start = 3, .end = 9 }, report.match_span);
 }
 
+test "Searcher byte fallback supports UTF-8 literal patterns" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "жар", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8.bin", "xx\xffжарyy")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 4), report.column_number);
+    try testing.expectEqual(Span{ .start = 3, .end = 9 }, report.match_span);
+}
+
+test "Searcher byte fallback supports literal-only UTF-8 classes" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "[ж]", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-class.bin", "xx\xffжyy")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 4), report.column_number);
+    try testing.expectEqual(Span{ .start = 3, .end = 5 }, report.match_span);
+}
+
+test "Searcher byte fallback supports repetition over literal-only UTF-8 classes" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "[жё]{2}", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-class.bin", "x\xffжёz")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 6 }, report.match_span);
+}
+
+test "Searcher byte fallback supports small UTF-8 range classes" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "[а-я]", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-range.bin", "xx\xffжyy")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 4), report.column_number);
+    try testing.expectEqual(Span{ .start = 3, .end = 5 }, report.match_span);
+}
+
+test "Searcher byte fallback supports repetition over small UTF-8 range classes" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "[а-я]{2}", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-range.bin", "x\xffжяz")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 6 }, report.match_span);
+}
+
 test "Searcher byte fallback is limited to exact literal patterns" {
     const testing = std.testing;
 
@@ -1162,6 +1324,24 @@ test "Searcher firstByteMatch reports planner-friendly capture groups" {
     try testing.expectEqual(@as(?usize, 4), found.groups[0].end);
     try testing.expectEqual(@as(?usize, 4), found.groups[1].start);
     try testing.expectEqual(@as(?usize, 6), found.groups[1].end);
+}
+
+test "Searcher firstByteMatch preserves UTF-8 literal captures on the byte path" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(ж)(ар)", .{});
+    defer searcher.deinit();
+
+    const found = (try searcher.firstByteMatch("xx\xffжарyy")).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(?usize, 3), found.span.start);
+    try testing.expectEqual(@as(?usize, 9), found.span.end);
+    try testing.expectEqual(@as(usize, 2), found.groups.len);
+    try testing.expectEqual(@as(?usize, 3), found.groups[0].start);
+    try testing.expectEqual(@as(?usize, 5), found.groups[0].end);
+    try testing.expectEqual(@as(?usize, 5), found.groups[1].start);
+    try testing.expectEqual(@as(?usize, 9), found.groups[1].end);
 }
 
 test "Searcher byte fallback supports repetition over grouped literal subpatterns" {

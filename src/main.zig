@@ -1289,11 +1289,55 @@ test "runCli default mode still returns no match for invalid UTF-8 patterns outs
     const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
     defer testing.allocator.free(root_path);
 
-    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a[ж]b", root_path });
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a[^ж]b", root_path });
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 1), run.exit_code);
     try testing.expectEqualStrings("", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches literal-only UTF-8 classes through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf8-class.bin",
+        .data = "xx\xffжyy\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "[ж]", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-class.bin:1:4:xx\\xFFжyy"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches small UTF-8 range classes through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf8-range.bin",
+        .data = "xx\xffжyy\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "[а-я]", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-range.bin:1:4:xx\\xFFжyy"));
     try testing.expectEqualStrings("", run.stderr);
 }
 

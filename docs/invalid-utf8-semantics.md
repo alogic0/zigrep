@@ -25,7 +25,8 @@ path. The long-term replacement plan remains in
   just ASCII-only literals.
 - The current raw-byte path also covers simple concat sequences built from
   literals, dots, and character classes, such as `a[0-9]b`, `a[^x]b`,
-  `a.[0-9]b`, and `жар`.
+  `a.[0-9]b`, `жар`, literal-only UTF-8 classes like `[ж]`, and small
+  positive UTF-8 ranges like `[а-я]`.
 - Repetition over that same ASCII subset is also supported when it applies to a
   single literal, dot, or class atom, including `+`, `*`, `?`, and counted
   forms such as `ab+c`, `a.*b`, `a[0-9]{1,3}b`, and `a.{2}[0-9]{2}b`.
@@ -61,6 +62,11 @@ Under the current invalid-UTF-8 behavior:
   over that subset, plus empty branches including inside quantified grouped
   alternation and anchored empty matches, match against the original file
   bytes.
+- Literal-only UTF-8 classes are part of that subset when they are positive
+  sets of explicit code points like `[ж]` or `[жё]`. Small positive UTF-8
+  ranges are also part of it when they can be expanded safely, such as
+  `[а-я]`. Negated non-ASCII classes and larger Unicode ranges still fall
+  outside the current byte planner.
 - Planner-friendly capture groups on that raw-byte subset keep capture spans
   instead of degrading to whole-match-only reporting.
 - Under `--text`, patterns outside that subset still retry through the lossy
