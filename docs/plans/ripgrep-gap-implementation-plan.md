@@ -151,9 +151,10 @@ ecosystem features.
   `zigrep` now supports `latin1` as the first explicit single-byte text
   encoding beyond UTF-8 and UTF-16.
 
-- [ ] Revisit binary detection behavior under mmap vs buffered reads.
-  ripgrep documents subtle differences here; `zigrep` should decide whether to
-  normalize behavior or document intentional differences.
+- [x] Revisit binary detection behavior under mmap vs buffered reads.
+  `zigrep` now treats binary detection as read-strategy-independent by using a
+  separate sampling pass before buffered or mmap-backed file reads, and this
+  parity is covered by end-to-end tests.
 
 ### Zig-specific guidance
 

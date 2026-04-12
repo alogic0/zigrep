@@ -4868,3 +4868,62 @@ test "runCli search output stays equivalent across allocator and read strategy p
     try testing.expectEqualStrings(sequential_buffered.stderr, sequential_mmap.stderr);
     try testing.expectEqualStrings(sequential_buffered.stderr, parallel_mmap.stderr);
 }
+
+test "runCli binary detection stays consistent across buffered and mmap reads" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "binary.bin",
+        .data = "xx\x00needleyy",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const buffered_default = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--buffered",
+        "needle",
+        root_path,
+    });
+    defer buffered_default.deinit(testing.allocator);
+
+    const mmap_default = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--mmap",
+        "needle",
+        root_path,
+    });
+    defer mmap_default.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 1), buffered_default.exit_code);
+    try testing.expectEqual(@as(u8, 1), mmap_default.exit_code);
+    try testing.expectEqualStrings(buffered_default.stdout, mmap_default.stdout);
+    try testing.expectEqualStrings(buffered_default.stderr, mmap_default.stderr);
+
+    const buffered_binary = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--buffered",
+        "--binary",
+        "needle",
+        root_path,
+    });
+    defer buffered_binary.deinit(testing.allocator);
+
+    const mmap_binary = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--mmap",
+        "--binary",
+        "needle",
+        root_path,
+    });
+    defer mmap_binary.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), buffered_binary.exit_code);
+    try testing.expectEqual(@as(u8, 0), mmap_binary.exit_code);
+    try testing.expectEqualStrings(buffered_binary.stdout, mmap_binary.stdout);
+    try testing.expectEqualStrings(buffered_binary.stderr, mmap_binary.stderr);
+}

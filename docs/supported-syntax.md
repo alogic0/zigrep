@@ -147,6 +147,7 @@ Practical guidance:
 - use `--buffered` if you want the most conservative behavior
 - use `--mmap` if you want normal fast behavior on regular files
 - if you are unsure, the default behavior is already reasonable for typical use
+- binary-file detection is intentionally normalized across `--buffered` and `--mmap`
 
 `--glob` note:
 
