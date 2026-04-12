@@ -1797,3 +1797,67 @@ test "runCli parallel and sequential modes produce the same output set" {
     try testing.expectEqual(@as(u8, 0), parallel.exit_code);
     try testing.expectEqualStrings(sequential.stdout, parallel.stdout);
 }
+
+test "runCli search output stays equivalent across allocator and read strategy paths" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ascii.txt",
+        .data = "prefix needle suffix\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "invalid.bin",
+        .data = "xx\xffneedleyy\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf16le.txt",
+        .data = "\xff\xfen\x00e\x00e\x00d\x00l\x00e\x00\n\x00",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const sequential_buffered = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--text",
+        "--buffered",
+        "-j",
+        "1",
+        "needle",
+        root_path,
+    });
+    defer sequential_buffered.deinit(testing.allocator);
+
+    const sequential_mmap = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--text",
+        "--mmap",
+        "-j",
+        "1",
+        "needle",
+        root_path,
+    });
+    defer sequential_mmap.deinit(testing.allocator);
+
+    const parallel_mmap = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--text",
+        "--mmap",
+        "-j",
+        "4",
+        "needle",
+        root_path,
+    });
+    defer parallel_mmap.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), sequential_buffered.exit_code);
+    try testing.expectEqual(@as(u8, 0), sequential_mmap.exit_code);
+    try testing.expectEqual(@as(u8, 0), parallel_mmap.exit_code);
+    try testing.expectEqualStrings(sequential_buffered.stdout, sequential_mmap.stdout);
+    try testing.expectEqualStrings(sequential_buffered.stdout, parallel_mmap.stdout);
+    try testing.expectEqualStrings(sequential_buffered.stderr, sequential_mmap.stderr);
+    try testing.expectEqualStrings(sequential_buffered.stderr, parallel_mmap.stderr);
+}

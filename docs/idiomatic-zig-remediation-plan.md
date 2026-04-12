@@ -62,17 +62,17 @@ encoding behavior without rewriting the whole architecture around generic
 
 - [x] Write `docs/tmp/error-policy.md` describing the skip/fail/warn rules
 - [x] Add tests proving sequential and parallel search behave the same under error conditions
-- [ ] Add tests proving allocator-boundary refactors do not change search output
-- [ ] Document any user-visible behavior changes in `README.md` and `docs/supported-syntax.md`
-- [ ] Benchmark reporting-path changes with `zig build bench` before and after
+- [x] Add tests proving allocator-boundary refactors do not change search output
+- [x] Document any user-visible behavior changes in `README.md` and `docs/supported-syntax.md`
+- [x] Benchmark reporting-path changes with `zig build bench` before and after
 
 ## Suggested Execution Order
 
-- [ ] Finish Priority 1 before changing allocator structure
-- [ ] Finish Priority 2 before larger reporting-path refactors
-- [ ] Finish Priority 3 before deeper encoding work
-- [ ] Finish Priority 4 as part of reporting cleanup
-- [ ] Treat Priority 5 as a dedicated longer-term track
+- [x] Finish Priority 1 before changing allocator structure
+- [x] Finish Priority 2 before larger reporting-path refactors
+- [x] Finish Priority 3 before deeper encoding work
+- [x] Finish Priority 4 as part of reporting cleanup
+- [x] Treat Priority 5 as a dedicated longer-term track
 
 ## Progress Notes
 
