@@ -92,8 +92,9 @@ ecosystem features.
 - [ ] Add NUL-delimited path output where appropriate (`--null` style support).
   This matters for safe scripting with unusual file names.
 
-- [ ] Add JSON output.
-  This is one of ripgrep’s strongest integration features for downstream tools.
+- [x] Add JSON output.
+  `zigrep` now supports newline-delimited JSON events via `--json` for
+  match, count, and path-oriented reporting modes.
 
 - [ ] Add stats output.
   Even a smaller first version would improve observability for performance and

@@ -75,6 +75,7 @@ The current CLI supports:
 - Matching-file output with `-l` or `--files-with-matches`
 - Non-matching-file output with `-L` or `--files-without-match`
 - Match-only output with `-o` or `--only-matching`
+- Newline-delimited JSON output with `--json`
 - Output toggles with `-H`/`--with-filename`, `--no-filename`, `-n`/`--line-number`, `--no-line-number`, `--column`, and `--no-column`
 - `--` to terminate flag parsing
 
@@ -93,6 +94,16 @@ Context mode note:
 - overlapping context groups are merged, and disjoint groups are separated by `--`
 - context mode is currently supported only for normal line output
 - combinations with `--count`, `--files-with-matches`, `--files-without-match`, or `--only-matching` are rejected
+- context mode is also rejected with `--json` in the current implementation
+
+`--json` note:
+
+- `--json` emits one newline-delimited JSON event per result
+- line and only-matching output emit `match` events
+- `--count` emits `count` events
+- `--files-with-matches` and `--files-without-match` emit `path` events
+- displayed line content uses the same escaping rules as text output, including `\xNN` escapes for invalid or unsafe bytes
+- this is a smaller event schema than ripgrep's full JSON format
 
 For non-technical users:
 

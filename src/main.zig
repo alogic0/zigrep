@@ -18,6 +18,11 @@ pub const OutputOptions = struct {
     only_matching: bool = false,
 };
 
+const OutputFormat = enum {
+    text,
+    json,
+};
+
 const ReportMode = enum {
     lines,
     count,
@@ -48,6 +53,7 @@ pub const CliOptions = struct {
     context_before: usize = 0,
     context_after: usize = 0,
     output: OutputOptions = .{},
+    output_format: OutputFormat = .text,
     report_mode: ReportMode = .lines,
     buffer_output: bool = false,
 
@@ -177,6 +183,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var context_before: usize = 0;
     var context_after: usize = 0;
     var output: OutputOptions = .{};
+    var output_format: OutputFormat = .text;
     var report_mode: ReportMode = .lines;
     var pattern: ?[]const u8 = null;
     var show_type_list = false;
@@ -229,6 +236,10 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "--type-list")) {
                 show_type_list = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--json")) {
+                output_format = .json;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--type-add")) {
@@ -400,6 +411,9 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     if ((context_before != 0 or context_after != 0) and (report_mode != .lines or output.only_matching)) {
         return error.InvalidFlagCombination;
     }
+    if (output_format == .json and (context_before != 0 or context_after != 0)) {
+        return error.InvalidFlagCombination;
+    }
 
     const owned_paths = try paths.toOwnedSlice(allocator);
     errdefer allocator.free(owned_paths);
@@ -435,6 +449,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .context_before = context_before,
         .context_after = context_after,
         .output = output,
+        .output_format = output_format,
         .report_mode = report_mode,
     } };
 }
@@ -761,6 +776,7 @@ fn searchEntriesSequential(
             buffer.bytes(),
             options.encoding,
             options.output,
+            options.output_format,
             options.report_mode,
             options.max_count,
             options.context_before,
@@ -876,6 +892,7 @@ fn searchEntriesParallel(
                 buffer.bytes(),
                 self.options.encoding,
                 self.options.output,
+                self.options.output_format,
                 self.options.report_mode,
                 self.options.max_count,
                 self.options.context_before,
@@ -945,6 +962,90 @@ fn printReport(
     try writeReport(stdout, report, output);
 }
 
+fn writeJsonString(writer: *std.Io.Writer, bytes: []const u8) !void {
+    try writer.writeByte('"');
+
+    var index: usize = 0;
+    while (index < bytes.len) {
+        const byte = bytes[index];
+        if (byte < 0x80) {
+            switch (byte) {
+                '"' => try writer.writeAll("\\\""),
+                '\\' => try writer.writeAll("\\\\"),
+                '\n' => try writer.writeAll("\\n"),
+                '\r' => try writer.writeAll("\\r"),
+                '\t' => try writer.writeAll("\\t"),
+                else => {
+                    if (isDisplaySafeAscii(byte)) {
+                        try writer.writeByte(byte);
+                    } else {
+                        try writer.print("\\\\x{X:0>2}", .{byte});
+                    }
+                },
+            }
+            index += 1;
+            continue;
+        }
+
+        const sequence_len = std.unicode.utf8ByteSequenceLength(byte) catch {
+            try writer.print("\\\\x{X:0>2}", .{byte});
+            index += 1;
+            continue;
+        };
+        if (index + sequence_len > bytes.len) {
+            try writer.print("\\\\x{X:0>2}", .{byte});
+            index += 1;
+            continue;
+        }
+
+        const sequence = bytes[index .. index + sequence_len];
+        _ = std.unicode.utf8Decode(sequence) catch {
+            try writer.print("\\\\x{X:0>2}", .{byte});
+            index += 1;
+            continue;
+        };
+        try writer.writeAll(sequence);
+        index += sequence_len;
+    }
+
+    try writer.writeByte('"');
+}
+
+fn writeJsonMatchEvent(
+    writer: *std.Io.Writer,
+    report: zigrep.search.grep.MatchReport,
+    output: OutputOptions,
+) !void {
+    const display_slice = if (output.only_matching)
+        report.line[report.match_span.start - report.line_span.start .. report.match_span.end - report.line_span.start]
+    else
+        report.line;
+
+    try writer.writeAll("{\"type\":\"match\",\"data\":{");
+    try writer.writeAll("\"path\":");
+    try writeJsonString(writer, report.path);
+    try writer.print(",\"line_number\":{d},\"column_number\":{d}", .{ report.line_number, report.column_number });
+    try writer.writeAll(",\"line\":");
+    try writeJsonString(writer, display_slice);
+    try writer.print(",\"line_span\":{{\"start\":{d},\"end\":{d}}}", .{ report.line_span.start, report.line_span.end });
+    try writer.print(",\"match_span\":{{\"start\":{d},\"end\":{d}}}", .{ report.match_span.start, report.match_span.end });
+    try writer.writeAll("}}\n");
+}
+
+fn writeJsonCountEvent(writer: *std.Io.Writer, path: []const u8, count: usize) !void {
+    try writer.writeAll("{\"type\":\"count\",\"data\":{");
+    try writer.writeAll("\"path\":");
+    try writeJsonString(writer, path);
+    try writer.print(",\"count\":{d}}}\n", .{count});
+}
+
+fn writeJsonPathEvent(writer: *std.Io.Writer, path: []const u8, matched: bool) !void {
+    try writer.writeAll("{\"type\":\"path\",\"data\":{");
+    try writer.writeAll("\"path\":");
+    try writeJsonString(writer, path);
+    try writer.print(",\"matched\":{s}}}\n", .{if (matched) "true" else "false"});
+}
+
 fn writeReport(
     writer: *std.Io.Writer,
     report: zigrep.search.grep.MatchReport,
@@ -1006,6 +1107,7 @@ fn writeFileReports(
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
     output: OutputOptions,
+    output_format: OutputFormat,
     max_count: ?usize,
 ) !bool {
     if (output.only_matching) {
@@ -1017,6 +1119,7 @@ fn writeFileReports(
         allocator: std.mem.Allocator,
         writer: *std.Io.Writer,
         output: OutputOptions,
+        output_format: OutputFormat,
         max_count: ?usize,
         matched_lines: usize = 0,
         last_line_start: ?usize = null,
@@ -1039,7 +1142,10 @@ fn writeFileReports(
             if (report.owned_line) |line| {
                 defer self.allocator.free(line);
             }
-            try writeReport(self.writer, report, self.output);
+            switch (self.output_format) {
+                .text => try writeReport(self.writer, report, self.output),
+                .json => try writeJsonMatchEvent(self.writer, report, self.output),
+            }
         }
     };
 
@@ -1047,6 +1153,7 @@ fn writeFileReports(
         .allocator = allocator,
         .writer = writer,
         .output = .{},
+        .output_format = output_format,
         .max_count = max_count,
     };
     context.output = output;
@@ -1203,6 +1310,7 @@ fn writeFileOutput(
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
     output: OutputOptions,
+    output_format: OutputFormat,
     report_mode: ReportMode,
     max_count: ?usize,
     context_before: usize,
@@ -1217,13 +1325,14 @@ fn writeFileOutput(
             bytes,
             encoding,
             output,
+            output_format,
             max_count,
             context_before,
             context_after,
         ),
-        .count => writeFileCount(allocator, writer, searcher, path, bytes, encoding, output, max_count),
-        .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding),
-        .files_without_match => writeFilePathWithoutMatch(allocator, writer, searcher, path, bytes, encoding),
+        .count => writeFileCount(allocator, writer, searcher, path, bytes, encoding, output, output_format, max_count),
+        .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding, output_format),
+        .files_without_match => writeFilePathWithoutMatch(allocator, writer, searcher, path, bytes, encoding, output_format),
     };
 }
 
@@ -1235,6 +1344,7 @@ fn writeFileLines(
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
     output: OutputOptions,
+    output_format: OutputFormat,
     max_count: ?usize,
     context_before: usize,
     context_after: usize,
@@ -1254,7 +1364,7 @@ fn writeFileLines(
                 context_after,
             );
         }
-        return writeFileReports(allocator, writer, searcher, path, decoded, .utf8, output, max_count);
+        return writeFileReports(allocator, writer, searcher, path, decoded, .utf8, output, output_format, max_count);
     }
 
     if (context_before != 0 or context_after != 0) {
@@ -1270,7 +1380,7 @@ fn writeFileLines(
             context_after,
         );
     }
-    return writeFileReports(allocator, writer, searcher, path, bytes, .utf8, output, max_count);
+    return writeFileReports(allocator, writer, searcher, path, bytes, .utf8, output, output_format, max_count);
 }
 
 fn writeFileCount(
@@ -1281,6 +1391,7 @@ fn writeFileCount(
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
     output: OutputOptions,
+    output_format: OutputFormat,
     max_count: ?usize,
 ) !bool {
     const IterationStop = error{MaxCountReached};
@@ -1314,10 +1425,13 @@ fn writeFileCount(
     }
 
     if (counter.count == 0) return false;
-    if (output.with_filename) {
-        try writer.print("{s}:{d}\n", .{ path, counter.count });
-    } else {
-        try writer.print("{d}\n", .{counter.count});
+    switch (output_format) {
+        .text => if (output.with_filename) {
+            try writer.print("{s}:{d}\n", .{ path, counter.count });
+        } else {
+            try writer.print("{d}\n", .{counter.count});
+        },
+        .json => try writeJsonCountEvent(writer, path, counter.count),
     }
     return true;
 }
@@ -1329,10 +1443,14 @@ fn writeFilePathOnMatch(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
+    output_format: OutputFormat,
 ) !bool {
     const report = try reportFileMatch(allocator, searcher, path, bytes, encoding) orelse return false;
     defer report.deinit(allocator);
-    try writer.print("{s}\n", .{path});
+    switch (output_format) {
+        .text => try writer.print("{s}\n", .{path}),
+        .json => try writeJsonPathEvent(writer, path, true),
+    }
     return true;
 }
 
@@ -1343,13 +1461,17 @@ fn writeFilePathWithoutMatch(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
+    output_format: OutputFormat,
 ) !bool {
     const report = try reportFileMatch(allocator, searcher, path, bytes, encoding);
     if (report) |found| {
         found.deinit(allocator);
         return false;
     }
-    try writer.print("{s}\n", .{path});
+    switch (output_format) {
+        .text => try writer.print("{s}\n", .{path}),
+        .json => try writeJsonPathEvent(writer, path, false),
+    }
     return true;
 }
 
@@ -1487,6 +1609,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -L, --files-without-match
         \\                        print only non-matching file paths
         \\  -o, --only-matching   print only the matched text
+        \\  --json                emit newline-delimited JSON events
         \\  -H, --with-filename   always print the file path
         \\  --no-filename         suppress the file path prefix
         \\  -n, --line-number     print line numbers
@@ -1561,6 +1684,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(opts.output.line_number);
             try testing.expect(opts.output.column_number);
             try testing.expect(!opts.output.only_matching);
+            try testing.expectEqual(OutputFormat.text, opts.output_format);
             try testing.expectEqual(ReportMode.lines, opts.report_mode);
         },
         .help => unreachable,
@@ -1826,6 +1950,25 @@ test "parseArgs accepts unrestricted flags" {
     }
 }
 
+test "parseArgs accepts json output flag" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--json", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(OutputFormat.json, opts.output_format);
+            try testing.expectEqual(ReportMode.lines, opts.report_mode);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
 test "parseArgs accepts ignore-case and smart-case flags" {
     const testing = std.testing;
 
@@ -1938,6 +2081,13 @@ test "parseArgs rejects invalid numeric flags" {
         "zigrep",
         "--only-matching",
         "-A",
+        "1",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--json",
+        "-C",
         "1",
         "needle",
     }));
@@ -2849,6 +2999,57 @@ test "runCli files-without-match mode prints only non-matching file paths" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli json mode emits match events" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--json", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"match\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_number\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line\":\"needle one\""));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli json count mode emits count events" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one\nneedle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--json", "--count", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"count\":2"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli only-matching mode prints each match occurrence" {
     const testing = std.testing;
 
@@ -3708,6 +3909,7 @@ test "writeFileReports does not require owned line bytes for decoded multi-line 
         utf16le,
         .auto,
         .{},
+        .text,
         null,
     );
 
