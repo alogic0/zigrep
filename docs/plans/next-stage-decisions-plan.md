@@ -105,21 +105,21 @@ maintenance cost.
 
 ### Phase 5: End-To-End Validation
 
-- [ ] Add a focused multiline test matrix modeled after ripgrep’s coverage:
+- [x] Add a focused multiline test matrix modeled after ripgrep’s coverage:
   - overlapping multiline matches
   - adjacent multiline matches
   - `.` not matching newline without dotall
   - dotall behavior with `--multiline-dotall`
   - `--only-matching` in multiline mode
   - context output in multiline mode
-  - stdin / non-mmap full-buffer behavior
+  - non-mmap full-buffer behavior
 
-- [ ] Add sequential versus parallel output-equivalence tests for multiline
+- [x] Add sequential versus parallel output-equivalence tests for multiline
   results.
 
-- [ ] Add buffered versus mmap output-equivalence tests for multiline results.
+- [x] Add buffered versus mmap output-equivalence tests for multiline results.
 
-- [ ] Run targeted benchmarks comparing multiline-off versus multiline-on on:
+- [x] Run targeted benchmarks comparing multiline-off versus multiline-on on:
   - UTF-8 text
   - invalid UTF-8 text-like files
   - decoded UTF-16 input

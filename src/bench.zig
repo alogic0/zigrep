@@ -26,6 +26,9 @@ const OutputBenchCase = struct {
     iterations: usize,
     parallel_jobs: ?usize = null,
     buffer_output: bool = false,
+    multiline: bool = false,
+    encoding: zigrep.search.io.InputEncoding = .auto,
+    read_strategy: zigrep.search.io.ReadStrategy = .mmap,
 };
 
 const Result = struct {
@@ -53,7 +56,11 @@ pub fn main() !void {
     const corpus_cases = buildCorpusCases();
     const output_root = try buildOutputBenchCorpus(allocator);
     defer allocator.free(output_root);
-    const output_cases = buildOutputCases(output_root);
+    const output_cases = try buildOutputCases(allocator, output_root);
+    defer {
+        for (output_cases) |bench_case| allocator.free(bench_case.root);
+        allocator.free(output_cases);
+    }
 
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
@@ -215,8 +222,10 @@ fn runOutputCase(allocator: std.mem.Allocator, bench_case: OutputBenchCase) !Res
             .pattern = bench_case.pattern,
             .paths = &.{bench_case.root},
             .parallel_jobs = bench_case.parallel_jobs,
-            .read_strategy = .mmap,
+            .read_strategy = bench_case.read_strategy,
             .buffer_output = bench_case.buffer_output,
+            .multiline = bench_case.multiline,
+            .encoding = bench_case.encoding,
         });
         try stdout.flush();
         try stderr.flush();
@@ -445,39 +454,97 @@ fn buildCorpusCases() []const CorpusBenchCase {
     };
 }
 
-fn buildOutputCases(root: []const u8) [4]OutputBenchCase {
-    return .{
-        .{
-            .name = "high_match_seq",
-            .root = root,
-            .pattern = "needle",
-            .iterations = 6,
-            .parallel_jobs = 1,
-        },
-        .{
-            .name = "high_match_seq_buffered",
-            .root = root,
-            .pattern = "needle",
-            .iterations = 6,
-            .parallel_jobs = 1,
-            .buffer_output = true,
-        },
-        .{
-            .name = "high_match_parallel",
-            .root = root,
-            .pattern = "needle",
-            .iterations = 6,
-            .parallel_jobs = 4,
-        },
-        .{
-            .name = "high_match_parallel_buffered",
-            .root = root,
-            .pattern = "needle",
-            .iterations = 6,
-            .parallel_jobs = 4,
-            .buffer_output = true,
-        },
+fn buildOutputCases(allocator: std.mem.Allocator, root: []const u8) ![]OutputBenchCase {
+    const cases = try allocator.alloc(OutputBenchCase, 10);
+    errdefer {
+        var i: usize = 0;
+        while (i < cases.len) : (i += 1) {
+            if (cases[i].root.len != 0) allocator.free(cases[i].root);
+        }
+        allocator.free(cases);
+    }
+    @memset(cases, std.mem.zeroes(OutputBenchCase));
+
+    cases[0] = .{
+        .name = "high_match_seq",
+        .root = try allocator.dupe(u8, root),
+        .pattern = "needle",
+        .iterations = 6,
+        .parallel_jobs = 1,
     };
+    cases[1] = .{
+        .name = "high_match_seq_buffered",
+        .root = try allocator.dupe(u8, root),
+        .pattern = "needle",
+        .iterations = 6,
+        .parallel_jobs = 1,
+        .buffer_output = true,
+    };
+    cases[2] = .{
+        .name = "high_match_parallel",
+        .root = try allocator.dupe(u8, root),
+        .pattern = "needle",
+        .iterations = 6,
+        .parallel_jobs = 4,
+    };
+    cases[3] = .{
+        .name = "high_match_parallel_buffered",
+        .root = try allocator.dupe(u8, root),
+        .pattern = "needle",
+        .iterations = 6,
+        .parallel_jobs = 4,
+        .buffer_output = true,
+    };
+    cases[4] = .{
+        .name = "multiline_utf8_off",
+        .root = try std.fmt.allocPrint(allocator, "{s}/multiline-utf8.txt", .{root}),
+        .pattern = "needle",
+        .iterations = 6,
+        .parallel_jobs = 1,
+    };
+    cases[5] = .{
+        .name = "multiline_utf8_on",
+        .root = try std.fmt.allocPrint(allocator, "{s}/multiline-utf8.txt", .{root}),
+        .pattern = "needle",
+        .iterations = 6,
+        .parallel_jobs = 1,
+        .multiline = true,
+    };
+    cases[6] = .{
+        .name = "multiline_invalid_utf8_off",
+        .root = try std.fmt.allocPrint(allocator, "{s}/multiline-invalid.bin", .{root}),
+        .pattern = "needle",
+        .iterations = 6,
+        .parallel_jobs = 1,
+        .encoding = .none,
+    };
+    cases[7] = .{
+        .name = "multiline_invalid_utf8_on",
+        .root = try std.fmt.allocPrint(allocator, "{s}/multiline-invalid.bin", .{root}),
+        .pattern = "needle",
+        .iterations = 6,
+        .parallel_jobs = 1,
+        .multiline = true,
+        .encoding = .none,
+    };
+    cases[8] = .{
+        .name = "multiline_utf16_off",
+        .root = try std.fmt.allocPrint(allocator, "{s}/multiline-utf16le.txt", .{root}),
+        .pattern = "needle",
+        .iterations = 6,
+        .parallel_jobs = 1,
+        .encoding = .utf16le,
+    };
+    cases[9] = .{
+        .name = "multiline_utf16_on",
+        .root = try std.fmt.allocPrint(allocator, "{s}/multiline-utf16le.txt", .{root}),
+        .pattern = "needle",
+        .iterations = 6,
+        .parallel_jobs = 1,
+        .multiline = true,
+        .encoding = .utf16le,
+    };
+    return cases;
 }
 
 fn buildOutputBenchCorpus(allocator: std.mem.Allocator) ![]u8 {
@@ -503,6 +570,51 @@ fn buildOutputBenchCorpus(allocator: std.mem.Allocator) ![]u8 {
             .data = line_buffer.items,
         });
     }
+
+    var utf8_lines: std.ArrayList(u8) = .empty;
+    defer utf8_lines.deinit(allocator);
+    var utf8_index: usize = 0;
+    while (utf8_index < 256) : (utf8_index += 1) {
+        try utf8_lines.writer(allocator).print("needle utf8 line {d:0>3}\n", .{utf8_index});
+    }
+    var path_buffer: [256]u8 = undefined;
+    const utf8_path = try std.fmt.bufPrint(&path_buffer, "{s}/multiline-utf8.txt", .{root});
+    try cwd.writeFile(.{
+        .sub_path = utf8_path,
+        .data = utf8_lines.items,
+    });
+
+    var invalid_lines: std.ArrayList(u8) = .empty;
+    defer invalid_lines.deinit(allocator);
+    var invalid_index: usize = 0;
+    while (invalid_index < 256) : (invalid_index += 1) {
+        try invalid_lines.appendSlice(allocator, "needle invalid line ");
+        try invalid_lines.writer(allocator).print("{d:0>3}", .{invalid_index});
+        try invalid_lines.appendSlice(allocator, " \xff\n");
+    }
+    const invalid_path = try std.fmt.bufPrint(&path_buffer, "{s}/multiline-invalid.bin", .{root});
+    try cwd.writeFile(.{
+        .sub_path = invalid_path,
+        .data = invalid_lines.items,
+    });
+
+    var utf16_lines: std.ArrayList(u8) = .empty;
+    defer utf16_lines.deinit(allocator);
+    try utf16_lines.appendSlice(allocator, "\xff\xfe");
+    var utf16_index: usize = 0;
+    while (utf16_index < 256) : (utf16_index += 1) {
+        const line = try std.fmt.allocPrint(allocator, "needle utf16 line {d:0>3}\n", .{utf16_index});
+        defer allocator.free(line);
+        for (line) |byte| {
+            try utf16_lines.append(allocator, byte);
+            try utf16_lines.append(allocator, 0);
+        }
+    }
+    const utf16_path = try std.fmt.bufPrint(&path_buffer, "{s}/multiline-utf16le.txt", .{root});
+    try cwd.writeFile(.{
+        .sub_path = utf16_path,
+        .data = utf16_lines.items,
+    });
 
     return allocator.dupe(u8, root);
 }
