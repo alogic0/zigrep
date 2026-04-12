@@ -277,6 +277,10 @@ fn searchEntriesSequential(
 
     var matched = false;
     for (entries) |entry| {
+        var file_arena_state = std.heap.ArenaAllocator.init(allocator);
+        defer file_arena_state.deinit();
+        const file_allocator = file_arena_state.allocator();
+
         if (options.skip_binary) {
             const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
                 if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
@@ -285,17 +289,17 @@ fn searchEntriesSequential(
             if (decision == .binary) continue;
         }
 
-        const buffer = zigrep.search.io.readFile(allocator, entry.path, .{
+        const buffer = zigrep.search.io.readFile(file_allocator, entry.path, .{
             .strategy = options.read_strategy,
         }) catch |err| {
             if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
             return err;
         };
-        defer buffer.deinit(allocator);
+        defer buffer.deinit(file_allocator);
 
-        if (try reportFileMatch(allocator, &searcher, entry.path, buffer.bytes(), !options.skip_binary)) |report| {
-            defer report.deinit(allocator);
-            try printReport(stdout, report, options.output);
+        if (try reportFileMatch(file_allocator, &searcher, entry.path, buffer.bytes(), !options.skip_binary)) |report| {
+            defer report.deinit(file_allocator);
+            try printReport(file_allocator, stdout, report, options.output);
             matched = true;
         }
     }
@@ -434,9 +438,14 @@ fn searchEntriesParallel(
     return matched;
 }
 
-fn printReport(stdout: *std.Io.Writer, report: zigrep.search.grep.MatchReport, output: OutputOptions) !void {
-    const line = try formatReport(std.heap.smp_allocator, report, output);
-    defer std.heap.smp_allocator.free(line);
+fn printReport(
+    allocator: std.mem.Allocator,
+    stdout: *std.Io.Writer,
+    report: zigrep.search.grep.MatchReport,
+    output: OutputOptions,
+) !void {
+    const line = try formatReport(allocator, report, output);
+    defer allocator.free(line);
     try stdout.writeAll(line);
 }
 

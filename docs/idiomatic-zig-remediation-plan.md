@@ -17,11 +17,11 @@ encoding behavior without rewriting the whole architecture around generic
 
 ## Priority 2: Per-File Allocator Boundary Cleanup
 
-- [ ] Document allocator lifetimes across process, search, worker, and file scopes
-- [ ] Identify per-file temporary allocations in the search path
-- [ ] Add a per-file `ArenaAllocator` in the sequential search path
-- [ ] Move lossy `--text` sanitizing buffers onto the per-file arena
-- [ ] Move temporary report-formatting buffers onto the per-file arena where useful
+- [~] Document allocator lifetimes across process, search, worker, and file scopes
+- [x] Identify per-file temporary allocations in the search path
+- [x] Add a per-file `ArenaAllocator` in the sequential search path
+- [x] Move lossy `--text` sanitizing buffers onto the per-file arena
+- [x] Move temporary report-formatting buffers onto the per-file arena where useful
 - [ ] Evaluate whether parallel workers should use per-file or per-chunk arenas
 - [ ] Confirm behavior remains unchanged with `zig build test`
 
@@ -82,3 +82,6 @@ encoding behavior without rewriting the whole architecture around generic
 - Child-directory traversal failures now use a warn-and-skip policy through the
   walker, while root traversal failures remain fatal.
 - Unreadable-file and unreadable-directory regression coverage both exist now.
+- Sequential search now uses a per-file arena for file-local temporary
+  allocations, including buffered file reads, lossy `--text` sanitizing, and
+  temporary formatted output.
