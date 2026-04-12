@@ -220,6 +220,14 @@ Preprocessor note:
 - `--pre` uses simple whitespace splitting for the command string, not shell parsing or quoting
 - when both `--pre` and `-z` are present, `--pre` takes precedence for files selected by `--pre-glob`
 
+Config note:
+
+- `--config-path PATH` loads default flags from `PATH`
+- `ZIGREP_CONFIG_PATH` provides the same behavior through the environment when `--config-path` is not given
+- `--no-config` disables config loading for a single run
+- config files are line-oriented: each non-empty, non-comment line becomes one extra CLI argument
+- config arguments are prepended before command-line arguments, so later CLI flags still override config defaults
+
 `--binary` note:
 
 - `--binary` searches binary files but suppresses matching line content

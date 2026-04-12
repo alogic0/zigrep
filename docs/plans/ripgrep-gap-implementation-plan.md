@@ -184,8 +184,10 @@ ecosystem features.
 
 ## Priority 7: Config And Tooling Surface
 
-- [ ] Add configuration file support.
-  ripgrep’s config file support is a real UX multiplier for regular users.
+- [x] Add configuration file support.
+  `zigrep` now supports explicit config files via `--config-path PATH` and
+  environment-driven config via `ZIGREP_CONFIG_PATH`, with CLI flags applied
+  afterward so they still win.
 
 - [ ] Add better exit/status and warning behavior around new modes as they land.
 

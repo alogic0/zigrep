@@ -169,7 +169,10 @@ fn runCli(
     stderr: *std.Io.Writer,
     argv: []const []const u8,
 ) !u8 {
-    const parsed = try parseArgs(allocator, argv);
+    const resolved = try zigrep.config.resolveArgs(allocator, argv);
+    defer resolved.deinit(allocator);
+
+    const parsed = try parseArgs(allocator, resolved.argv);
     defer switch (parsed) {
         .run => |opts| opts.deinit(allocator),
         .type_list => |opts| opts.deinit(allocator),
@@ -178,7 +181,7 @@ fn runCli(
 
     switch (parsed) {
         .help => {
-            try writeUsage(stdout, argv[0]);
+            try writeUsage(stdout, resolved.argv[0]);
             return 0;
         },
         .version => {
@@ -1973,6 +1976,8 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\search recursively for PATTERN starting at each PATH, or "." when omitted
         \\  -h, --help            show this help
         \\  -V, --version         show program version
+        \\  --config-path PATH    load default flags from PATH
+        \\  --no-config           ignore config file support for this run
         \\  --hidden              include hidden files
         \\  -u, --unrestricted    reduce filtering; repeat to include hidden and binary files
         \\  -v, --invert-match    select non-matching lines instead of matching lines
@@ -3032,6 +3037,81 @@ test "runCli prints version and exits successfully" {
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expectEqualStrings("zigrep " ++ zigrep.app_version ++ "\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli config file prepends default flags" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "zigrep.conf",
+        .data =
+            "--count\n" ++
+            "--ignore-case\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "Needle one\n" ++
+            "needle two\n" ++
+            "miss\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const config_path = try std.fs.path.join(testing.allocator, &.{ root_path, "zigrep.conf" });
+    defer testing.allocator.free(config_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--config-path",
+        config_path,
+        "needle",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli command-line flags override config defaults" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "zigrep.conf",
+        .data = "--count\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const config_path = try std.fs.path.join(testing.allocator, &.{ root_path, "zigrep.conf" });
+    defer testing.allocator.free(config_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--config-path",
+        config_path,
+        "--files-with-matches",
+        "needle",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
