@@ -34,6 +34,7 @@ const ByteAtom = union(enum) {
     literal: []u8,
     any_byte,
     class: regex.hir.CharacterClass,
+    utf8_class: regex.hir.CharacterClass,
     alternation: []BytePattern,
     save_start: u32,
     save_end: u32,
@@ -41,7 +42,7 @@ const ByteAtom = union(enum) {
     fn deinit(self: ByteAtom, allocator: std.mem.Allocator) void {
         switch (self) {
             .literal => |bytes| allocator.free(bytes),
-            .class => |class| allocator.free(class.items),
+            .class, .utf8_class => |class| allocator.free(class.items),
             .alternation => |patterns| {
                 for (patterns) |pattern| pattern.deinit(allocator);
                 allocator.free(patterns);
@@ -392,6 +393,10 @@ fn appendNodeToByteTerms(
                 try terms.append(allocator, term);
                 return true;
             }
+            if (try classToUtf8Atom(allocator, class)) |atom| {
+                try terms.append(allocator, .{ .atom = atom });
+                return true;
+            }
             return false;
         },
         .repetition => |rep| {
@@ -468,7 +473,7 @@ fn extractRepeatableByteTerm(
                         },
                     };
                 },
-                .alternation, .save_start, .save_end => return null,
+                .utf8_class, .alternation, .save_start, .save_end => return null,
             };
             _ = children;
             break :blk dup_atom;
@@ -488,6 +493,13 @@ fn extractRepeatableByteTerm(
             if (try classToByteTerm(allocator, class)) |term| {
                 if (term.min != 1 or term.max == null or term.max.? != 1) return null;
                 break :blk term.atom;
+            }
+            if (try classToUtf8Atom(allocator, class)) |atom| {
+                if (std.meta.activeTag(atom) == .utf8_class) {
+                    atom.deinit(allocator);
+                    return null;
+                }
+                break :blk atom;
             }
             return null;
         },
@@ -537,8 +549,8 @@ fn classToByteTerm(
     allocator: std.mem.Allocator,
     class: regex.hir.CharacterClass,
 ) BytePlanError!?ByteTerm {
-    if (class.negated) return null;
     if (class.items.len == 0) return null;
+    if (class.negated) return null;
 
     var patterns: std.ArrayList(BytePattern) = .empty;
     defer patterns.deinit(allocator);
@@ -563,6 +575,34 @@ fn classToByteTerm(
         .atom = .{ .alternation = try patterns.toOwnedSlice(allocator) },
         .min = 1,
         .max = 1,
+    };
+}
+
+fn classToUtf8Atom(
+    allocator: std.mem.Allocator,
+    class: regex.hir.CharacterClass,
+) BytePlanError!?ByteAtom {
+    if (class.items.len == 0) return null;
+    var saw_non_ascii = false;
+    for (class.items) |item| {
+        switch (item) {
+            .literal => |cp| {
+                if (cp > 0x7f) saw_non_ascii = true;
+            },
+            .range => |range| {
+                if (range.start > 0x7f or range.end > 0x7f) saw_non_ascii = true;
+            },
+        }
+    }
+    if (!saw_non_ascii) return null;
+
+    const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
+    @memcpy(duped_items, class.items);
+    return .{
+        .utf8_class = .{
+            .negated = class.negated,
+            .items = duped_items,
+        },
     };
 }
 
@@ -702,6 +742,11 @@ fn matchByteTermsAt(terms: []const ByteTerm, haystack: []const u8, term_index: u
     const term = terms[term_index];
     switch (term.atom) {
         .alternation => |patterns| return matchAlternationTerm(patterns, term.min, term.max, terms, term_index, haystack, pos),
+        .utf8_class => {
+            if (term.min != 1 or term.max == null or term.max.? != 1) return null;
+            const next_pos = matchByteAtomAt(term.atom, haystack, pos) orelse return null;
+            return matchByteTermsAt(terms, haystack, term_index + 1, next_pos);
+        },
         else => {},
     }
 
@@ -886,6 +931,7 @@ fn matchByteAtomAt(atom: ByteAtom, haystack: []const u8, pos: usize) ?usize {
             pos + 1
         else
             null,
+        .utf8_class => |class| matchUtf8ClassAt(class, haystack, pos),
         .alternation => unreachable,
         .save_start, .save_end => pos,
     };
@@ -899,7 +945,7 @@ fn matchByteAtomAtWithSlots(
     slots: []?usize,
 ) regex.Vm.MatchError!?usize {
     return switch (atom) {
-        .literal, .any_byte, .class => matchByteAtomAt(atom, haystack, pos),
+        .literal, .any_byte, .class, .utf8_class => matchByteAtomAt(atom, haystack, pos),
         .alternation => |patterns| blk: {
             for (patterns) |pattern| {
                 const snapshot = try cloneSlots(allocator, slots);
@@ -924,7 +970,7 @@ fn matchByteAtomAtWithSlots(
 fn byteAtomLen(atom: ByteAtom) usize {
     return switch (atom) {
         .literal => |bytes| bytes.len,
-        .any_byte, .class => 1,
+        .any_byte, .class, .utf8_class => 1,
         .alternation => unreachable,
         .save_start, .save_end => 0,
     };
@@ -933,7 +979,7 @@ fn byteAtomLen(atom: ByteAtom) usize {
 fn byteAtomMinLen(atom: ByteAtom) usize {
     return switch (atom) {
         .literal => |bytes| bytes.len,
-        .any_byte, .class => 1,
+        .any_byte, .class, .utf8_class => 1,
         .alternation => |patterns| blk: {
             var min_len: ?usize = null;
             for (patterns) |pattern| {
@@ -967,7 +1013,10 @@ fn isAsciiClass(class: regex.hir.CharacterClass) bool {
 }
 
 fn byteMatchesClass(class: regex.hir.CharacterClass, byte: u8) bool {
-    const cp: u32 = byte;
+    return classMatchesCodePoint(class, byte);
+}
+
+fn classMatchesCodePoint(class: regex.hir.CharacterClass, cp: u32) bool {
     var matched = false;
     for (class.items) |item| {
         switch (item) {
@@ -982,6 +1031,29 @@ fn byteMatchesClass(class: regex.hir.CharacterClass, byte: u8) bool {
         }
     }
     return if (class.negated) !matched else matched;
+}
+
+fn matchUtf8ClassAt(class: regex.hir.CharacterClass, haystack: []const u8, pos: usize) ?usize {
+    if (pos >= haystack.len) return null;
+
+    const byte = haystack[pos];
+    if (byte < 0x80) {
+        return if (classMatchesCodePoint(class, byte)) pos + 1 else null;
+    }
+
+    const seq_len = std.unicode.utf8ByteSequenceLength(byte) catch {
+        return if (class.negated) pos + 1 else null;
+    };
+    if (pos + seq_len > haystack.len) {
+        return if (class.negated) pos + 1 else null;
+    }
+
+    const seq = haystack[pos .. pos + seq_len];
+    const cp = std.unicode.utf8Decode(seq) catch {
+        return if (class.negated) pos + 1 else null;
+    };
+
+    return if (classMatchesCodePoint(class, cp)) pos + seq_len else null;
 }
 
 test "reportFirstMatch returns line-oriented match data" {
@@ -1114,6 +1186,87 @@ test "Searcher byte fallback supports repetition over small UTF-8 range classes"
 
     try testing.expectEqual(@as(usize, 3), report.column_number);
     try testing.expectEqual(Span{ .start = 2, .end = 6 }, report.match_span);
+}
+
+test "Searcher byte fallback supports negated literal-only UTF-8 classes" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a[^ж]b", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-negated.bin", "aяb")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 4 }, report.match_span);
+    try testing.expect((try searcher.reportFirstByteMatch("utf8-negated.bin", "aжb")) == null);
+}
+
+test "Searcher byte fallback lets negated literal-only UTF-8 classes match invalid bytes" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a[^ж]b", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-negated.bin", "a\xffb")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
+}
+
+test "Searcher byte fallback supports negated small UTF-8 range classes" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a[^а-я]b", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-negated-range.bin", "aѣb")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 4 }, report.match_span);
+    try testing.expect((try searcher.reportFirstByteMatch("utf8-negated-range.bin", "aжb")) == null);
+}
+
+test "Searcher byte fallback lets negated small UTF-8 range classes match invalid bytes" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a[^а-я]b", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-negated-range.bin", "a\xffb")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
+}
+
+test "Searcher byte fallback supports larger UTF-8 ranges without expansion" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "[Ā-ӿ]", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-large-range.bin", "xx\xffжyy")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 4), report.column_number);
+    try testing.expectEqual(Span{ .start = 3, .end = 5 }, report.match_span);
+}
+
+test "Searcher byte fallback supports negated larger UTF-8 ranges without expansion" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a[^Ā-ӿ]b", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-large-range.bin", "a字b")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 5 }, report.match_span);
+    try testing.expect((try searcher.reportFirstByteMatch("utf8-large-range.bin", "aжb")) == null);
 }
 
 test "Searcher byte fallback is limited to exact literal patterns" {

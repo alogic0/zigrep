@@ -151,3 +151,9 @@ encoding behavior without rewriting the whole architecture around generic
   like `[а-я]` no longer fall through to the lossy retry or to default-mode
   no-match. The remaining class gap is now concentrated in negated non-ASCII
   classes and larger Unicode ranges.
+- Negated literal-only UTF-8 classes now ride that planner too, so cases like
+  `[^ж]` no longer fall through to the lossy retry or to default-mode
+  no-match. Negated small UTF-8 ranges now ride it too, so practical cases
+  like `[^а-я]` also stay off the lossy path. Larger unquantified Unicode
+  ranges now ride it too, so the remaining class gap is narrower again:
+  quantified larger Unicode ranges.

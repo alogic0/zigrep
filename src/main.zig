@@ -1283,13 +1283,13 @@ test "runCli default mode still returns no match for invalid UTF-8 patterns outs
 
     try tmp.dir.writeFile(.{
         .sub_path = "dot.bin",
-        .data = "\xffaжb\n",
+        .data = "\xffaжѣb\n",
     });
 
     const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
     defer testing.allocator.free(root_path);
 
-    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a[^ж]b", root_path });
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a[Ā-ӿ]+b", root_path });
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 1), run.exit_code);
@@ -1338,6 +1338,94 @@ test "runCli default mode matches small UTF-8 range classes through the byte pat
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-range.bin:1:4:xx\\xFFжyy"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches negated literal-only UTF-8 classes through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf8-negated.bin",
+        .data = "\xffaяb\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a[^ж]b", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-negated.bin:1:2:\\xFFaяb"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches negated small UTF-8 ranges through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf8-negated-range.bin",
+        .data = "\xffaѣb\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a[^а-я]b", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-negated-range.bin:1:2:\\xFFaѣb"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches larger UTF-8 ranges through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf8-large-range.bin",
+        .data = "xx\xffжyy\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "[Ā-ӿ]", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-large-range.bin:1:4:xx\\xFFжyy"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches negated larger UTF-8 ranges through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf8-large-negated.bin",
+        .data = "\xffa字b\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a[^Ā-ӿ]b", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-large-negated.bin:1:2:\\xFFa字b"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
