@@ -20,6 +20,10 @@ pub const BinaryOptions = struct {
     control_threshold: usize = 8,
 };
 
+pub const DecodeError = std.mem.Allocator.Error || error{
+    InvalidUtf16Length,
+} || std.unicode.Utf16LeToUtf8Error;
+
 pub const Bom = enum {
     none,
     utf8,
@@ -82,6 +86,8 @@ pub fn readFile(
 }
 
 pub fn detectBinary(bytes: []const u8, options: BinaryOptions) BinaryDecision {
+    if (detectBom(bytes) != .none) return .text;
+
     const sample_len = @min(bytes.len, options.sample_limit);
     const sample = bytes[0..sample_len];
 
@@ -101,6 +107,14 @@ pub fn detectBom(bytes: []const u8) Bom {
     if (std.mem.startsWith(u8, bytes, "\xff\xfe")) return .utf16_le;
     if (std.mem.startsWith(u8, bytes, "\xfe\xff")) return .utf16_be;
     return .none;
+}
+
+pub fn decodeBomToUtf8Alloc(allocator: std.mem.Allocator, bytes: []const u8) DecodeError!?[]u8 {
+    return switch (detectBom(bytes)) {
+        .utf16_le => try decodeUtf16BomToUtf8Alloc(allocator, bytes, .little),
+        .utf16_be => try decodeUtf16BomToUtf8Alloc(allocator, bytes, .big),
+        else => null,
+    };
 }
 
 pub fn detectBinaryFile(path: []const u8, options: BinaryOptions) !BinaryDecision {
@@ -174,6 +188,27 @@ fn isSuspiciousControl(byte: u8) bool {
     return byte < 0x20 or byte == 0x7f;
 }
 
+fn decodeUtf16BomToUtf8Alloc(
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+    endian: std.builtin.Endian,
+) DecodeError![]u8 {
+    const body = bytes[2..];
+    if (body.len % 2 != 0) return error.InvalidUtf16Length;
+
+    const unit_count = body.len / 2;
+    const units = try allocator.alloc(u16, unit_count);
+    defer allocator.free(units);
+
+    for (0..unit_count) |index| {
+        const start = index * 2;
+        const pair: *const [2]u8 = @ptrCast(body[start .. start + 2].ptr);
+        units[index] = std.mem.readInt(u16, pair, endian);
+    }
+
+    return try std.unicode.utf16LeToUtf8Alloc(allocator, units);
+}
+
 test "binary detector treats UTF-8 and plain text as text" {
     const testing = std.testing;
 
@@ -230,6 +265,22 @@ test "BOM detector recognizes common Unicode BOMs" {
     try testing.expectEqual(Bom.utf16_be, detectBom("\xfe\xff\x00h\x00i"));
     try testing.expectEqual(Bom.none, detectBom("plain text"));
     try testing.expectEqual(Bom.none, detectBom(""));
+}
+
+test "UTF-16 BOM decoder converts UTF-16LE and UTF-16BE inputs to UTF-8" {
+    const testing = std.testing;
+
+    const utf16le = "\xff\xfeh\x00i\x00";
+    const decoded_le = (try decodeBomToUtf8Alloc(testing.allocator, utf16le)).?;
+    defer testing.allocator.free(decoded_le);
+    try testing.expectEqualStrings("hi", decoded_le);
+
+    const utf16be = "\xfe\xff\x00h\x00i";
+    const decoded_be = (try decodeBomToUtf8Alloc(testing.allocator, utf16be)).?;
+    defer testing.allocator.free(decoded_be);
+    try testing.expectEqualStrings("hi", decoded_be);
+
+    try testing.expect((try decodeBomToUtf8Alloc(testing.allocator, "plain text")) == null);
 }
 
 test "buffered I/O reads whole files into owned buffers" {

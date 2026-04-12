@@ -540,6 +540,18 @@ fn reportFileMatch(
     bytes: []const u8,
     allow_lossy_invalid_utf8: bool,
 ) !?zigrep.search.grep.MatchReport {
+    if (try zigrep.search.io.decodeBomToUtf8Alloc(allocator, bytes)) |decoded| {
+        defer allocator.free(decoded);
+        if (try searcher.reportFirstMatch(path, decoded)) |report| {
+            const owned_line = try allocator.dupe(u8, report.line);
+            var stable = report;
+            stable.line = owned_line;
+            stable.owned_line = owned_line;
+            return stable;
+        }
+        return null;
+    }
+
     return searcher.reportFirstMatch(path, bytes) catch |err| switch (err) {
         error.InvalidUtf8 => if (!allow_lossy_invalid_utf8) null else {
             const sanitized = try sanitizeInvalidUtf8Lossy(allocator, bytes);
@@ -1132,6 +1144,48 @@ test "runCli skips control-heavy binary payloads by default but searches them wi
     defer text_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), text_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, text_run.stdout, 1, "control-heavy.bin:1:9:"));
+}
+
+test "runCli can search UTF-16LE BOM files in default mode" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf16le.txt",
+        .data = "\xff\xfen\x00e\x00e\x00d\x00l\x00e\x00\n\x00",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf16le.txt:1:1:needle"));
+}
+
+test "runCli can search UTF-16BE BOM files in default mode" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf16be.txt",
+        .data = "\xfe\xff\x00n\x00e\x00e\x00d\x00l\x00e\x00\x0a",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf16be.txt:1:1:needle"));
 }
 
 test "reportFileMatch only owns line bytes for lossy text-mode fallback" {

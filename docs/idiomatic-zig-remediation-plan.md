@@ -53,7 +53,7 @@ encoding behavior without rewriting the whole architecture around generic
 - [ ] Design a true byte-oriented search path
 - [ ] Define regex semantics for invalid UTF-8 input
 - [x] Add BOM detection
-- [ ] Add UTF-16LE and UTF-16BE decoding support
+- [x] Add UTF-16LE and UTF-16BE decoding support
 - [ ] Add explicit encoding configuration
 - [ ] Normalize output behavior for non-UTF-8 matches
 - [ ] Remove the current lossy `?` fallback once byte-oriented handling replaces it
@@ -106,3 +106,5 @@ encoding behavior without rewriting the whole architecture around generic
   default mode versus `--text`.
 - The search I/O layer now has explicit BOM detection for UTF-8, UTF-16LE, and
   UTF-16BE inputs, which gives the later encoding work a concrete entry point.
+- UTF-16LE and UTF-16BE BOM files now decode to UTF-8 for matching and are
+  treated as text by the current binary detector.
