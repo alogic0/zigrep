@@ -42,6 +42,7 @@ pub const CliOptions = struct {
     pattern: []const u8,
     paths: []const []const u8,
     globs: []const []const u8 = &.{},
+    pre_globs: []const []const u8 = &.{},
     ignore_files: []const []const u8 = &.{},
     include_types: []const []const u8 = &.{},
     exclude_types: []const []const u8 = &.{},
@@ -54,6 +55,7 @@ pub const CliOptions = struct {
     no_ignore_parent: bool = false,
     binary_mode: BinaryMode = .skip,
     search_compressed: bool = false,
+    preprocessor: ?[]const u8 = null,
     case_mode: zigrep.search.grep.CaseMode = .sensitive,
     read_strategy: zigrep.search.io.ReadStrategy = .mmap,
     encoding: zigrep.search.io.InputEncoding = .auto,
@@ -71,6 +73,7 @@ pub const CliOptions = struct {
     fn deinit(self: CliOptions, allocator: std.mem.Allocator) void {
         allocator.free(self.paths);
         allocator.free(self.globs);
+        allocator.free(self.pre_globs);
         allocator.free(self.ignore_files);
         allocator.free(self.include_types);
         allocator.free(self.exclude_types);
@@ -205,6 +208,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var no_ignore_parent = false;
     var binary_mode: BinaryMode = .skip;
     var search_compressed = false;
+    var preprocessor: ?[]const u8 = null;
     var unrestricted_level: u8 = 0;
     var case_mode: zigrep.search.grep.CaseMode = .sensitive;
     var read_strategy: zigrep.search.io.ReadStrategy = .mmap;
@@ -222,12 +226,14 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var show_type_list = false;
     var paths = std.ArrayList([]const u8).empty;
     var globs = std.ArrayList([]const u8).empty;
+    var pre_globs = std.ArrayList([]const u8).empty;
     var ignore_files = std.ArrayList([]const u8).empty;
     var include_types = std.ArrayList([]const u8).empty;
     var exclude_types = std.ArrayList([]const u8).empty;
     var type_adds = std.ArrayList([]const u8).empty;
     defer paths.deinit(allocator);
     defer globs.deinit(allocator);
+    defer pre_globs.deinit(allocator);
     defer ignore_files.deinit(allocator);
     defer include_types.deinit(allocator);
     defer exclude_types.deinit(allocator);
@@ -343,6 +349,18 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "-z") or std.mem.eql(u8, arg, "--search-zip")) {
                 search_compressed = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--pre")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                preprocessor = argv[index];
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--pre-glob")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                try pre_globs.append(allocator, argv[index]);
                 continue;
             }
             if (std.mem.eql(u8, arg, "-g") or std.mem.eql(u8, arg, "--glob")) {
@@ -461,6 +479,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     }
 
     if (pattern == null) return error.MissingPattern;
+    if (preprocessor == null and pre_globs.items.len != 0) return error.InvalidFlagCombination;
     if (unrestricted_level >= 1) no_ignore = true;
     if (unrestricted_level >= 2) include_hidden = true;
     if (unrestricted_level >= 3) binary_mode = .text;
@@ -493,6 +512,8 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     errdefer allocator.free(owned_paths);
     const owned_globs = try globs.toOwnedSlice(allocator);
     errdefer allocator.free(owned_globs);
+    const owned_pre_globs = try pre_globs.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_pre_globs);
     const owned_ignore_files = try ignore_files.toOwnedSlice(allocator);
     errdefer allocator.free(owned_ignore_files);
     const owned_include_types = try include_types.toOwnedSlice(allocator);
@@ -504,6 +525,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .pattern = pattern.?,
         .paths = owned_paths,
         .globs = owned_globs,
+        .pre_globs = owned_pre_globs,
         .ignore_files = owned_ignore_files,
         .include_types = owned_include_types,
         .exclude_types = owned_exclude_types,
@@ -516,6 +538,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .no_ignore_parent = no_ignore_parent,
         .binary_mode = binary_mode,
         .search_compressed = search_compressed,
+        .preprocessor = preprocessor,
         .case_mode = case_mode,
         .read_strategy = read_strategy,
         .encoding = encoding,
@@ -861,14 +884,11 @@ fn searchEntriesSequential(
             return err;
         };
         defer buffer.deinit(file_allocator);
-        const search_bytes = if (options.search_compressed)
-            prepareSearchBytes(file_allocator, buffer.bytes(), true) catch |err| {
+        const search_bytes = prepareSearchBytes(file_allocator, entry.path, buffer.bytes(), options) catch |err| {
                 if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
                 return err;
-            }
-        else
-            buffer.bytes();
-        const effective_binary_output = if (options.search_compressed)
+            };
+        const effective_binary_output = if (options.search_compressed or options.preprocessor != null)
             decideBinaryBehavior(search_bytes, options.encoding, options.binary_mode) orelse {
                 result.stats.skipped_binary_files += 1;
                 continue;
@@ -1026,14 +1046,11 @@ fn searchEntriesParallel(
                 return err;
             };
             defer buffer.deinit(file_allocator);
-            const search_bytes = if (self.options.search_compressed)
-                prepareSearchBytes(file_allocator, buffer.bytes(), true) catch |err| {
+            const search_bytes = prepareSearchBytes(file_allocator, entry.path, buffer.bytes(), self.options) catch |err| {
                     if (try self.warnAndSkip(entry.path, err)) return;
                     return err;
-                }
-            else
-                buffer.bytes();
-            const effective_binary_output = if (self.options.search_compressed)
+                };
+            const effective_binary_output = if (self.options.search_compressed or self.options.preprocessor != null)
                 decideBinaryBehavior(search_bytes, self.options.encoding, self.options.binary_mode) orelse {
                     self.result_reports[index] = .{
                         .bytes = .empty,
@@ -1308,6 +1325,9 @@ fn shouldWarnAndSkipFileError(err: anyerror) bool {
         error.NameTooLong,
         error.SymLinkLoop,
         error.InvalidCompressedInput,
+        error.PreprocessorFailed,
+        error.PreprocessorSignaled,
+        error.PreprocessorTooMuchOutput,
         => true,
         else => false,
     };
@@ -1315,14 +1335,15 @@ fn shouldWarnAndSkipFileError(err: anyerror) bool {
 
 fn prepareSearchBytes(
     allocator: std.mem.Allocator,
+    path: []const u8,
     bytes: []const u8,
-    search_compressed: bool,
+    options: CliOptions,
 ) ![]const u8 {
-    if (!search_compressed) return bytes;
-    return if (try zigrep.search.io.decompressAlloc(allocator, bytes)) |decoded|
-        decoded
-    else
-        bytes;
+    if (zigrep.search.preprocess.shouldApply(options.preprocessor, options.pre_globs, path)) {
+        return try zigrep.search.preprocess.runAlloc(allocator, options.preprocessor.?, path);
+    }
+    if (!options.search_compressed) return bytes;
+    return if (try zigrep.search.io.decompressAlloc(allocator, bytes)) |decoded| decoded else bytes;
 }
 
 fn decideBinaryBehavior(
@@ -1969,6 +1990,8 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --text                search binary files and print normal match output
         \\  --binary              search binary files but suppress matching line content
         \\  -z, --search-zip      search gzip-compressed files too
+        \\  --pre CMD             run CMD on each selected file path before searching
+        \\  --pre-glob GLOB       apply --pre only to paths matching GLOB
         \\  -g, --glob GLOB       include or exclude paths by glob
         \\  --buffered            use the simpler file-reading method
         \\  --mmap                use the faster file-reading method when possible
@@ -2488,6 +2511,33 @@ test "parseArgs accepts compressed search flag" {
     }
 }
 
+test "parseArgs accepts preprocessor flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--pre",
+        "/bin/cat",
+        "--pre-glob",
+        "*.wrapped",
+        "needle",
+        "src",
+    });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        else => unreachable,
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("/bin/cat", opts.preprocessor.?);
+            try testing.expectEqual(@as(usize, 1), opts.pre_globs.len);
+            try testing.expectEqualStrings("*.wrapped", opts.pre_globs[0]);
+        },
+        else => unreachable,
+    }
+}
+
 test "parseArgs accepts ignore-case and smart-case flags" {
     const testing = std.testing;
 
@@ -2651,6 +2701,12 @@ test "parseArgs rejects invalid numeric flags" {
         "zigrep",
         "--binary",
         "--json",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--pre-glob",
+        "*.wrapped",
         "needle",
     }));
 }
@@ -4158,6 +4214,64 @@ test "runCli compressed search mode finds matches in gzip files" {
     defer zip_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), zip_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, zip_run.stdout, 1, "sample.txt.gz:1:1:Hello world"));
+}
+
+test "runCli preprocessor transforms matching files selected by pre-glob" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.wrapped",
+        .data = "original payload\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "plain.txt",
+        .data = "plain text\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "pre.sh",
+        .data =
+            "#!/bin/sh\n" ++
+            "case \"$1\" in\n" ++
+            "  *.wrapped) printf '\\156\\145\\145\\144\\154\\145 from pre\\n' ;;\n" ++
+            "  *) cat \"$1\" ;;\n" ++
+            "esac\n",
+    });
+
+    var script = try tmp.dir.openFile("pre.sh", .{ .mode = .read_write });
+    defer script.close();
+    try script.chmod(0o755);
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const script_path = try std.fs.path.join(testing.allocator, &.{ root_path, "pre.sh" });
+    defer testing.allocator.free(script_path);
+
+    const default_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer default_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), default_run.exit_code);
+
+    const pre_command = try std.fmt.allocPrint(testing.allocator, "/bin/sh {s}", .{script_path});
+    defer testing.allocator.free(pre_command);
+
+    const pre_run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-j",
+        "1",
+        "--pre",
+        pre_command,
+        "--pre-glob",
+        "*.wrapped",
+        "needle",
+        root_path,
+    });
+    defer pre_run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), pre_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, pre_run.stdout, 1, "sample.wrapped:1:1:needle from pre"));
+    try testing.expect(!std.mem.containsAtLeast(u8, pre_run.stdout, 1, "plain.txt"));
 }
 
 test "runCli skips invalid UTF-8 files instead of aborting the whole search" {

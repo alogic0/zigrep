@@ -170,8 +170,10 @@ ecosystem features.
   `--search-zip`. This is the first compressed-stream step, not full
   multi-format archive parity.
 
-- [ ] Add preprocessor support (`--pre`, `--pre-glob` style) if the project
+- [x] Add preprocessor support (`--pre`, `--pre-glob` style) if the project
   wants ripgrep-like arbitrary input transforms.
+  `zigrep` now supports running a single external command on selected file
+  paths before search via `--pre` and `--pre-glob`.
 
 ### Zig-specific guidance
 

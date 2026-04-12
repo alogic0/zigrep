@@ -213,6 +213,13 @@ Compressed-input note:
 - compressed bytes are decompressed before binary detection, encoding handling, and match reporting
 - this is an initial compressed-stream step, not full ripgrep-compatible compressed-input coverage
 
+Preprocessor note:
+
+- `--pre CMD` runs `CMD <path>` and searches the command's stdout instead of the file's original bytes
+- `--pre-glob GLOB` limits that transform to matching paths; without `--pre-glob`, `--pre` applies to every searched file
+- `--pre` uses simple whitespace splitting for the command string, not shell parsing or quoting
+- when both `--pre` and `-z` are present, `--pre` takes precedence for files selected by `--pre-glob`
+
 `--binary` note:
 
 - `--binary` searches binary files but suppresses matching line content

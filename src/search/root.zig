@@ -3,6 +3,7 @@ pub const ignore = @import("ignore.zig");
 pub const glob = @import("glob.zig");
 pub const types = @import("types.zig");
 pub const io = @import("io.zig");
+pub const preprocess = @import("preprocess.zig");
 pub const grep = @import("grep.zig");
 pub const schedule = @import("schedule.zig");
 pub const report = @import("report.zig");
