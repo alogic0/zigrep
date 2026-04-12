@@ -339,6 +339,13 @@ fn extractRepeatableByteTerm(
     quantifier: regex.hir.Quantifier,
 ) BytePlanError!?ByteTerm {
     switch (nodes[@intFromEnum(node_id)]) {
+        .alternation => {
+            const term = try extractAlternationByteTerm(allocator, nodes, node_id) orelse return null;
+            var updated = term;
+            updated.min = quantifier.min;
+            updated.max = quantifier.max;
+            return updated;
+        },
         .group => |group| return extractRepeatableByteTerm(allocator, nodes, group.child, quantifier),
         else => {},
     }
@@ -492,7 +499,7 @@ fn matchBytePatternAt(pattern: BytePattern, haystack: []const u8, start: usize) 
 fn minBytePatternLen(pattern: BytePattern) usize {
     var total: usize = 0;
     for (pattern.terms) |term| {
-        total += term.min * byteAtomLen(term.atom);
+        total += term.min * byteAtomMinLen(term.atom);
     }
     return total;
 }
@@ -501,17 +508,9 @@ fn matchByteTermsAt(terms: []const ByteTerm, haystack: []const u8, term_index: u
     if (term_index >= terms.len) return pos;
 
     const term = terms[term_index];
-    if (term.min == 1 and term.max != null and term.max.? == 1) {
-        switch (term.atom) {
-            .alternation => |patterns| {
-                for (patterns) |pattern| {
-                    const end = matchContainedBytePatternAt(pattern, haystack, pos) orelse continue;
-                    if (matchByteTermsAt(terms, haystack, term_index + 1, end)) |result| return result;
-                }
-                return null;
-            },
-            else => {},
-        }
+    switch (term.atom) {
+        .alternation => |patterns| return matchAlternationTerm(patterns, term.min, term.max, terms, term_index, haystack, pos),
+        else => {},
     }
 
     const step = byteAtomLen(term.atom);
@@ -546,6 +545,41 @@ fn matchContainedBytePatternAt(pattern: BytePattern, haystack: []const u8, pos: 
     return matchByteTermsAt(pattern.terms, haystack, 0, pos);
 }
 
+fn matchAlternationTerm(
+    patterns: []const BytePattern,
+    min: u32,
+    max: ?u32,
+    terms: []const ByteTerm,
+    term_index: usize,
+    haystack: []const u8,
+    pos: usize,
+) ?usize {
+    return matchAlternationTermReps(patterns, min, max, terms, term_index, haystack, pos, 0);
+}
+
+fn matchAlternationTermReps(
+    patterns: []const BytePattern,
+    min: u32,
+    max: ?u32,
+    terms: []const ByteTerm,
+    term_index: usize,
+    haystack: []const u8,
+    pos: usize,
+    count: u32,
+) ?usize {
+    if (count >= min) {
+        if (matchByteTermsAt(terms, haystack, term_index + 1, pos)) |end| return end;
+    }
+    if (max != null and count >= max.?) return null;
+
+    for (patterns) |pattern| {
+        const next_pos = matchContainedBytePatternAt(pattern, haystack, pos) orelse continue;
+        if (next_pos == pos) continue;
+        if (matchAlternationTermReps(patterns, min, max, terms, term_index, haystack, next_pos, count + 1)) |end| return end;
+    }
+    return null;
+}
+
 fn matchByteAtomAt(atom: ByteAtom, haystack: []const u8, pos: usize) ?usize {
     return switch (atom) {
         .literal => |bytes| if (pos + bytes.len <= haystack.len and std.mem.eql(u8, haystack[pos .. pos + bytes.len], bytes))
@@ -569,6 +603,21 @@ fn byteAtomLen(atom: ByteAtom) usize {
         .literal => |bytes| bytes.len,
         .any_byte, .class => 1,
         .alternation => unreachable,
+    };
+}
+
+fn byteAtomMinLen(atom: ByteAtom) usize {
+    return switch (atom) {
+        .literal => |bytes| bytes.len,
+        .any_byte, .class => 1,
+        .alternation => |patterns| blk: {
+            var min_len: ?usize = null;
+            for (patterns) |pattern| {
+                const len = minBytePatternLen(pattern);
+                min_len = if (min_len == null or len < min_len.?) len else min_len;
+            }
+            break :blk min_len orelse 0;
+        },
     };
 }
 
@@ -909,6 +958,32 @@ test "Searcher byte fallback supports grouped alternation with mixed simple bran
 
     try testing.expectEqual(@as(usize, 2), report.column_number);
     try testing.expectEqual(Span{ .start = 1, .end = 5 }, report.match_span);
+}
+
+test "Searcher byte fallback supports quantified grouped alternation" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "((ab)|(cd))+e", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("alt-repeat.bin", "xxabcdabe").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 9 }, report.match_span);
+}
+
+test "Searcher byte fallback supports counted repetition over grouped alternation" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "((a[0-9])|(b.)){2}c", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("alt-repeat.bin", "xa4b\xffc").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), report.column_number);
+    try testing.expectEqual(Span{ .start = 1, .end = 6 }, report.match_span);
 }
 
 test "reportFirstMatch stays aligned across buffered and mmap file reads" {
