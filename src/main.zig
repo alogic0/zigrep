@@ -167,6 +167,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var no_ignore_vcs = false;
     var no_ignore_parent = false;
     var skip_binary = true;
+    var unrestricted_level: u8 = 0;
     var case_mode: zigrep.search.grep.CaseMode = .sensitive;
     var read_strategy: zigrep.search.io.ReadStrategy = .mmap;
     var encoding: zigrep.search.io.InputEncoding = .auto;
@@ -207,6 +208,14 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
                 return .version;
+            }
+            if (std.mem.eql(u8, arg, "--unrestricted")) {
+                unrestricted_level = @min(unrestricted_level + 1, 3);
+                continue;
+            }
+            if (shortUnrestrictedCount(arg)) |count| {
+                unrestricted_level = @min(unrestricted_level + count, 3);
+                continue;
             }
             if (std.mem.eql(u8, arg, "--hidden")) {
                 include_hidden = true;
@@ -384,6 +393,9 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     }
 
     if (pattern == null) return error.MissingPattern;
+    if (unrestricted_level >= 1) no_ignore = true;
+    if (unrestricted_level >= 2) include_hidden = true;
+    if (unrestricted_level >= 3) skip_binary = false;
     if (paths.items.len == 0) try paths.append(allocator, ".");
     if ((context_before != 0 or context_after != 0) and (report_mode != .lines or output.only_matching)) {
         return error.InvalidFlagCombination;
@@ -425,6 +437,14 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .output = output,
         .report_mode = report_mode,
     } };
+}
+
+fn shortUnrestrictedCount(arg: []const u8) ?u8 {
+    if (arg.len < 2 or arg[0] != '-') return null;
+    for (arg[1..]) |byte| {
+        if (byte != 'u') return null;
+    }
+    return @intCast(arg.len - 1);
 }
 
 pub fn runSearch(
@@ -1436,6 +1456,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -h, --help            show this help
         \\  -V, --version         show program version
         \\  --hidden              include hidden files
+        \\  -u, --unrestricted    reduce filtering; repeat to include hidden and binary files
         \\  --ignore-file PATH    load ignore rules from PATH
         \\  --no-ignore           disable ignore filtering
         \\  --no-ignore-vcs       ignore VCS ignore files like .gitignore
@@ -1779,6 +1800,32 @@ test "parseArgs accepts ignore control flags" {
     }
 }
 
+test "parseArgs accepts unrestricted flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-uu",
+        "--unrestricted",
+        "needle",
+        "src",
+    });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.no_ignore);
+            try testing.expect(opts.include_hidden);
+            try testing.expect(!opts.skip_binary);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
 test "parseArgs accepts ignore-case and smart-case flags" {
     const testing = std.testing;
 
@@ -2073,6 +2120,54 @@ test "runCli no-ignore bypasses all ignore filtering" {
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ignored.txt:1:1:needle ignored"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "blocked.txt:1:1:needle blocked"));
+}
+
+test "runCli unrestricted mode widens filtering progressively" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = ".gitignore",
+        .data = "ignored.txt\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "ignored.txt",
+        .data = "needle ignored\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = ".hidden.txt",
+        .data = "needle hidden\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "binary.bin",
+        .data = "xx\x00needleyy",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const one_u = try runCliCaptured(testing.allocator, &.{ "zigrep", "-u", "needle", root_path });
+    defer one_u.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), one_u.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, one_u.stdout, 1, "ignored.txt:1:1:needle ignored"));
+    try testing.expect(!std.mem.containsAtLeast(u8, one_u.stdout, 1, ".hidden.txt"));
+    try testing.expect(!std.mem.containsAtLeast(u8, one_u.stdout, 1, "binary.bin"));
+
+    const two_u = try runCliCaptured(testing.allocator, &.{ "zigrep", "-uu", "needle", root_path });
+    defer two_u.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), two_u.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, two_u.stdout, 1, "ignored.txt:1:1:needle ignored"));
+    try testing.expect(std.mem.containsAtLeast(u8, two_u.stdout, 1, ".hidden.txt:1:1:needle hidden"));
+    try testing.expect(!std.mem.containsAtLeast(u8, two_u.stdout, 1, "binary.bin"));
+
+    const three_u = try runCliCaptured(testing.allocator, &.{ "zigrep", "-uuu", "needle", root_path });
+    defer three_u.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), three_u.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, three_u.stdout, 1, "ignored.txt:1:1:needle ignored"));
+    try testing.expect(std.mem.containsAtLeast(u8, three_u.stdout, 1, ".hidden.txt:1:1:needle hidden"));
+    try testing.expect(std.mem.containsAtLeast(u8, three_u.stdout, 1, "binary.bin"));
 }
 
 test "runCli ignore-case matches differing literal case" {

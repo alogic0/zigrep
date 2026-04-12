@@ -59,6 +59,7 @@ The current CLI supports:
 - `zigrep [FLAGS] PATTERN [PATH...]`
 - Recursive search from each path, defaulting to `.`
 - Hidden-file inclusion with `--hidden`
+- Ripgrep-style unrestricted search with `-u`, `-uu`, and `-uuu`
 - Ignore controls with `--ignore-file`, `--no-ignore`, `--no-ignore-vcs`, and `--no-ignore-parent`
 - Symlink following with `--follow`
 - Case-insensitive search with `-i` / `--ignore-case` and `-S` / `--smart-case`
@@ -130,6 +131,9 @@ Ignore-control note:
 - `--no-ignore` disables all ignore filtering
 - `--no-ignore-vcs` disables `.gitignore` loading but still allows explicit `--ignore-file` rules
 - `--no-ignore-parent` keeps the searched root's own `.gitignore` but skips parent `.gitignore` files
+- `-u` is a shortcut for disabling ignore filtering
+- `-uu` disables ignore filtering and includes hidden files
+- `-uuu` disables ignore filtering, includes hidden files, and searches binary files
 
 Case-mode note:
 

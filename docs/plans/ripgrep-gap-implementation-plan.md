@@ -72,9 +72,10 @@ ecosystem features.
   `zigrep` now supports `-t`, `-T`, `--type-add`, and `--type-list` with a
   small built-in type table plus runtime type additions.
 
-- [ ] Add `--hidden` / ignore interactions closer to ripgrep’s actual model.
-  `zigrep` has basic hidden-file support, but not the broader ripgrep-style flag
-  family or its interaction model.
+- [x] Add `--hidden` / ignore interactions closer to ripgrep’s actual model.
+  `zigrep` now supports ripgrep-style unrestricted mode via `-u`,
+  `-uu`, and `-uuu`, which progressively disable ignore filtering,
+  include hidden files, and search binary files.
 
 ### Zig-specific guidance
 
