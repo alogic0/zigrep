@@ -193,6 +193,15 @@ pub fn reportFirstMatch(
     return searcher.reportFirstMatch(path, haystack);
 }
 
+fn expectBytePlan(pattern: []const u8, expected: bool) !void {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, pattern, .{});
+    defer searcher.deinit();
+
+    try testing.expectEqual(expected, searcher.hasBytePlan());
+}
+
 fn buildReport(path: []const u8, haystack: []const u8, span: regex.Vm.Capture) MatchReport {
     std.debug.assert(span.start != null);
     std.debug.assert(span.end != null);
@@ -373,6 +382,9 @@ fn appendNodeToByteTerms(
     literal_bytes: *std.ArrayList(u8),
 ) BytePlanError!bool {
     switch (nodes[@intFromEnum(node_id)]) {
+        .empty => {
+            return true;
+        },
         .group => |group| {
             try flushLiteralTerm(allocator, terms, literal_bytes);
             try terms.append(allocator, .{ .atom = .{ .save_start = group.index } });
@@ -790,36 +802,24 @@ fn matchUtf8ClassTerm(
     haystack: []const u8,
     pos: usize,
 ) ?usize {
-    var positions: [256]usize = undefined;
-    var positions_len: usize = 1;
-    positions[0] = pos;
+    return matchUtf8ClassTermReps(term, terms, term_index, haystack, pos, 0);
+}
 
-    var current_pos = pos;
-    var matched_min: u32 = 0;
-    while (matched_min < term.min) : (matched_min += 1) {
-        current_pos = matchByteAtomAt(term.atom, haystack, current_pos) orelse return null;
-        if (positions_len >= positions.len) return null;
-        positions[positions_len] = current_pos;
-        positions_len += 1;
+fn matchUtf8ClassTermReps(
+    term: ByteTerm,
+    terms: []const ByteTerm,
+    term_index: usize,
+    haystack: []const u8,
+    pos: usize,
+    count: u32,
+) ?usize {
+    if (count >= term.min) {
+        if (matchByteTermsAt(terms, haystack, term_index + 1, pos)) |end| return end;
     }
+    if (term.max != null and count >= term.max.?) return null;
 
-    var max_count = matched_min;
-    while (term.max == null or max_count < term.max.?) {
-        current_pos = matchByteAtomAt(term.atom, haystack, current_pos) orelse break;
-        max_count += 1;
-        if (positions_len >= positions.len) return null;
-        positions[positions_len] = current_pos;
-        positions_len += 1;
-    }
-
-    var count = max_count;
-    while (true) {
-        if (matchByteTermsAt(terms, haystack, term_index + 1, positions[count])) |end| return end;
-        if (count == term.min) break;
-        count -= 1;
-    }
-
-    return null;
+    const next_pos = matchByteAtomAt(term.atom, haystack, pos) orelse return null;
+    return matchUtf8ClassTermReps(term, terms, term_index, haystack, next_pos, count + 1);
 }
 
 fn matchByteTermsAtWithSlots(
@@ -882,60 +882,39 @@ fn matchUtf8ClassTermWithSlots(
     pos: usize,
     slots: []?usize,
 ) regex.Vm.MatchError!?usize {
-    const State = struct {
-        pos: usize,
-        snapshot: []?usize,
+    return matchUtf8ClassTermRepsWithSlots(allocator, term, terms, term_index, haystack, pos, slots, 0);
+}
+
+fn matchUtf8ClassTermRepsWithSlots(
+    allocator: std.mem.Allocator,
+    term: ByteTerm,
+    terms: []const ByteTerm,
+    term_index: usize,
+    haystack: []const u8,
+    pos: usize,
+    slots: []?usize,
+    count: u32,
+) regex.Vm.MatchError!?usize {
+    if (count >= term.min) {
+        const rest_snapshot = try cloneSlots(allocator, slots);
+        defer allocator.free(rest_snapshot);
+
+        if (try matchByteTermsAtWithSlots(allocator, terms, haystack, term_index + 1, pos, slots)) |end| return end;
+        restoreSlots(slots, rest_snapshot);
+    }
+    if (term.max != null and count >= term.max.?) return null;
+
+    const atom_snapshot = try cloneSlots(allocator, slots);
+    defer allocator.free(atom_snapshot);
+
+    const next_pos = try matchByteAtomAtWithSlots(allocator, term.atom, haystack, pos, slots) orelse {
+        restoreSlots(slots, atom_snapshot);
+        return null;
     };
-    var states: [256]State = undefined;
-    var states_len: usize = 0;
-    errdefer {
-        for (states[0..states_len]) |state| allocator.free(state.snapshot);
-    }
 
-    states[states_len] = .{
-        .pos = pos,
-        .snapshot = try cloneSlots(allocator, slots),
-    };
-    states_len += 1;
+    if (try matchUtf8ClassTermRepsWithSlots(allocator, term, terms, term_index, haystack, next_pos, slots, count + 1)) |end| return end;
 
-    var current_pos = pos;
-    var matched_min: u32 = 0;
-    while (matched_min < term.min) : (matched_min += 1) {
-        current_pos = try matchByteAtomAtWithSlots(allocator, term.atom, haystack, current_pos, slots) orelse return null;
-        if (states_len >= states.len) return null;
-        states[states_len] = .{
-            .pos = current_pos,
-            .snapshot = try cloneSlots(allocator, slots),
-        };
-        states_len += 1;
-    }
-
-    var max_count = matched_min;
-    while (term.max == null or max_count < term.max.?) {
-        current_pos = try matchByteAtomAtWithSlots(allocator, term.atom, haystack, current_pos, slots) orelse break;
-        max_count += 1;
-        if (states_len >= states.len) return null;
-        states[states_len] = .{
-            .pos = current_pos,
-            .snapshot = try cloneSlots(allocator, slots),
-        };
-        states_len += 1;
-    }
-
-    var count = max_count;
-    while (true) {
-        const state = states[count];
-        restoreSlots(slots, state.snapshot);
-        if (try matchByteTermsAtWithSlots(allocator, terms, haystack, term_index + 1, state.pos, slots)) |end| {
-            for (states[0..states_len]) |saved| allocator.free(saved.snapshot);
-            return end;
-        }
-        if (count == term.min) break;
-        count -= 1;
-    }
-
-    restoreSlots(slots, states[0].snapshot);
-    for (states[0..states_len]) |state| allocator.free(state.snapshot);
+    restoreSlots(slots, atom_snapshot);
     return null;
 }
 
@@ -1433,6 +1412,27 @@ test "Searcher byte fallback supports counted larger UTF-8 ranges" {
     try testing.expectEqual(Span{ .start = 1, .end = 5 }, report.match_span);
 }
 
+test "Searcher byte fallback supports long quantified larger UTF-8 ranges" {
+    const testing = std.testing;
+
+    var builder: std.ArrayList(u8) = .empty;
+    defer builder.deinit(testing.allocator);
+
+    var count: usize = 0;
+    while (count < 300) : (count += 1) {
+        try builder.appendSlice(testing.allocator, "ж");
+    }
+
+    var searcher = try Searcher.init(testing.allocator, "[Ā-ӿ]+", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-long-range.bin", builder.items)).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(@as(usize, builder.items.len), report.match_span.end - report.match_span.start);
+}
+
 test "Searcher byte fallback is limited to exact literal patterns" {
     const testing = std.testing;
 
@@ -1440,6 +1440,15 @@ test "Searcher byte fallback is limited to exact literal patterns" {
     defer searcher.deinit();
 
     try testing.expect(searcher.reportFirstByteMatch("sample.bin", "a\xffb") == null);
+}
+
+test "Searcher byte plan inventory records current unsupported structural shapes" {
+    try expectBytePlan("a^b", false);
+    try expectBytePlan("a$b", false);
+    try expectBytePlan("^+", false);
+    try expectBytePlan("x(ab)y", false);
+    try expectBytePlan("x(a.[0-9]b)y", false);
+    try expectBytePlan("x(^ab)y", false);
 }
 
 test "Searcher byte fallback supports anchored literal start and end patterns" {
@@ -1841,6 +1850,21 @@ test "Searcher byte fallback supports empty alternation branches inside a sequen
 
     try testing.expect(searcher.reportFirstByteMatch("empty-alt.bin", "ac") != null);
     try testing.expect(searcher.reportFirstByteMatch("empty-alt.bin", "abc") != null);
+}
+
+test "Searcher byte fallback supports empty capture groups inside a sequence" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a()b", .{});
+    defer searcher.deinit();
+
+    const found = (try searcher.firstByteMatch("xx\xffabyy")).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(Span{ .start = 3, .end = 5 }, found.span);
+    try testing.expectEqual(@as(usize, 1), found.groups.len);
+    try testing.expectEqual(@as(?usize, 4), found.groups[0].start);
+    try testing.expectEqual(@as(?usize, 4), found.groups[0].end);
 }
 
 test "Searcher byte fallback supports anchored empty matches" {

@@ -162,3 +162,9 @@ encoding behavior without rewriting the whole architecture around generic
   special invalid-UTF-8 fallback cases. Nested alternation now also lowers as
   a first-class byte pattern instead of depending on narrower special-case
   lowering paths, and anchored grouped repetition now rides the planner too.
+  Quantified UTF-8 class matching no longer has an internal fixed-capacity
+  ceiling, so long Unicode-range runs stay on the byte path instead of falling
+  out of the planner for implementation reasons. Empty capture groups inside
+  planner-friendly patterns now ride that raw-byte path too, so cases like
+  `a()b` no longer need the lossy retry just because the file contains
+  unrelated invalid bytes.

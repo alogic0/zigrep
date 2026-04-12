@@ -83,6 +83,7 @@ Current `--text` note:
 - `--text` disables binary-file skipping and tries to search the file anyway
 - if a file contains invalid UTF-8 bytes, the current implementation first uses its raw-byte planner and only uses a lossy internal retry for patterns that still fall outside that planner
 - before that lossy retry, many planner-friendly literal, grouping, and simple byte-sequence regexes are matched directly against the original bytes, including their capture spans
+- planner-friendly empty capture groups like `a()b` are covered by that raw-byte path too
 - default mode now uses that same raw-byte planner for text-like invalid UTF-8 files; patterns outside the planner still behave like no-match unless `--text` is used
 - literal-only UTF-8 classes like `[ж]`, negated literal-only UTF-8 classes like `[^ж]`, small positive UTF-8 ranges like `[а-я]`, negated small UTF-8 ranges like `[^а-я]`, larger Unicode ranges like `[Ā-ӿ]`, `[^Ā-ӿ]`, or `[Ā-ӿ]+`, bare anchors like `^` or `$`, grouped alternation branches that use those anchored forms, and anchored grouped patterns like `(^ab)+c` are covered by that planner too while keeping normal anchor semantics; the remaining misses are broader regex shapes that still fall outside the planner
 - when a reported line contains invalid bytes or unsafe control bytes, the CLI prints those bytes as `\xNN` escapes instead of sending them raw to the terminal

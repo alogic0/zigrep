@@ -45,6 +45,8 @@ path. The long-term replacement plan remains in
   as `((ab)|(cd))+e` and `((a[0-9])|(b.)){2}c`.
 - Empty subpatterns and empty alternation branches inside that same subset are
   also supported, such as `a(|b)c` and anchored empty matches like `^$`.
+- Empty capture groups inside that same subset are also supported, such as
+  `a()b`.
 - Empty branches are also supported inside quantified grouped alternation, such
   as `((|ab))+c` and `((|ab)){2}c`.
 - Planner-friendly captures on that same subset now preserve group spans on
