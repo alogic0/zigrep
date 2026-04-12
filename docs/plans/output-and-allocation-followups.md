@@ -23,10 +23,11 @@ Reduce avoidable runtime overhead in output-heavy and allocation-heavy paths wit
 
 - [x] Audit temporary string and buffer allocations in the reporting path.
   Identify where `formatReport`, captured parallel output, decoded text buffers, or line ownership still allocate more than necessary.
-  The current audit is recorded in `docs/tmp/output-allocation-audit.md`, and `formatReport` no longer duplicates its formatted buffer.
+  The current audit is summarized in [output-allocation-notes.md](../output-allocation-notes.md), and `formatReport` no longer duplicates its formatted buffer.
 
-- [ ] Separate required allocations from convenience allocations in the current search/output path.
+- [x] Separate required allocations from convenience allocations in the current search/output path.
   Document which allocations are structurally required for correctness or lifetime reasons and which ones are candidates for removal.
+  The tracked split now lives in [output-allocation-notes.md](../output-allocation-notes.md).
 
 - [ ] Reduce avoidable heap duplication in the parallel output path.
   Check whether the current stored-per-file output chunk can be kept correct while reducing copies or intermediate allocation churn.
