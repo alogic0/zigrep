@@ -21,6 +21,9 @@ path. The long-term replacement plan remains in
 - The current raw-byte path also covers simple ASCII concat sequences built
   from literals, dots, and character classes, such as `a[0-9]b`, `a[^x]b`, and
   `a.[0-9]b`.
+- Repetition over that same ASCII subset is also supported when it applies to a
+  single literal, dot, or class atom, including `+`, `*`, `?`, and counted
+  forms such as `ab+c`, `a.*b`, `a[0-9]{1,3}b`, and `a.{2}[0-9]{2}b`.
 - The lossy shadow haystack replaces each invalid byte that breaks UTF-8
   decoding with the single ASCII byte `?`.
 - Matching uses that lossy shadow haystack only as an internal aid. Printed
@@ -31,8 +34,9 @@ path. The long-term replacement plan remains in
 Under the current `--text` fallback:
 
 - Exact, anchored, and simple alternated ASCII literal patterns plus simple
-  ASCII concat sequences built from literals, dots, and character classes
-  match against the original file bytes.
+  ASCII concat sequences built from literals, dots, and character classes plus
+  single-atom repetition over that subset match against the original file
+  bytes.
 - `.` can match a replaced invalid byte because the matcher sees `?`.
 - Anchors and newline behavior still follow the current regex engine rules.
 - Column numbers and line spans stay byte-oriented against the original file

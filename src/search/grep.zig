@@ -44,13 +44,23 @@ const ByteAtom = union(enum) {
     }
 };
 
+const ByteTerm = struct {
+    atom: ByteAtom,
+    min: u32 = 1,
+    max: ?u32 = 1,
+
+    fn deinit(self: ByteTerm, allocator: std.mem.Allocator) void {
+        self.atom.deinit(allocator);
+    }
+};
+
 const BytePattern = struct {
     mode: AnchoredLiteralMode,
-    atoms: []ByteAtom,
+    terms: []ByteTerm,
 
     fn deinit(self: BytePattern, allocator: std.mem.Allocator) void {
-        for (self.atoms) |atom| atom.deinit(allocator);
-        allocator.free(self.atoms);
+        for (self.terms) |term| term.deinit(allocator);
+        allocator.free(self.terms);
     }
 };
 
@@ -192,12 +202,22 @@ fn extractBytePattern(
     root: regex.hir.NodeId,
 ) !?BytePattern {
     return switch (nodes[@intFromEnum(root)]) {
-        .literal => |cp| if (cp <= 0x7f) .{
-            .mode = .contains,
-            .atoms = try allocator.dupe(ByteAtom, &[_]ByteAtom{
-                .{ .literal = try allocator.dupe(u8, &[_]u8{@as(u8, @intCast(cp))}) },
-            }),
-        } else null,
+        .literal, .dot, .char_class, .repetition => blk: {
+            var terms: std.ArrayList(ByteTerm) = .empty;
+            defer terms.deinit(allocator);
+            errdefer for (terms.items) |term| term.deinit(allocator);
+            var literal_bytes: std.ArrayList(u8) = .empty;
+            defer literal_bytes.deinit(allocator);
+
+            if (!(try appendNodeToByteTerms(allocator, nodes, root, &terms, &literal_bytes))) break :blk null;
+            try flushLiteralTerm(allocator, &terms, &literal_bytes);
+            if (terms.items.len == 0) break :blk null;
+
+            break :blk .{
+                .mode = .contains,
+                .terms = try terms.toOwnedSlice(allocator),
+            };
+        },
         .concat => |children| blk: {
             var prefix_anchor = false;
             var suffix_anchor = false;
@@ -214,40 +234,18 @@ fn extractBytePattern(
             }
             if (start_index == end_index) break :blk null;
 
-            var atoms: std.ArrayList(ByteAtom) = .empty;
-            defer atoms.deinit(allocator);
-            errdefer for (atoms.items) |atom| atom.deinit(allocator);
+            var terms: std.ArrayList(ByteTerm) = .empty;
+            defer terms.deinit(allocator);
+            errdefer for (terms.items) |term| term.deinit(allocator);
 
             var literal_bytes: std.ArrayList(u8) = .empty;
             defer literal_bytes.deinit(allocator);
 
             for (children[start_index..end_index]) |child| {
-                switch (nodes[@intFromEnum(child)]) {
-                    .literal => |cp| {
-                        if (cp > 0x7f) break :blk null;
-                        try literal_bytes.append(allocator, @as(u8, @intCast(cp)));
-                    },
-                    .dot => {
-                        try flushLiteralAtom(allocator, &atoms, &literal_bytes);
-                        try atoms.append(allocator, .any_byte);
-                    },
-                    .char_class => |class| {
-                        if (!isAsciiClass(class)) break :blk null;
-                        try flushLiteralAtom(allocator, &atoms, &literal_bytes);
-                        const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
-                        @memcpy(duped_items, class.items);
-                        try atoms.append(allocator, .{
-                            .class = .{
-                                .negated = class.negated,
-                                .items = duped_items,
-                            },
-                        });
-                    },
-                    else => break :blk null,
-                }
+                if (!(try appendNodeToByteTerms(allocator, nodes, child, &terms, &literal_bytes))) break :blk null;
             }
-            try flushLiteralAtom(allocator, &atoms, &literal_bytes);
-            if (atoms.items.len == 0) break :blk null;
+            try flushLiteralTerm(allocator, &terms, &literal_bytes);
+            if (terms.items.len == 0) break :blk null;
 
             break :blk .{
                 .mode = if (prefix_anchor and suffix_anchor)
@@ -258,20 +256,106 @@ fn extractBytePattern(
                     .end
                 else
                     .contains,
-                .atoms = try atoms.toOwnedSlice(allocator),
+                .terms = try terms.toOwnedSlice(allocator),
             };
         },
         else => null,
     };
 }
 
-fn flushLiteralAtom(
+fn appendNodeToByteTerms(
     allocator: std.mem.Allocator,
-    atoms: *std.ArrayList(ByteAtom),
+    nodes: []const regex.hir.Node,
+    node_id: regex.hir.NodeId,
+    terms: *std.ArrayList(ByteTerm),
+    literal_bytes: *std.ArrayList(u8),
+) !bool {
+    switch (nodes[@intFromEnum(node_id)]) {
+        .literal => |cp| {
+            if (cp > 0x7f) return false;
+            try literal_bytes.append(allocator, @as(u8, @intCast(cp)));
+            return true;
+        },
+        .dot => {
+            try flushLiteralTerm(allocator, terms, literal_bytes);
+            try terms.append(allocator, .{ .atom = .any_byte });
+            return true;
+        },
+        .char_class => |class| {
+            if (!isAsciiClass(class)) return false;
+            try flushLiteralTerm(allocator, terms, literal_bytes);
+            const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
+            @memcpy(duped_items, class.items);
+            try terms.append(allocator, .{
+                .atom = .{
+                    .class = .{
+                        .negated = class.negated,
+                        .items = duped_items,
+                    },
+                },
+            });
+            return true;
+        },
+        .repetition => |rep| {
+            if (try extractRepeatableByteTerm(allocator, nodes, rep.child, rep.quantifier)) |term| {
+                try flushLiteralTerm(allocator, terms, literal_bytes);
+                try terms.append(allocator, term);
+                return true;
+            }
+
+            const max = rep.quantifier.max orelse return false;
+            if (max != rep.quantifier.min) return false;
+
+            var count: u32 = 0;
+            while (count < rep.quantifier.min) : (count += 1) {
+                if (!(try appendNodeToByteTerms(allocator, nodes, rep.child, terms, literal_bytes))) return false;
+            }
+            return true;
+        },
+        else => return false,
+    }
+}
+
+fn extractRepeatableByteTerm(
+    allocator: std.mem.Allocator,
+    nodes: []const regex.hir.Node,
+    node_id: regex.hir.NodeId,
+    quantifier: regex.hir.Quantifier,
+) !?ByteTerm {
+    const atom = switch (nodes[@intFromEnum(node_id)]) {
+        .literal => |cp| if (cp <= 0x7f)
+            ByteAtom{ .literal = try allocator.dupe(u8, &[_]u8{@as(u8, @intCast(cp))}) }
+        else
+            return null,
+        .dot => ByteAtom.any_byte,
+        .char_class => |class| blk: {
+            if (!isAsciiClass(class)) return null;
+            const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
+            @memcpy(duped_items, class.items);
+            break :blk ByteAtom{
+                .class = .{
+                    .negated = class.negated,
+                    .items = duped_items,
+                },
+            };
+        },
+        else => return null,
+    };
+
+    return .{
+        .atom = atom,
+        .min = quantifier.min,
+        .max = quantifier.max,
+    };
+}
+
+fn flushLiteralTerm(
+    allocator: std.mem.Allocator,
+    terms: *std.ArrayList(ByteTerm),
     literal_bytes: *std.ArrayList(u8),
 ) !void {
     if (literal_bytes.items.len == 0) return;
-    try atoms.append(allocator, .{ .literal = try literal_bytes.toOwnedSlice(allocator) });
+    try terms.append(allocator, .{ .atom = .{ .literal = try literal_bytes.toOwnedSlice(allocator) } });
 }
 
 fn findByteAlternationSpan(patterns: []const BytePattern, haystack: []const u8) ?Span {
@@ -322,36 +406,71 @@ fn findBytePatternAnchoredFullSpan(pattern: BytePattern, haystack: []const u8) ?
 }
 
 fn matchBytePatternAt(pattern: BytePattern, haystack: []const u8, start: usize) ?Span {
-    var pos = start;
-    for (pattern.atoms) |atom| {
-        switch (atom) {
-            .literal => |bytes| {
-                if (pos + bytes.len > haystack.len) return null;
-                if (!std.mem.eql(u8, haystack[pos .. pos + bytes.len], bytes)) return null;
-                pos += bytes.len;
-            },
-            .any_byte => {
-                if (pos >= haystack.len or haystack[pos] == '\n') return null;
-                pos += 1;
-            },
-            .class => |class| {
-                if (pos >= haystack.len or !byteMatchesClass(class, haystack[pos])) return null;
-                pos += 1;
-            },
-        }
-    }
-    return .{ .start = start, .end = pos };
+    const end = matchByteTermsAt(pattern.terms, haystack, 0, start) orelse return null;
+    return .{ .start = start, .end = end };
 }
 
 fn minBytePatternLen(pattern: BytePattern) usize {
     var total: usize = 0;
-    for (pattern.atoms) |atom| {
-        total += switch (atom) {
-            .literal => |bytes| bytes.len,
-            .any_byte, .class => 1,
-        };
+    for (pattern.terms) |term| {
+        total += term.min * byteAtomLen(term.atom);
     }
     return total;
+}
+
+fn matchByteTermsAt(terms: []const ByteTerm, haystack: []const u8, term_index: usize, pos: usize) ?usize {
+    if (term_index >= terms.len) return pos;
+
+    const term = terms[term_index];
+    const step = byteAtomLen(term.atom);
+
+    var min_pos = pos;
+    var matched_min: u32 = 0;
+    while (matched_min < term.min) : (matched_min += 1) {
+        min_pos = matchByteAtomAt(term.atom, haystack, min_pos) orelse return null;
+    }
+
+    var max_pos = min_pos;
+    var max_count = matched_min;
+    while (term.max == null or max_count < term.max.?) {
+        max_pos = matchByteAtomAt(term.atom, haystack, max_pos) orelse break;
+        max_count += 1;
+    }
+
+    var count = max_count;
+    var trial_pos = max_pos;
+    while (true) {
+        if (matchByteTermsAt(terms, haystack, term_index + 1, trial_pos)) |end| return end;
+        if (count == matched_min) break;
+        count -= 1;
+        trial_pos -= step;
+    }
+
+    return null;
+}
+
+fn matchByteAtomAt(atom: ByteAtom, haystack: []const u8, pos: usize) ?usize {
+    return switch (atom) {
+        .literal => |bytes| if (pos + bytes.len <= haystack.len and std.mem.eql(u8, haystack[pos .. pos + bytes.len], bytes))
+            pos + bytes.len
+        else
+            null,
+        .any_byte => if (pos < haystack.len and haystack[pos] != '\n')
+            pos + 1
+        else
+            null,
+        .class => |class| if (pos < haystack.len and byteMatchesClass(class, haystack[pos]))
+            pos + 1
+        else
+            null,
+    };
+}
+
+fn byteAtomLen(atom: ByteAtom) usize {
+    return switch (atom) {
+        .literal => |bytes| bytes.len,
+        .any_byte, .class => 1,
+    };
 }
 
 fn isAsciiClass(class: regex.hir.CharacterClass) bool {
@@ -551,6 +670,81 @@ test "Searcher byte fallback supports mixed dot and class sequences" {
 
     try testing.expectEqual(@as(usize, 3), report.column_number);
     try testing.expectEqual(Span{ .start = 2, .end = 6 }, report.match_span);
+}
+
+test "Searcher byte fallback supports fixed counted repetition" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "ab{2}c", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("repeat.bin", "xxabbcyy").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 6 }, report.match_span);
+}
+
+test "Searcher byte fallback supports fixed repetition over wildcard and class atoms" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a.{2}[0-9]{2}b", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("repeat-mixed.bin", "xa\xffy42bz").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), report.column_number);
+    try testing.expectEqual(Span{ .start = 1, .end = 7 }, report.match_span);
+}
+
+test "Searcher byte fallback supports plus repetition over literal atoms" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "ab+c", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("repeat.bin", "xxabbbc").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 7 }, report.match_span);
+}
+
+test "Searcher byte fallback supports star repetition over wildcard atoms" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a.*b", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("star.bin", "xa\xffy42bz").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), report.column_number);
+    try testing.expectEqual(Span{ .start = 1, .end = 7 }, report.match_span);
+}
+
+test "Searcher byte fallback supports bounded repetition over class atoms" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a[0-9]{1,3}b", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("range.bin", "xa42bz").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), report.column_number);
+    try testing.expectEqual(Span{ .start = 1, .end = 5 }, report.match_span);
+}
+
+test "Searcher byte fallback supports optional repetition" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "ab?c", .{});
+    defer searcher.deinit();
+
+    try testing.expect(searcher.reportFirstByteMatch("optional.bin", "ac") != null);
+    try testing.expect(searcher.reportFirstByteMatch("optional.bin", "abc") != null);
 }
 
 test "reportFirstMatch stays aligned across buffered and mmap file reads" {
