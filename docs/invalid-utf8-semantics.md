@@ -36,6 +36,9 @@ path. The long-term replacement plan remains in
   also supported, such as `a(|b)c` and anchored empty matches like `^$`.
 - Empty branches are also supported inside quantified grouped alternation, such
   as `((|ab))+c` and `((|ab)){2}c`.
+- Planner-friendly captures on that same subset now preserve group spans on
+  the raw-byte path too, including simple repeated-group cases such as
+  `(ab)+c`.
 - The lossy shadow haystack replaces each invalid byte that breaks UTF-8
   decoding with the single ASCII byte `?`.
 - Matching uses that lossy shadow haystack only as an internal aid. Printed
@@ -51,6 +54,8 @@ Under the current `--text` fallback:
   alternation over that subset, plus empty branches including inside quantified
   grouped alternation and anchored empty matches, match against the original
   file bytes.
+- Planner-friendly capture groups on that raw-byte subset keep capture spans
+  instead of degrading to whole-match-only reporting.
 - `.` can match a replaced invalid byte because the matcher sees `?`.
 - Anchors and newline behavior still follow the current regex engine rules.
 - Column numbers and line spans stay byte-oriented against the original file

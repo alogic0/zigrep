@@ -565,7 +565,7 @@ fn reportFileMatch(
 
     return searcher.reportFirstMatch(path, bytes) catch |err| switch (err) {
         error.InvalidUtf8 => if (!allow_lossy_invalid_utf8) null else {
-            if (searcher.reportFirstByteMatch(path, bytes)) |report| {
+            if (try searcher.reportFirstByteMatch(path, bytes)) |report| {
                 return report;
             }
 

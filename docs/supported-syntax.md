@@ -82,8 +82,10 @@ Current `--text` note:
 
 - `--text` disables binary-file skipping and tries to search the file anyway
 - if a file contains invalid UTF-8 bytes, the current implementation still uses a lossy internal retry so matching can continue
+- before that lossy retry, many planner-friendly ASCII regexes are matched directly against the original bytes, including their capture spans
 - when a reported line contains invalid bytes or unsafe control bytes, the CLI prints those bytes as `\xNN` escapes instead of sending them raw to the terminal
 - this is a practical fallback, not full ripgrep-compatible encoding behavior
+- the exact temporary rules are documented in [docs/invalid-utf8-semantics.md](/home/oleg/prog/zigrep/docs/invalid-utf8-semantics.md)
 
 Output is line-oriented. When enabled, prefixes are emitted in this order:
 

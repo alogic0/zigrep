@@ -50,7 +50,7 @@ encoding behavior without rewriting the whole architecture around generic
 - [x] Keep [docs/rg-binary-encoding-plan.md](/home/oleg/prog/zigrep/docs/rg-binary-encoding-plan.md) as the main long-term roadmap
 - [x] Add more regression tests around invalid UTF-8 under default mode and `--text`
 - [x] Add more regression tests around binary-file heuristics
-- [ ] Design a true byte-oriented search path
+- [x] Design a true byte-oriented search path
 - [x] Define regex semantics for invalid UTF-8 input
 - [x] Add BOM detection
 - [x] Add UTF-16LE and UTF-16BE decoding support
@@ -125,3 +125,8 @@ encoding behavior without rewriting the whole architecture around generic
   alternation and anchored empty matches, on invalid UTF-8 input, which
   reduces reliance on the lossy retry for the simplest and most common search
   cases.
+- That raw-byte path now also preserves capture spans for planner-friendly
+  groups, including repeated-group cases that stay inside the current byte-plan
+  subset, so the remaining invalid-UTF-8 gap is concentrated on eliminating
+  the lossy retry for patterns outside that subset rather than on missing byte
+  capture support inside it.

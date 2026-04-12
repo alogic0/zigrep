@@ -35,6 +35,8 @@ const ByteAtom = union(enum) {
     any_byte,
     class: regex.hir.CharacterClass,
     alternation: []BytePattern,
+    save_start: u32,
+    save_end: u32,
 
     fn deinit(self: ByteAtom, allocator: std.mem.Allocator) void {
         switch (self) {
@@ -44,7 +46,7 @@ const ByteAtom = union(enum) {
                 for (patterns) |pattern| pattern.deinit(allocator);
                 allocator.free(patterns);
             },
-            .any_byte => {},
+            .any_byte, .save_start, .save_end => {},
         }
     }
 };
@@ -124,16 +126,49 @@ pub const Searcher = struct {
         return null;
     }
 
-    pub fn reportFirstByteMatch(self: *Searcher, path: []const u8, haystack: []const u8) ?MatchReport {
+    pub fn firstByteMatch(self: *Searcher, haystack: []const u8) regex.Vm.MatchError!?regex.Vm.Match {
         const span = switch (self.byte_plan) {
             .none => null,
             .single => |pattern| findBytePatternSpan(pattern, haystack),
             .alternation => |patterns| findByteAlternationSpan(patterns, haystack),
         } orelse return null;
 
+        const slots = try self.allocator.alloc(?usize, (self.program.capture_count + 1) * 2);
+        defer self.allocator.free(slots);
+        @memset(slots, null);
+
+        const end = switch (self.byte_plan) {
+            .none => unreachable,
+            .single => |pattern| try matchBytePatternAtWithSlots(self.allocator, pattern, haystack, span.start, slots),
+            .alternation => |patterns| try matchByteAlternationAtWithSlots(self.allocator, patterns, haystack, span.start, slots),
+        } orelse return null;
+        if (end != span.end) return null;
+
+        slots[0] = span.start;
+        slots[1] = span.end;
+
+        const groups = try self.allocator.alloc(regex.Vm.Capture, self.program.capture_count);
+        errdefer self.allocator.free(groups);
+        for (groups, 0..) |*group, index| {
+            group.* = .{
+                .start = slots[2 * (index + 1)],
+                .end = slots[2 * (index + 1) + 1],
+            };
+        }
+
+        return .{
+            .span = .{ .start = span.start, .end = span.end },
+            .groups = groups,
+        };
+    }
+
+    pub fn reportFirstByteMatch(self: *Searcher, path: []const u8, haystack: []const u8) SearchError!?MatchReport {
+        const found = try self.firstByteMatch(haystack) orelse return null;
+        defer found.deinit(self.allocator);
+
         return buildReport(path, haystack, .{
-            .start = span.start,
-            .end = span.end,
+            .start = found.span.start,
+            .end = found.span.end,
         });
     }
 };
@@ -213,7 +248,11 @@ fn extractBytePattern(
             .mode = .contains,
             .terms = try allocator.alloc(ByteTerm, 0),
         },
-        .group => |group| try extractBytePattern(allocator, nodes, group.child),
+        .group => |group| blk: {
+            var pattern = (try extractBytePattern(allocator, nodes, group.child)) orelse break :blk null;
+            pattern = try wrapPatternWithCapture(allocator, pattern, group.index);
+            break :blk pattern;
+        },
         .literal, .dot, .char_class, .repetition => blk: {
             var terms: std.ArrayList(ByteTerm) = .empty;
             defer terms.deinit(allocator);
@@ -296,12 +335,12 @@ fn appendNodeToByteTerms(
 ) BytePlanError!bool {
     switch (nodes[@intFromEnum(node_id)]) {
         .group => |group| {
-            if (try extractAlternationByteTerm(allocator, nodes, group.child)) |term| {
-                try flushLiteralTerm(allocator, terms, literal_bytes);
-                try terms.append(allocator, term);
-                return true;
-            }
-            return appendNodeToByteTerms(allocator, nodes, group.child, terms, literal_bytes);
+            try flushLiteralTerm(allocator, terms, literal_bytes);
+            try terms.append(allocator, .{ .atom = .{ .save_start = group.index } });
+            if (!(try appendNodeToByteTerms(allocator, nodes, group.child, terms, literal_bytes))) return false;
+            try flushLiteralTerm(allocator, terms, literal_bytes);
+            try terms.append(allocator, .{ .atom = .{ .save_end = group.index } });
+            return true;
         },
         .literal => |cp| {
             if (cp > 0x7f) return false;
@@ -362,7 +401,20 @@ fn extractRepeatableByteTerm(
             updated.max = quantifier.max;
             return updated;
         },
-        .group => |group| return extractRepeatableByteTerm(allocator, nodes, group.child, quantifier),
+        .group => |group| {
+            var pattern = (try extractBytePattern(allocator, nodes, group.child)) orelse return null;
+            errdefer pattern.deinit(allocator);
+            if (pattern.mode != .contains) return null;
+            pattern = try wrapPatternWithCapture(allocator, pattern, group.index);
+
+            const patterns = try allocator.alloc(BytePattern, 1);
+            patterns[0] = pattern;
+            return .{
+                .atom = .{ .alternation = patterns },
+                .min = quantifier.min,
+                .max = quantifier.max,
+            };
+        },
         else => {},
     }
 
@@ -392,7 +444,7 @@ fn extractRepeatableByteTerm(
                         },
                     };
                 },
-                .alternation => return null,
+                .alternation, .save_start, .save_end => return null,
             };
             _ = children;
             break :blk dup_atom;
@@ -448,6 +500,23 @@ fn extractAlternationByteTerm(
         .atom = .{ .alternation = try patterns.toOwnedSlice(allocator) },
         .min = 1,
         .max = 1,
+    };
+}
+
+fn wrapPatternWithCapture(
+    allocator: std.mem.Allocator,
+    pattern: BytePattern,
+    group_index: u32,
+) BytePlanError!BytePattern {
+    const wrapped = try allocator.alloc(ByteTerm, pattern.terms.len + 2);
+    wrapped[0] = .{ .atom = .{ .save_start = group_index } };
+    @memcpy(wrapped[1 .. wrapped.len - 1], pattern.terms);
+    wrapped[wrapped.len - 1] = .{ .atom = .{ .save_end = group_index } };
+    allocator.free(pattern.terms);
+
+    return .{
+        .mode = pattern.mode,
+        .terms = wrapped,
     };
 }
 
@@ -512,6 +581,16 @@ fn matchBytePatternAt(pattern: BytePattern, haystack: []const u8, start: usize) 
     return .{ .start = start, .end = end };
 }
 
+fn matchBytePatternAtWithSlots(
+    allocator: std.mem.Allocator,
+    pattern: BytePattern,
+    haystack: []const u8,
+    start: usize,
+    slots: []?usize,
+) regex.Vm.MatchError!?usize {
+    return matchByteTermsAtWithSlots(allocator, pattern.terms, haystack, 0, start, slots);
+}
+
 fn minBytePatternLen(pattern: BytePattern) usize {
     var total: usize = 0;
     for (pattern.terms) |term| {
@@ -556,9 +635,32 @@ fn matchByteTermsAt(terms: []const ByteTerm, haystack: []const u8, term_index: u
     return null;
 }
 
+fn matchByteTermsAtWithSlots(
+    allocator: std.mem.Allocator,
+    terms: []const ByteTerm,
+    haystack: []const u8,
+    term_index: usize,
+    pos: usize,
+    slots: []?usize,
+) regex.Vm.MatchError!?usize {
+    if (term_index >= terms.len) return pos;
+    return matchByteTermRepsWithSlots(allocator, terms, haystack, term_index, pos, slots, 0);
+}
+
 fn matchContainedBytePatternAt(pattern: BytePattern, haystack: []const u8, pos: usize) ?usize {
     if (pattern.mode != .contains) return null;
     return matchByteTermsAt(pattern.terms, haystack, 0, pos);
+}
+
+fn matchContainedBytePatternAtWithSlots(
+    allocator: std.mem.Allocator,
+    pattern: BytePattern,
+    haystack: []const u8,
+    pos: usize,
+    slots: []?usize,
+) regex.Vm.MatchError!?usize {
+    if (pattern.mode != .contains) return null;
+    return matchByteTermsAtWithSlots(allocator, pattern.terms, haystack, 0, pos, slots);
 }
 
 fn matchAlternationTerm(
@@ -605,6 +707,74 @@ fn matchAlternationTermReps(
     return null;
 }
 
+fn matchByteAlternationAtWithSlots(
+    allocator: std.mem.Allocator,
+    patterns: []const BytePattern,
+    haystack: []const u8,
+    start: usize,
+    slots: []?usize,
+) regex.Vm.MatchError!?usize {
+    for (patterns) |pattern| {
+        const snapshot = try cloneSlots(allocator, slots);
+        defer allocator.free(snapshot);
+
+        if (try matchBytePatternAtWithSlots(allocator, pattern, haystack, start, slots)) |end| return end;
+        restoreSlots(slots, snapshot);
+    }
+    return null;
+}
+
+fn matchByteTermRepsWithSlots(
+    allocator: std.mem.Allocator,
+    terms: []const ByteTerm,
+    haystack: []const u8,
+    term_index: usize,
+    pos: usize,
+    slots: []?usize,
+    count: u32,
+) regex.Vm.MatchError!?usize {
+    const term = terms[term_index];
+
+    if (count >= term.min) {
+        const rest_snapshot = try cloneSlots(allocator, slots);
+        defer allocator.free(rest_snapshot);
+
+        if (try matchByteTermsAtWithSlots(allocator, terms, haystack, term_index + 1, pos, slots)) |end| return end;
+        restoreSlots(slots, rest_snapshot);
+    }
+
+    if (term.max != null and count >= term.max.?) return null;
+
+    const atom_snapshot = try cloneSlots(allocator, slots);
+    defer allocator.free(atom_snapshot);
+
+    const next_pos = try matchByteAtomAtWithSlots(allocator, term.atom, haystack, pos, slots) orelse {
+        restoreSlots(slots, atom_snapshot);
+        return null;
+    };
+
+    const next_count = count + 1;
+    if (next_pos == pos) {
+        if (next_count >= term.min) {
+            const rest_snapshot = try cloneSlots(allocator, slots);
+            defer allocator.free(rest_snapshot);
+
+            if (try matchByteTermsAtWithSlots(allocator, terms, haystack, term_index + 1, pos, slots)) |end| return end;
+            restoreSlots(slots, rest_snapshot);
+        }
+        if (term.max != null and next_count < term.max.?) {
+            if (try matchByteTermRepsWithSlots(allocator, terms, haystack, term_index, pos, slots, next_count)) |end| return end;
+        }
+        restoreSlots(slots, atom_snapshot);
+        return null;
+    }
+
+    if (try matchByteTermRepsWithSlots(allocator, terms, haystack, term_index, next_pos, slots, next_count)) |end| return end;
+
+    restoreSlots(slots, atom_snapshot);
+    return null;
+}
+
 fn matchByteAtomAt(atom: ByteAtom, haystack: []const u8, pos: usize) ?usize {
     return switch (atom) {
         .literal => |bytes| if (pos + bytes.len <= haystack.len and std.mem.eql(u8, haystack[pos .. pos + bytes.len], bytes))
@@ -620,6 +790,37 @@ fn matchByteAtomAt(atom: ByteAtom, haystack: []const u8, pos: usize) ?usize {
         else
             null,
         .alternation => unreachable,
+        .save_start, .save_end => pos,
+    };
+}
+
+fn matchByteAtomAtWithSlots(
+    allocator: std.mem.Allocator,
+    atom: ByteAtom,
+    haystack: []const u8,
+    pos: usize,
+    slots: []?usize,
+) regex.Vm.MatchError!?usize {
+    return switch (atom) {
+        .literal, .any_byte, .class => matchByteAtomAt(atom, haystack, pos),
+        .alternation => |patterns| blk: {
+            for (patterns) |pattern| {
+                const snapshot = try cloneSlots(allocator, slots);
+                defer allocator.free(snapshot);
+
+                if (try matchContainedBytePatternAtWithSlots(allocator, pattern, haystack, pos, slots)) |end| break :blk end;
+                restoreSlots(slots, snapshot);
+            }
+            break :blk null;
+        },
+        .save_start => |group_index| blk: {
+            slots[2 * group_index] = pos;
+            break :blk pos;
+        },
+        .save_end => |group_index| blk: {
+            slots[2 * group_index + 1] = pos;
+            break :blk pos;
+        },
     };
 }
 
@@ -628,6 +829,7 @@ fn byteAtomLen(atom: ByteAtom) usize {
         .literal => |bytes| bytes.len,
         .any_byte, .class => 1,
         .alternation => unreachable,
+        .save_start, .save_end => 0,
     };
 }
 
@@ -643,7 +845,18 @@ fn byteAtomMinLen(atom: ByteAtom) usize {
             }
             break :blk min_len orelse 0;
         },
+        .save_start, .save_end => 0,
     };
+}
+
+fn cloneSlots(allocator: std.mem.Allocator, slots: []const ?usize) std.mem.Allocator.Error![]?usize {
+    const snapshot = try allocator.alloc(?usize, slots.len);
+    @memcpy(snapshot, slots);
+    return snapshot;
+}
+
+fn restoreSlots(slots: []?usize, snapshot: []const ?usize) void {
+    @memcpy(slots, snapshot);
 }
 
 fn isAsciiClass(class: regex.hir.CharacterClass) bool {
@@ -933,6 +1146,24 @@ test "Searcher byte fallback treats simple groups transparently" {
     try testing.expectEqual(Span{ .start = 2, .end = 6 }, report.match_span);
 }
 
+test "Searcher firstByteMatch reports planner-friendly capture groups" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(a.)([0-9]b)", .{});
+    defer searcher.deinit();
+
+    const found = (try searcher.firstByteMatch("xxa\xff7byy")).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(?usize, 2), found.span.start);
+    try testing.expectEqual(@as(?usize, 6), found.span.end);
+    try testing.expectEqual(@as(usize, 2), found.groups.len);
+    try testing.expectEqual(@as(?usize, 2), found.groups[0].start);
+    try testing.expectEqual(@as(?usize, 4), found.groups[0].end);
+    try testing.expectEqual(@as(?usize, 4), found.groups[1].start);
+    try testing.expectEqual(@as(?usize, 6), found.groups[1].end);
+}
+
 test "Searcher byte fallback supports repetition over grouped literal subpatterns" {
     const testing = std.testing;
 
@@ -944,6 +1175,22 @@ test "Searcher byte fallback supports repetition over grouped literal subpattern
 
     try testing.expectEqual(@as(usize, 3), report.column_number);
     try testing.expectEqual(Span{ .start = 2, .end = 7 }, report.match_span);
+}
+
+test "Searcher firstByteMatch reports the last repeated group capture on the byte path" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(ab)+c", .{});
+    defer searcher.deinit();
+
+    const found = (try searcher.firstByteMatch("xxababc")).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(?usize, 2), found.span.start);
+    try testing.expectEqual(@as(?usize, 7), found.span.end);
+    try testing.expectEqual(@as(usize, 1), found.groups.len);
+    try testing.expectEqual(@as(?usize, 4), found.groups[0].start);
+    try testing.expectEqual(@as(?usize, 6), found.groups[0].end);
 }
 
 test "Searcher byte fallback supports counted repetition over grouped simple byte patterns" {
