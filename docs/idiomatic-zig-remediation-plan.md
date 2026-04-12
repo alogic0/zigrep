@@ -42,8 +42,8 @@ encoding behavior without rewriting the whole architecture around generic
 - [x] Add tests for files without trailing newlines
 - [x] Add tests for very long lines
 - [x] Add tests for matches late in large files
-- [ ] Evaluate whether line-number derivation needs optional indexing for repeated reports
-- [ ] Keep mmap and buffered paths aligned in report behavior
+- [x] Evaluate whether line-number derivation needs optional indexing for repeated reports
+- [x] Keep mmap and buffered paths aligned in report behavior
 
 ## Priority 5: Encoding And Byte-Oriented Search Work
 
@@ -98,3 +98,6 @@ encoding behavior without rewriting the whole architecture around generic
 - Line and column derivation now lives in `src/search/report.zig` with focused
   edge-case coverage for empty input, missing trailing newlines, long lines,
   and late matches.
+- The current line-number path intentionally does not build a line index yet,
+  because the CLI still reports only the first match per file.
+- Buffered and mmap-backed reads now have explicit report-equivalence coverage.

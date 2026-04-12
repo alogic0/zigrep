@@ -1,6 +1,7 @@
 const std = @import("std");
 const regex = @import("../regex/root.zig");
 const report_mod = @import("report.zig");
+const io = @import("io.zig");
 
 pub const SearchError = regex.ParseError || regex.Nfa.CompileError || regex.Vm.MatchError || error{
     UnsupportedCaseInsensitive,
@@ -145,4 +146,55 @@ test "reportFirstMatch rejects unsupported case-insensitive search for now" {
         "ABC",
         .{ .case_insensitive = true },
     ));
+}
+
+test "reportFirstMatch stays aligned across buffered and mmap file reads" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "first line\n" ++
+            "second line\n" ++
+            "late needle here\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const file_path = try std.fs.path.join(testing.allocator, &.{ root_path, "sample.txt" });
+    defer testing.allocator.free(file_path);
+
+    const buffered = try io.readFile(testing.allocator, file_path, .{ .strategy = .buffered });
+    defer buffered.deinit(testing.allocator);
+
+    const mapped = try io.readFile(testing.allocator, file_path, .{ .strategy = .mmap });
+    defer mapped.deinit(testing.allocator);
+
+    const buffered_report = (try reportFirstMatch(
+        testing.allocator,
+        "needle",
+        file_path,
+        buffered.bytes(),
+        .{},
+    )).?;
+    defer buffered_report.deinit(testing.allocator);
+
+    const mapped_report = (try reportFirstMatch(
+        testing.allocator,
+        "needle",
+        file_path,
+        mapped.bytes(),
+        .{},
+    )).?;
+    defer mapped_report.deinit(testing.allocator);
+
+    try testing.expectEqualStrings(buffered_report.path, mapped_report.path);
+    try testing.expectEqual(buffered_report.line_number, mapped_report.line_number);
+    try testing.expectEqual(buffered_report.column_number, mapped_report.column_number);
+    try testing.expectEqualStrings(buffered_report.line, mapped_report.line);
+    try testing.expectEqual(buffered_report.line_span, mapped_report.line_span);
+    try testing.expectEqual(buffered_report.match_span, mapped_report.match_span);
 }
