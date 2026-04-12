@@ -77,6 +77,7 @@ The current CLI supports:
 - Match-only output with `-o` or `--only-matching`
 - Newline-delimited JSON output with `--json`
 - NUL-delimited path output with `--null` for file-path reporting modes
+- Search summary output with `--stats`
 - Output toggles with `-H`/`--with-filename`, `--no-filename`, `-n`/`--line-number`, `--no-line-number`, `--column`, and `--no-column`
 - `--` to terminate flag parsing
 
@@ -111,6 +112,12 @@ Context mode note:
 - `--null` currently applies to `--files-with-matches` and `--files-without-match`
 - those modes emit matching or non-matching file paths terminated with `\0` instead of `\n`
 - `--null` is currently rejected with normal line output, count output, context output, and `--json`
+
+`--stats` note:
+
+- `--stats` prints a compact search summary to stderr after the normal search output
+- the current summary includes searched file count, matched file count, searched byte count, and skipped binary-file count
+- `--stats` does not change normal exit codes or stdout search results
 
 For non-technical users:
 

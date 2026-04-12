@@ -53,6 +53,7 @@ pub const CliOptions = struct {
     max_count: ?usize = null,
     context_before: usize = 0,
     context_after: usize = 0,
+    show_stats: bool = false,
     output: OutputOptions = .{},
     output_format: OutputFormat = .text,
     report_mode: ReportMode = .lines,
@@ -79,6 +80,25 @@ const ParseResult = union(enum) {
         }
     },
     run: CliOptions,
+};
+
+const SearchStats = struct {
+    searched_files: usize = 0,
+    matched_files: usize = 0,
+    searched_bytes: usize = 0,
+    skipped_binary_files: usize = 0,
+
+    fn add(self: *SearchStats, other: SearchStats) void {
+        self.searched_files += other.searched_files;
+        self.matched_files += other.matched_files;
+        self.searched_bytes += other.searched_bytes;
+        self.skipped_binary_files += other.skipped_binary_files;
+    }
+};
+
+const SearchResult = struct {
+    matched: bool,
+    stats: SearchStats = .{},
 };
 
 pub fn main() !void {
@@ -183,6 +203,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var max_count: ?usize = null;
     var context_before: usize = 0;
     var context_after: usize = 0;
+    var show_stats = false;
     var output: OutputOptions = .{};
     var output_format: OutputFormat = .text;
     var report_mode: ReportMode = .lines;
@@ -241,6 +262,10 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "--json")) {
                 output_format = .json;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--stats")) {
+                show_stats = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--null")) {
@@ -458,6 +483,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .max_count = max_count,
         .context_before = context_before,
         .context_after = context_after,
+        .show_stats = show_stats,
         .output = output,
         .output_format = output_format,
         .report_mode = report_mode,
@@ -482,24 +508,25 @@ pub fn runSearch(
     defer type_matcher.deinit(allocator);
     try zigrep.search.types.validateSelectedTypes(type_matcher, options.include_types, options.exclude_types);
 
-    var matched = false;
+    var result: SearchResult = .{ .matched = false };
     for (options.paths) |path| {
         if (options.buffer_output) {
             var buffered_output: std.Io.Writer.Allocating = .init(allocator);
             defer buffered_output.deinit();
 
-            if (try searchPath(allocator, &buffered_output.writer, stderr, path, options, type_matcher)) {
-                matched = true;
-            }
+            const path_result = try searchPath(allocator, &buffered_output.writer, stderr, path, options, type_matcher);
+            if (path_result.matched) result.matched = true;
+            result.stats.add(path_result.stats);
             try stdout.writeAll(buffered_output.written());
             continue;
         }
 
-        if (try searchPath(allocator, stdout, stderr, path, options, type_matcher)) {
-            matched = true;
-        }
+        const path_result = try searchPath(allocator, stdout, stderr, path, options, type_matcher);
+        if (path_result.matched) result.matched = true;
+        result.stats.add(path_result.stats);
     }
-    return if (matched) 0 else 1;
+    if (options.show_stats) try writeStats(stderr, result.stats);
+    return if (result.matched) 0 else 1;
 }
 
 fn searchPath(
@@ -509,7 +536,7 @@ fn searchPath(
     root_path: []const u8,
     options: CliOptions,
     type_matcher: zigrep.search.types.Matcher,
-) !bool {
+) !SearchResult {
     const TraversalWarningHandler = struct {
         writer: *std.Io.Writer,
 
@@ -745,7 +772,7 @@ fn searchEntriesSequential(
     stderr: *std.Io.Writer,
     entries: []const zigrep.search.walk.Entry,
     options: CliOptions,
-) !bool {
+) !SearchResult {
     // Search-lifetime allocator: the compiled regex program and VM state are
     // reused across every file in this search invocation.
     var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{
@@ -753,7 +780,7 @@ fn searchEntriesSequential(
     });
     defer searcher.deinit();
 
-    var matched = false;
+    var result: SearchResult = .{ .matched = false };
     for (entries) |entry| {
         // File-lifetime allocator: buffered reads and temporary per-file
         // matching/reporting allocations,
@@ -767,7 +794,10 @@ fn searchEntriesSequential(
                 if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
                 return err;
             };
-            if (decision == .binary) continue;
+            if (decision == .binary) {
+                result.stats.skipped_binary_files += 1;
+                continue;
+            }
         }
 
         const buffer = zigrep.search.io.readFile(file_allocator, entry.path, .{
@@ -777,6 +807,8 @@ fn searchEntriesSequential(
             return err;
         };
         defer buffer.deinit(file_allocator);
+        result.stats.searched_files += 1;
+        result.stats.searched_bytes += buffer.bytes().len;
 
         if (try writeFileOutput(
             file_allocator,
@@ -792,11 +824,12 @@ fn searchEntriesSequential(
             options.context_before,
             options.context_after,
         )) {
-            matched = true;
+            result.matched = true;
+            result.stats.matched_files += 1;
         }
     }
 
-    return matched;
+    return result;
 }
 
 fn searchEntriesParallel(
@@ -805,7 +838,7 @@ fn searchEntriesParallel(
     entries: []const zigrep.search.walk.Entry,
     options: CliOptions,
     schedule: zigrep.search.schedule.Plan,
-) !bool {
+) !SearchResult {
     // Worker-lifetime allocator: shared worker state and stored output lines
     // stay on smp_allocator, while each file gets its own short-lived arena.
     const worker_allocator = std.heap.smp_allocator;
@@ -815,6 +848,9 @@ fn searchEntriesParallel(
 
     const StoredOutput = struct {
         bytes: std.ArrayListUnmanaged(u8),
+        searched_bytes: usize = 0,
+        matched: bool = false,
+        skipped_binary: bool = false,
 
         fn deinit(self: @This()) void {
             var bytes = self.bytes;
@@ -880,7 +916,15 @@ fn searchEntriesParallel(
                     if (try self.warnAndSkip(entry.path, err)) return;
                     return err;
                 };
-                if (decision == .binary) return;
+                if (decision == .binary) {
+                    self.result_reports[index] = .{
+                        .bytes = .empty,
+                        .searched_bytes = 0,
+                        .matched = false,
+                        .skipped_binary = true,
+                    };
+                    return;
+                }
             }
 
             const buffer = zigrep.search.io.readFile(file_allocator, entry.path, .{
@@ -894,7 +938,7 @@ fn searchEntriesParallel(
             var capture: std.Io.Writer.Allocating = .init(std.heap.smp_allocator);
             defer capture.deinit();
 
-            if (try writeFileOutput(
+            const matched = try writeFileOutput(
                 file_allocator,
                 &capture.writer,
                 searcher,
@@ -907,11 +951,13 @@ fn searchEntriesParallel(
                 self.options.max_count,
                 self.options.context_before,
                 self.options.context_after,
-            )) {
-                self.result_reports[index] = .{
-                    .bytes = capture.toArrayList(),
-                };
-            }
+            );
+            self.result_reports[index] = .{
+                .bytes = capture.toArrayList(),
+                .searched_bytes = buffer.bytes().len,
+                .matched = matched,
+                .skipped_binary = false,
+            };
         }
 
         fn warnAndSkip(self: *@This(), path: []const u8, err: anyerror) !bool {
@@ -953,15 +999,24 @@ fn searchEntriesParallel(
         return err;
     }
 
-    var matched = false;
+    var result: SearchResult = .{ .matched = false };
     for (result_reports) |maybe_report| {
         if (maybe_report) |report| {
             defer report.deinit();
-            try stdout.writeAll(report.bytes.items);
-            matched = true;
+            if (report.skipped_binary) {
+                result.stats.skipped_binary_files += 1;
+                continue;
+            }
+            result.stats.searched_files += 1;
+            result.stats.searched_bytes += report.searched_bytes;
+            if (report.matched) {
+                try stdout.writeAll(report.bytes.items);
+                result.matched = true;
+                result.stats.matched_files += 1;
+            }
         }
     }
-    return matched;
+    return result;
 }
 
 fn printReport(
@@ -1059,6 +1114,13 @@ fn writeJsonPathEvent(writer: *std.Io.Writer, path: []const u8, matched: bool) !
 fn writePathResult(writer: *std.Io.Writer, path: []const u8, output: OutputOptions) !void {
     try writer.writeAll(path);
     try writer.writeByte(if (output.null_path_terminator) 0 else '\n');
+}
+
+fn writeStats(writer: *std.Io.Writer, stats: SearchStats) !void {
+    try writer.print(
+        "stats: searched_files={d} matched_files={d} searched_bytes={d} skipped_binary_files={d}\n",
+        .{ stats.searched_files, stats.matched_files, stats.searched_bytes, stats.skipped_binary_files },
+    );
 }
 
 fn writeReport(
@@ -1627,6 +1689,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\                        print only non-matching file paths
         \\  -o, --only-matching   print only the matched text
         \\  --json                emit newline-delimited JSON events
+        \\  --stats               print search summary statistics to stderr
         \\  --null                emit NUL-delimited paths in file path output modes
         \\  -H, --with-filename   always print the file path
         \\  --no-filename         suppress the file path prefix
@@ -1705,6 +1768,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(!opts.output.null_path_terminator);
             try testing.expectEqual(OutputFormat.text, opts.output_format);
             try testing.expectEqual(ReportMode.lines, opts.report_mode);
+            try testing.expect(!opts.show_stats);
         },
         .help => unreachable,
         .version => unreachable,
@@ -2003,6 +2067,22 @@ test "parseArgs accepts null output flag for path modes" {
             try testing.expect(opts.output.null_path_terminator);
             try testing.expectEqual(ReportMode.files_with_matches, opts.report_mode);
         },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts stats flag" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--stats", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| try testing.expect(opts.show_stats),
         .help, .version, .type_list => unreachable,
     }
 }
@@ -3156,6 +3236,38 @@ test "runCli json count mode emits count events" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli stats mode prints search summary to stderr" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "two.txt",
+        .data = "skip\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "binary.bin",
+        .data = "xx\x00needleyy",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--stats", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "stats: searched_files=2"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "matched_files=1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "skipped_binary_files=1"));
+}
+
 test "runCli only-matching mode prints each match occurrence" {
     const testing = std.testing;
 
@@ -3255,12 +3367,13 @@ test "searchEntriesSequential warns and skips unreadable files" {
         .{ .path = missing_path, .kind = .file, .depth = 0 },
     };
 
-    const matched = try searchEntriesSequential(testing.allocator, &stdout_capture.writer, &stderr_capture.writer, &entries, .{
+    const result = try searchEntriesSequential(testing.allocator, &stdout_capture.writer, &stderr_capture.writer, &entries, .{
         .pattern = "needle",
         .paths = &.{"."},
     });
 
-    try testing.expect(!matched);
+    try testing.expect(!result.matched);
+    try testing.expectEqual(@as(usize, 0), result.stats.searched_files);
     try testing.expectEqualStrings("", stdout_capture.written());
     try testing.expect(std.mem.containsAtLeast(u8, stderr_capture.written(), 1, "warning: skipping missing-file-for-zigrep-test: FileNotFound\n"));
 }

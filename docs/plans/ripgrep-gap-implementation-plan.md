@@ -97,9 +97,10 @@ ecosystem features.
   `zigrep` now supports newline-delimited JSON events via `--json` for
   match, count, and path-oriented reporting modes.
 
-- [ ] Add stats output.
-  Even a smaller first version would improve observability for performance and
-  search behavior.
+- [x] Add stats output.
+  `zigrep` now supports `--stats`, emitting a compact search summary to
+  stderr with searched file counts, matched file counts, searched bytes,
+  and skipped binary-file counts.
 
 - [ ] Add passthrough / non-match-printing modes only if justified.
   This is lower priority than count/context/json, but it is part of the broader
