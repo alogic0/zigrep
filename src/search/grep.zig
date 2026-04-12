@@ -209,6 +209,10 @@ fn extractBytePattern(
     root: regex.hir.NodeId,
 ) BytePlanError!?BytePattern {
     return switch (nodes[@intFromEnum(root)]) {
+        .empty => .{
+            .mode = .contains,
+            .terms = try allocator.alloc(ByteTerm, 0),
+        },
         .group => |group| try extractBytePattern(allocator, nodes, group.child),
         .literal, .dot, .char_class, .repetition => blk: {
             var terms: std.ArrayList(ByteTerm) = .empty;
@@ -240,7 +244,19 @@ fn extractBytePattern(
                 suffix_anchor = true;
                 end_index -= 1;
             }
-            if (start_index == end_index) break :blk null;
+            if (start_index == end_index) {
+                break :blk .{
+                    .mode = if (prefix_anchor and suffix_anchor)
+                        .full
+                    else if (prefix_anchor)
+                        .start
+                    else if (suffix_anchor)
+                        .end
+                    else
+                        .contains,
+                    .terms = try allocator.alloc(ByteTerm, 0),
+                };
+            }
 
             var terms: std.ArrayList(ByteTerm) = .empty;
             defer terms.deinit(allocator);
@@ -466,7 +482,7 @@ fn findBytePatternSpan(pattern: BytePattern, haystack: []const u8) ?Span {
 
 fn findBytePatternContainsSpan(pattern: BytePattern, haystack: []const u8) ?Span {
     var start: usize = 0;
-    while (start < haystack.len) : (start += 1) {
+    while (start <= haystack.len) : (start += 1) {
         if (matchBytePatternAt(pattern, haystack, start)) |span| return span;
     }
     return null;
@@ -574,7 +590,16 @@ fn matchAlternationTermReps(
 
     for (patterns) |pattern| {
         const next_pos = matchContainedBytePatternAt(pattern, haystack, pos) orelse continue;
-        if (next_pos == pos) continue;
+        if (next_pos == pos) {
+            const next_count = count + 1;
+            if (next_count >= min) {
+                if (matchByteTermsAt(terms, haystack, term_index + 1, pos)) |end| return end;
+            }
+            if (max != null and next_count < max.?) {
+                if (matchAlternationTermReps(patterns, min, max, terms, term_index, haystack, pos, next_count)) |end| return end;
+            }
+            continue;
+        }
         if (matchAlternationTermReps(patterns, min, max, terms, term_index, haystack, next_pos, count + 1)) |end| return end;
     }
     return null;
@@ -984,6 +1009,50 @@ test "Searcher byte fallback supports counted repetition over grouped alternatio
 
     try testing.expectEqual(@as(usize, 2), report.column_number);
     try testing.expectEqual(Span{ .start = 1, .end = 6 }, report.match_span);
+}
+
+test "Searcher byte fallback supports quantified grouped alternation with an empty branch" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "((|ab))+c", .{});
+    defer searcher.deinit();
+
+    try testing.expect(searcher.reportFirstByteMatch("empty-alt-repeat.bin", "c") != null);
+    try testing.expect(searcher.reportFirstByteMatch("empty-alt-repeat.bin", "abc") != null);
+}
+
+test "Searcher byte fallback supports counted repetition over empty alternation branches" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "((|ab)){2}c", .{});
+    defer searcher.deinit();
+
+    try testing.expect(searcher.reportFirstByteMatch("empty-alt-repeat.bin", "c") != null);
+    try testing.expect(searcher.reportFirstByteMatch("empty-alt-repeat.bin", "abc") != null);
+}
+
+test "Searcher byte fallback supports empty alternation branches inside a sequence" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a(|b)c", .{});
+    defer searcher.deinit();
+
+    try testing.expect(searcher.reportFirstByteMatch("empty-alt.bin", "ac") != null);
+    try testing.expect(searcher.reportFirstByteMatch("empty-alt.bin", "abc") != null);
+}
+
+test "Searcher byte fallback supports anchored empty matches" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "^$", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("empty.bin", "").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.line_number);
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 0 }, report.match_span);
 }
 
 test "reportFirstMatch stays aligned across buffered and mmap file reads" {

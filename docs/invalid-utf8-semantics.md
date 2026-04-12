@@ -32,6 +32,10 @@ path. The long-term replacement plan remains in
   as `a(ab|cd)e` and `a((b.)|([0-9]x))c`.
 - Quantified grouped alternation over that same subset is also supported, such
   as `((ab)|(cd))+e` and `((a[0-9])|(b.)){2}c`.
+- Empty subpatterns and empty alternation branches inside that same subset are
+  also supported, such as `a(|b)c` and anchored empty matches like `^$`.
+- Empty branches are also supported inside quantified grouped alternation, such
+  as `((|ab))+c` and `((|ab)){2}c`.
 - The lossy shadow haystack replaces each invalid byte that breaks UTF-8
   decoding with the single ASCII byte `?`.
 - Matching uses that lossy shadow haystack only as an internal aid. Printed
@@ -44,7 +48,9 @@ Under the current `--text` fallback:
 - Exact, anchored, and simple alternated ASCII literal patterns plus simple
   ASCII concat sequences built from literals, dots, and character classes plus
   repetition, transparent grouping, grouped alternation, and quantified grouped
-  alternation over that subset match against the original file bytes.
+  alternation over that subset, plus empty branches including inside quantified
+  grouped alternation and anchored empty matches, match against the original
+  file bytes.
 - `.` can match a replaced invalid byte because the matcher sees `?`.
 - Anchors and newline behavior still follow the current regex engine rules.
 - Column numbers and line spans stay byte-oriented against the original file

@@ -121,5 +121,7 @@ encoding behavior without rewriting the whole architecture around generic
   simple alternated ASCII literal patterns plus simple ASCII concat sequences
   built from literals, dots, and character classes plus repetition,
   transparent grouping, grouped alternation, and quantified grouped alternation
-  over that subset on invalid UTF-8 input, which reduces reliance on the lossy
-  retry for the simplest and most common search cases.
+  over that subset, plus empty branches including inside quantified grouped
+  alternation and anchored empty matches, on invalid UTF-8 input, which
+  reduces reliance on the lossy retry for the simplest and most common search
+  cases.
