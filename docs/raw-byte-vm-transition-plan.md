@@ -36,23 +36,61 @@ matrix again rather than by relying on the original boundary list.
 
 ## Phase 2: Define Engine-Level Raw-Byte Semantics
 
-- [ ] Define how literals behave on raw bytes
-- [ ] Define how `.` behaves on raw bytes
-- [ ] Define how ASCII classes behave on raw bytes
-- [ ] Define how UTF-8 literal and range classes behave on malformed input
-- [ ] Define how negated UTF-8 classes behave when the next byte is not a valid scalar start
-- [ ] Define anchor behavior on raw bytes
-- [ ] Define capture-span behavior on raw bytes
-- [ ] Write those rules into [docs/invalid-utf8-semantics.md](/home/oleg/prog/zigrep/docs/invalid-utf8-semantics.md) as the target semantics, not as a temporary fallback contract
+- [x] Define how literals behave on raw bytes
+- [x] Define how `.` behaves on raw bytes
+- [x] Define how ASCII classes behave on raw bytes
+- [x] Define how UTF-8 literal and range classes behave on malformed input
+- [x] Define how negated UTF-8 classes behave when the next byte is not a valid scalar start
+- [x] Define anchor behavior on raw bytes
+- [x] Define capture-span behavior on raw bytes
+- [x] Write those rules into [docs/invalid-utf8-semantics.md](/home/oleg/prog/zigrep/docs/invalid-utf8-semantics.md) as the target semantics, not as a temporary fallback contract
 
 ## Phase 3: Introduce A General Raw-Byte Execution Path
 
-- [ ] Decide whether to extend the current NFA/VM or add a dedicated byte-oriented VM layer
-- [ ] Reuse existing HIR lowering where possible instead of creating another ad hoc planner surface
-- [ ] Add a byte-oriented execution path that can handle all existing HIR node kinds
-- [ ] Support concatenation, alternation, anchors, repetition, and groups in the raw-byte engine
-- [ ] Support captures in the raw-byte engine
-- [ ] Keep newline behavior aligned with the current regex engine
+- [x] Decide whether to extend the current NFA/VM or add a dedicated byte-oriented VM layer
+- [x] Reuse existing HIR lowering where possible instead of creating another ad hoc planner surface
+- [x] Add a byte-oriented execution path that can handle all existing HIR node kinds
+- [x] Support concatenation, alternation, anchors, repetition, and groups in the raw-byte engine
+- [x] Support captures in the raw-byte engine
+- [x] Keep newline behavior aligned with the current regex engine
+
+### Phase 3 Decision
+
+The raw-byte path should extend the existing Thompson NFA and Pike VM instead
+of adding a third matcher beside the current VM and the planner.
+
+Reasoning:
+
+- the existing HIR already captures the supported regex structure cleanly
+- the current NFA already handles concatenation, alternation, anchors,
+  repetition, groups, and captures
+- the existing VM already has the right slot model for capture reporting
+- the current planner has become useful as an optimization boundary, but it is
+  the wrong place to keep accumulating correctness logic
+
+Chosen implementation direction:
+
+- keep HIR lowering unchanged as the structural source of truth
+- keep the existing NFA instruction set as the structural execution program
+- add a byte-oriented VM stepping mode that consumes one raw-byte text unit at
+  a time instead of one decoded code point at a time
+- define that raw-byte text unit using the Phase 2 semantics:
+  - one ASCII byte
+  - one full valid UTF-8 scalar when decodable
+  - one invalid byte when decoding fails at the current position
+- preserve the current newline rule for `.`
+- keep capture slots as byte offsets into the original haystack
+- keep the current planner only as an optional fast path for obvious cases,
+  not as the correctness boundary for invalid UTF-8 matching
+
+### Current Phase 3 Status
+
+The repo now has a general byte-oriented VM execution path in
+[src/regex/vm.zig](/home/oleg/prog/zigrep/src/regex/vm.zig) that reuses the
+existing NFA program and capture-slot model. `Searcher.firstByteMatch` in
+[src/search/grep.zig](/home/oleg/prog/zigrep/src/search/grep.zig) still uses
+the planner when available, but now falls back to that general raw-byte VM
+when no planner path exists.
 
 ## Phase 4: Replace Planner-Only Invalid-UTF-8 Matching
 

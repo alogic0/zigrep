@@ -1341,6 +1341,28 @@ test "runCli default mode uses the raw-byte path for quantified bare anchors on 
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli default mode uses the general raw-byte VM when no planner path exists" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "textish.bin",
+        .data = "aby\xff",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(^ab)y", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:1:1:aby\\xFF"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli default mode still returns no match for invalid UTF-8 patterns outside the byte planner" {
     const testing = std.testing;
 

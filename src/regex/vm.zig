@@ -26,6 +26,16 @@ const Thread = struct {
     slots: []?usize,
 };
 
+const TextUnit = struct {
+    scalar: ?u32,
+    invalid_byte: ?u8,
+    end: usize,
+
+    fn isNewline(self: TextUnit) bool {
+        return self.scalar != null and self.scalar.? == '\n';
+    }
+};
+
 pub const MatchEngine = struct {
     allocator: std.mem.Allocator,
 
@@ -99,6 +109,51 @@ pub const MatchEngine = struct {
         return null;
     }
 
+    pub fn firstMatchBytes(self: *const MatchEngine, program: nfa.Program, haystack: []const u8) MatchError!?Match {
+        if (program.instructions.len == 0) return null;
+        if (program.prefilter) |prefilter| {
+            if (!prefilter.mayMatch(haystack)) return null;
+        }
+        if (program.ascii_only and isAsciiBytes(haystack)) {
+            return self.firstMatchAscii(program, haystack);
+        }
+
+        var current: std.ArrayList(Thread) = .empty;
+        defer self.deinitThreadList(&current);
+
+        var next: std.ArrayList(Thread) = .empty;
+        defer self.deinitThreadList(&next);
+
+        const visited = try self.allocator.alloc(bool, program.instructions.len);
+        defer self.allocator.free(visited);
+
+        const start_slots = try self.allocSlots(program.slot_count);
+        defer self.allocator.free(start_slots);
+
+        @memset(visited, false);
+        if (try self.addThread(program, &current, visited, program.start, start_slots, 0, haystack.len)) |match| return match;
+
+        var pos: usize = 0;
+        while (nextTextUnit(haystack, &pos)) |unit| {
+            self.clearThreadList(&next);
+            @memset(visited, false);
+
+            for (current.items) |thread| {
+                if (try self.stepByte(program, &next, visited, thread, unit, haystack.len)) |match| return match;
+            }
+            self.clearThreadList(&current);
+
+            std.mem.swap(std.ArrayList(Thread), &current, &next);
+
+            @memset(visited, false);
+            const restart_slots = try self.allocSlots(program.slot_count);
+            defer self.allocator.free(restart_slots);
+            if (try self.addThread(program, &current, visited, program.start, restart_slots, unit.end, haystack.len)) |match| return match;
+        }
+
+        return null;
+    }
+
     fn firstMatchAscii(self: *const MatchEngine, program: nfa.Program, haystack: []const u8) MatchError!?Match {
         var current: std.ArrayList(Thread) = .empty;
         defer self.deinitThreadList(&current);
@@ -157,6 +212,32 @@ pub const MatchEngine = struct {
             .any => |any| {
                 if (cp == '\n') return null;
                 return self.addThread(program, list, visited, any.out.?, thread.slots, next_pos, input_len);
+            },
+            else => return null,
+        }
+    }
+
+    fn stepByte(
+        self: *const MatchEngine,
+        program: nfa.Program,
+        list: *std.ArrayList(Thread),
+        visited: []bool,
+        thread: Thread,
+        unit: TextUnit,
+        input_len: usize,
+    ) MatchError!?Match {
+        switch (program.instructions[thread.inst_ptr]) {
+            .literal => |literal| {
+                if (unit.scalar == null or literal.value != unit.scalar.?) return null;
+                return self.addThread(program, list, visited, literal.out.?, thread.slots, unit.end, input_len);
+            },
+            .char_class => |class| {
+                if (!textUnitMatchesClass(class, unit)) return null;
+                return self.addThread(program, list, visited, class.out.?, thread.slots, unit.end, input_len);
+            },
+            .any => |any| {
+                if (unit.isNewline()) return null;
+                return self.addThread(program, list, visited, any.out.?, thread.slots, unit.end, input_len);
             },
             else => return null,
         }
@@ -284,6 +365,72 @@ fn classMatches(class: anytype, cp: u32) bool {
     return if (class.negated) !matched else matched;
 }
 
+fn textUnitMatchesClass(class: anytype, unit: TextUnit) bool {
+    if (unit.invalid_byte) |byte| {
+        if (isAsciiClass(class)) return classMatches(class, byte);
+        return class.negated;
+    }
+    return classMatches(class, unit.scalar.?);
+}
+
+fn isAsciiClass(class: anytype) bool {
+    for (class.items) |item| {
+        switch (item) {
+            .literal => |literal| if (literal > 0x7f) return false,
+            .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
+        }
+    }
+    return true;
+}
+
+fn nextTextUnit(haystack: []const u8, pos: *usize) ?TextUnit {
+    if (pos.* >= haystack.len) return null;
+
+    const start = pos.*;
+    const byte = haystack[start];
+    if (byte < 0x80) {
+        pos.* += 1;
+        return .{
+            .scalar = @as(u32, byte),
+            .invalid_byte = null,
+            .end = pos.*,
+        };
+    }
+
+    const len = std.unicode.utf8ByteSequenceLength(byte) catch {
+        pos.* += 1;
+        return .{
+            .scalar = null,
+            .invalid_byte = byte,
+            .end = pos.*,
+        };
+    };
+    if (start + len > haystack.len) {
+        pos.* += 1;
+        return .{
+            .scalar = null,
+            .invalid_byte = byte,
+            .end = pos.*,
+        };
+    }
+
+    const cp = std.unicode.utf8Decode(haystack[start .. start + len]) catch {
+        pos.* += 1;
+        return .{
+            .scalar = null,
+            .invalid_byte = byte,
+            .end = pos.*,
+        };
+    };
+
+    pos.* += len;
+    return .{
+        .scalar = cp,
+        .invalid_byte = null,
+        .end = pos.*,
+    };
+}
+
 fn isAsciiBytes(bytes: []const u8) bool {
     for (bytes) |byte| {
         if (!std.ascii.isAscii(byte)) return false;
@@ -318,6 +465,19 @@ fn expectNoMatch(pattern: []const u8, haystack: []const u8) !void {
 
     var engine = MatchEngine.init(testing.allocator);
     try testing.expect(!(try engine.isMatch(program, haystack)));
+}
+
+fn expectByteMatch(pattern: []const u8, haystack: []const u8, expected: Capture) !void {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, pattern);
+    defer program.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    const found = (try engine.firstMatchBytes(program, haystack)).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(expected, found.span);
 }
 
 test "VM matches literals, alternation, and repetition" {
@@ -490,4 +650,24 @@ test "VM uses the ASCII-first capture path for ASCII-safe programs" {
     try testing.expectEqual(Capture{ .start = 2, .end = 7 }, found.span);
     try testing.expectEqual(Capture{ .start = 2, .end = 4 }, found.groups[0]);
     try testing.expectEqual(Capture{ .start = 4, .end = 7 }, found.groups[1]);
+}
+
+test "VM byte path matches through invalid UTF-8 bytes" {
+    try expectByteMatch("a.b", "xxa\xffbyy", .{ .start = 2, .end = 5 });
+    try expectByteMatch("жар", "xx\xffжарyy", .{ .start = 3, .end = 9 });
+}
+
+test "VM byte path preserves capture spans on invalid UTF-8 input" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "(a.)([0-9]b)");
+    defer program.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    const found = (try engine.firstMatchBytes(program, "xxa\xff7byy")).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(Capture{ .start = 2, .end = 6 }, found.span);
+    try testing.expectEqual(Capture{ .start = 2, .end = 4 }, found.groups[0]);
+    try testing.expectEqual(Capture{ .start = 4, .end = 6 }, found.groups[1]);
 }

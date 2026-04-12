@@ -130,6 +130,10 @@ pub const Searcher = struct {
     }
 
     pub fn firstByteMatch(self: *Searcher, haystack: []const u8) regex.Vm.MatchError!?regex.Vm.Match {
+        if (self.byte_plan == .none) {
+            return self.engine.firstMatchBytes(self.program, haystack);
+        }
+
         const span = switch (self.byte_plan) {
             .none => null,
             .single => |pattern| findBytePatternSpan(pattern, haystack),
@@ -1484,6 +1488,7 @@ test "Searcher byte plan inventory records current unsupported structural shapes
     try expectBytePlan("x(ab)y", true);
     try expectBytePlan("x(a.[0-9]b)y", true);
     try expectBytePlan("x(^ab)y", true);
+    try expectBytePlan("(^ab)y", false);
 }
 
 test "Searcher byte fallback supports anchored literal start and end patterns" {
@@ -1532,6 +1537,21 @@ test "Searcher byte fallback preserves impossible interior anchor semantics" {
     var grouped_searcher = try Searcher.init(testing.allocator, "x(^ab)y", .{});
     defer grouped_searcher.deinit();
     try testing.expect((try grouped_searcher.reportFirstByteMatch("anchor.bin", "xaby")) == null);
+}
+
+test "Searcher byte matching falls back to the general VM when no byte plan exists" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(^ab)y", .{});
+    defer searcher.deinit();
+
+    try testing.expect(!searcher.hasBytePlan());
+
+    const report = (try searcher.reportFirstByteMatch("anchor.bin", "aby\xff")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
 }
 
 test "Searcher byte fallback supports ASCII literal alternation" {

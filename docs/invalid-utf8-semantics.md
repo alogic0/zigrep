@@ -12,15 +12,17 @@ path. The long-term replacement plan remains in
 - Default mode does not abort the whole search on invalid UTF-8.
 - If a file is classified as binary, default mode still skips it before matching.
 - If a file is classified as text and the pattern is covered by the current
-  raw-byte planner, default mode uses that raw-byte path too.
+  raw-byte matcher, default mode uses that raw-byte path too.
 - If a file is classified as text but the pattern still falls outside the
-  raw-byte planner, the file currently behaves like "no match" in default
+  raw-byte matcher, the file currently behaves like "no match" in default
   mode.
-- `--text` first uses the raw-byte planner when a pattern stays inside the
-  current planner-friendly subset and only falls back to a temporary lossy
-  shadow haystack for patterns outside that subset.
+- `--text` first uses the raw-byte matcher and only falls back to a temporary
+  lossy shadow haystack after that matcher path.
 - Before that lossy retry, exact, anchored, and simple alternated literal
   patterns get a true raw-byte search path against the original file bytes.
+- The current implementation now also has a general raw-byte VM fallback for
+  patterns that do not have a planner path, while still reusing the planner as
+  a fast path when it exists.
 - Those literal-byte paths now cover UTF-8 literals from the pattern too, not
   just ASCII-only literals.
 - The current raw-byte path also covers simple concat sequences built from
@@ -56,8 +58,9 @@ path. The long-term replacement plan remains in
   decoding with the single ASCII byte `?`.
 - Matching uses that lossy shadow haystack only as an internal aid. Printed
   output still comes from the original file bytes.
-- The lossy shadow haystack is now only used for patterns that still do not
-  have a planner-backed raw-byte path.
+- The lossy shadow haystack is now only used after the raw-byte matcher path
+  fails, and is still a temporary compatibility fallback rather than the
+  intended final design.
 
 ## Regex Meaning In The Current Invalid-UTF-8 Path
 
@@ -98,3 +101,67 @@ Under the current invalid-UTF-8 behavior:
 
 This note only describes the current temporary behavior. It is not the intended
 final design for raw-byte matching.
+
+## Target Engine-Level Semantics
+
+The intended replacement for the current temporary fallback is a general
+byte-oriented matcher path with the following rules.
+
+### Literals
+
+- A literal from the pattern matches the exact UTF-8 byte sequence produced by
+  that literal code point.
+- ASCII literals therefore match one byte.
+- Non-ASCII literals match their full UTF-8 byte sequence.
+- Literal matching does not require the surrounding haystack bytes to form a
+  globally valid UTF-8 string.
+
+### Dot
+
+- `.` matches one byte-oriented text unit.
+- For ASCII bytes, that unit is one byte.
+- For a valid UTF-8 leading byte sequence, that unit is the full decoded
+  scalar width.
+- For an invalid byte that cannot start a valid UTF-8 scalar, that unit is the
+  single invalid byte.
+- `.` still does not match `\n`.
+
+### ASCII Classes
+
+- ASCII-only classes continue to match one byte at a time.
+- Negated ASCII classes also operate on one byte at a time.
+
+### UTF-8 Literal And Range Classes
+
+- Positive non-ASCII classes operate on one decoded UTF-8 scalar when the next
+  bytes form a valid scalar.
+- A positive non-ASCII class does not match an invalid leading byte.
+- Negated non-ASCII classes operate on one decoded UTF-8 scalar when the next
+  bytes form a valid scalar.
+- If the next byte is invalid and cannot begin a valid scalar, a negated
+  non-ASCII class matches that single invalid byte.
+
+### Anchors
+
+- `^` and `$` remain zero-width assertions over byte offsets.
+- `^` matches only byte offset `0`.
+- `$` matches only byte offset `haystack.len`.
+- Anchors keep the same regex meaning whether they appear alone, inside groups,
+  or inside larger concatenations.
+- Repetition over zero-width anchors must not create infinite loops; repeated
+  zero-width matches collapse to the same zero-width assertion semantics.
+
+### Captures
+
+- Whole-match and group spans remain byte offsets into the original file bytes.
+- Captures must preserve the current “last iteration wins” behavior for
+  repeated groups.
+- Printed output continues to come from the original file bytes, not from any
+  transformed shadow buffer.
+
+### Default Mode And `--text`
+
+- The matcher semantics should be the same in default mode and `--text`.
+- The difference between those modes should only be file-selection policy:
+  default mode may skip files by binary heuristic, while `--text` forces the
+  file through the matcher.
