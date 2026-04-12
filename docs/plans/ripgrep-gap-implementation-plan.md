@@ -54,8 +54,9 @@ ecosystem features.
 
 ## Priority 2: Search Filtering And CLI Surface
 
-- [ ] Add glob filtering like `-g/--glob` and possibly `--iglob`.
-  ripgrep’s manual include/exclude globs are a major missing search-tool feature.
+- [x] Add glob filtering with `-g/--glob`.
+  `zigrep` now supports repeated case-sensitive include/exclude globs with
+  `-g/--glob`, including `!pattern` exclusions. `--iglob` is still open.
 
 - [ ] Add richer ignore controls:
   `--ignore-file`, `--no-ignore`, `--no-ignore-vcs`, `--no-ignore-parent`,

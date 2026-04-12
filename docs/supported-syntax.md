@@ -60,6 +60,7 @@ The current CLI supports:
 - Recursive search from each path, defaulting to `.`
 - Hidden-file inclusion with `--hidden`
 - Symlink following with `--follow`
+- Case-sensitive path glob filtering with repeated `-g` / `--glob`
 - Binary-file search opt-in with `--text`
 - Buffered or mmap-backed reads with `--buffered` and `--mmap`
 - Worker-count control with `-j` or `--threads`
@@ -99,6 +100,15 @@ Practical guidance:
 - use `--buffered` if you want the most conservative behavior
 - use `--mmap` if you want normal fast behavior on regular files
 - if you are unsure, the default behavior is already reasonable for typical use
+
+`--glob` note:
+
+- `-g GLOB` or `--glob GLOB` filters searched file paths relative to each root path
+- repeated `-g` flags are allowed
+- a plain glob like `*.zig` includes matching paths
+- a bang-prefixed glob like `!main.zig` excludes matching paths
+- if any positive globs are present, `zigrep` treats them as an allow-list
+- matching is currently case-sensitive only; `--iglob` is not implemented yet
 
 Current `--text` note:
 

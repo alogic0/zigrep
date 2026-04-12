@@ -26,6 +26,7 @@ const ReportMode = enum {
 pub const CliOptions = struct {
     pattern: []const u8,
     paths: []const []const u8,
+    globs: []const []const u8 = &.{},
     include_hidden: bool = false,
     follow_symlinks: bool = false,
     skip_binary: bool = true,
@@ -103,7 +104,10 @@ fn runCli(
 ) !u8 {
     const parsed = try parseArgs(allocator, argv);
     defer switch (parsed) {
-        .run => |opts| allocator.free(opts.paths),
+        .run => |opts| {
+            allocator.free(opts.paths);
+            allocator.free(opts.globs);
+        },
         .help, .version => {},
     };
 
@@ -139,7 +143,9 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var report_mode: ReportMode = .lines;
     var pattern: ?[]const u8 = null;
     var paths = std.ArrayList([]const u8).empty;
+    var globs = std.ArrayList([]const u8).empty;
     defer paths.deinit(allocator);
+    defer globs.deinit(allocator);
     var stop_parsing_flags = false;
 
     var index: usize = 1;
@@ -167,6 +173,12 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "--text")) {
                 skip_binary = false;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-g") or std.mem.eql(u8, arg, "--glob")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                try globs.append(allocator, argv[index]);
                 continue;
             }
             if (std.mem.eql(u8, arg, "--buffered")) {
@@ -277,9 +289,15 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         return error.InvalidFlagCombination;
     }
 
+    const owned_paths = try paths.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_paths);
+    const owned_globs = try globs.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_globs);
+
     return .{ .run = .{
         .pattern = pattern.?,
-        .paths = try paths.toOwnedSlice(allocator),
+        .paths = owned_paths,
+        .globs = owned_globs,
         .include_hidden = include_hidden,
         .follow_symlinks = follow_symlinks,
         .skip_binary = skip_binary,
@@ -346,13 +364,50 @@ fn searchPath(
         allocator.free(entries);
     }
 
-    const schedule = zigrep.search.schedule.plan(entries.len, .{
+    const filtered_entries = if (options.globs.len == 0)
+        entries
+    else
+        try filterEntriesByGlob(allocator, root_path, entries, options.globs);
+    defer if (filtered_entries.ptr != entries.ptr) allocator.free(filtered_entries);
+
+    const schedule = zigrep.search.schedule.plan(filtered_entries.len, .{
         .requested_jobs = options.parallel_jobs,
     });
     if (schedule.parallel) {
-        return searchEntriesParallel(stdout, stderr, entries, options, schedule);
+        return searchEntriesParallel(stdout, stderr, filtered_entries, options, schedule);
     }
-    return searchEntriesSequential(allocator, stdout, stderr, entries, options);
+    return searchEntriesSequential(allocator, stdout, stderr, filtered_entries, options);
+}
+
+fn filterEntriesByGlob(
+    allocator: std.mem.Allocator,
+    root_path: []const u8,
+    entries: []const zigrep.search.walk.Entry,
+    globs: []const []const u8,
+) ![]const zigrep.search.walk.Entry {
+    var filtered: std.ArrayList(zigrep.search.walk.Entry) = .empty;
+    defer filtered.deinit(allocator);
+
+    for (entries) |entry| {
+        const relative = relativeGlobPath(root_path, entry.path);
+        if (!zigrep.search.glob.allowsPath(globs, relative)) continue;
+        try filtered.append(allocator, entry);
+    }
+
+    return filtered.toOwnedSlice(allocator);
+}
+
+fn relativeGlobPath(root_path: []const u8, entry_path: []const u8) []const u8 {
+    if (std.mem.eql(u8, root_path, entry_path)) {
+        return std.fs.path.basename(entry_path);
+    }
+    if (entry_path.len > root_path.len and
+        std.mem.startsWith(u8, entry_path, root_path) and
+        entry_path[root_path.len] == std.fs.path.sep)
+    {
+        return entry_path[root_path.len + 1 ..];
+    }
+    return entry_path;
 }
 
 fn searchEntriesSequential(
@@ -1095,6 +1150,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --hidden              include hidden files
         \\  --follow              follow symlinks
         \\  --text                search binary files too
+        \\  -g, --glob GLOB       include or exclude paths by glob
         \\  --buffered            use the simpler file-reading method
         \\  --mmap                use the faster file-reading method when possible
         \\  -E, --encoding ENC    force input encoding: auto, utf8, utf16le, utf16be
@@ -1159,7 +1215,10 @@ test "parseArgs defaults to current directory search" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "needle" });
     defer switch (parsed) {
-        .run => |opts| testing.allocator.free(opts.paths),
+        .run => |opts| {
+            testing.allocator.free(opts.paths);
+            testing.allocator.free(opts.globs);
+        },
         .help, .version => {},
     };
 
@@ -1224,7 +1283,10 @@ test "parseArgs treats version-like args as positional after the pattern starts"
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "needle", "--version" });
     defer switch (parsed) {
-        .run => |opts| testing.allocator.free(opts.paths),
+        .run => |opts| {
+            testing.allocator.free(opts.paths);
+            testing.allocator.free(opts.globs);
+        },
         .help, .version => {},
     };
 
@@ -1243,7 +1305,10 @@ test "parseArgs treats help-like args as positional after terminator" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--", "--help" });
     defer switch (parsed) {
-        .run => |opts| testing.allocator.free(opts.paths),
+        .run => |opts| {
+            testing.allocator.free(opts.paths);
+            testing.allocator.free(opts.globs);
+        },
         .help, .version => {},
     };
 
@@ -1279,7 +1344,10 @@ test "parseArgs accepts numeric and formatting flags" {
         "src",
     });
     defer switch (parsed) {
-        .run => |opts| testing.allocator.free(opts.paths),
+        .run => |opts| {
+            testing.allocator.free(opts.paths);
+            testing.allocator.free(opts.globs);
+        },
         .help, .version => {},
     };
 
@@ -1307,7 +1375,10 @@ test "parseArgs accepts files-without-match mode" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--files-without-match", "needle", "src" });
     defer switch (parsed) {
-        .run => |opts| testing.allocator.free(opts.paths),
+        .run => |opts| {
+            testing.allocator.free(opts.paths);
+            testing.allocator.free(opts.globs);
+        },
         .help, .version => {},
     };
 
@@ -1327,7 +1398,10 @@ test "parseArgs accepts max-count mode" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-m", "2", "needle", "src" });
     defer switch (parsed) {
-        .run => |opts| testing.allocator.free(opts.paths),
+        .run => |opts| {
+            testing.allocator.free(opts.paths);
+            testing.allocator.free(opts.globs);
+        },
         .help, .version => {},
     };
 
@@ -1347,7 +1421,10 @@ test "parseArgs accepts before and after context flags" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-B", "2", "-A", "3", "needle", "src" });
     defer switch (parsed) {
-        .run => |opts| testing.allocator.free(opts.paths),
+        .run => |opts| {
+            testing.allocator.free(opts.paths);
+            testing.allocator.free(opts.globs);
+        },
         .help, .version => {},
     };
 
@@ -1355,6 +1432,29 @@ test "parseArgs accepts before and after context flags" {
         .run => |opts| {
             try testing.expectEqual(@as(usize, 2), opts.context_before);
             try testing.expectEqual(@as(usize, 3), opts.context_after);
+        },
+        .help, .version => unreachable,
+    }
+}
+
+test "parseArgs accepts repeated glob flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-g", "*.zig", "--glob", "!main.zig", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| {
+            testing.allocator.free(opts.paths);
+            testing.allocator.free(opts.globs);
+        },
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(@as(usize, 2), opts.globs.len);
+            try testing.expectEqualStrings("*.zig", opts.globs[0]);
+            try testing.expectEqualStrings("!main.zig", opts.globs[1]);
+            try testing.expectEqualStrings("needle", opts.pattern);
         },
         .help, .version => unreachable,
     }
@@ -1771,6 +1871,60 @@ test "runCli context mode respects max-count" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:2:1:needle one\n"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-3-after\n"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "needle two"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli glob mode filters files by positive glob" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "keep.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "skip.md",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-g", "*.txt", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "keep.txt:1:1:needle one"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "skip.md"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli glob mode supports negative globs" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "main.txt",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-g", "*.txt", "-g", "!main.txt", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt:1:1:needle one"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "main.txt:1:1:needle two"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
