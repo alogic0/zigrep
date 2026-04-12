@@ -49,8 +49,7 @@ pub fn main() !void {
     const stderr = &stderr_writer.interface;
 
     const exit_code = runCli(allocator, stdout, stderr, argv) catch |err| {
-        try stderr.print("error: {s}\n", .{@errorName(err)});
-        try writeUsage(stderr, argv[0]);
+        try writeFatalError(stderr, argv[0], err);
         try stderr.flush();
         std.process.exit(2);
     };
@@ -58,6 +57,24 @@ pub fn main() !void {
     try stdout.flush();
     try stderr.flush();
     if (exit_code != 0) std.process.exit(exit_code);
+}
+
+fn writeFatalError(writer: *std.Io.Writer, argv0: []const u8, err: anyerror) !void {
+    try writer.print("error: {s}\n", .{@errorName(err)});
+    if (isUsageError(err)) {
+        try writeUsage(writer, argv0);
+    }
+}
+
+fn isUsageError(err: anyerror) bool {
+    return switch (err) {
+        error.MissingPattern,
+        error.UnknownFlag,
+        error.MissingFlagValue,
+        error.InvalidFlagValue,
+        => true,
+        else => false,
+    };
 }
 
 fn runCli(
@@ -584,6 +601,29 @@ test "parseArgs accepts version flag" {
         .version => {},
         else => return error.TestExpectedEqual,
     }
+}
+
+test "writeFatalError includes usage for CLI usage errors" {
+    const testing = std.testing;
+
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    try writeFatalError(&stderr_capture.writer, "zigrep", error.MissingPattern);
+
+    try testing.expect(std.mem.containsAtLeast(u8, stderr_capture.written(), 1, "error: MissingPattern\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, stderr_capture.written(), 1, "usage: zigrep [FLAGS] PATTERN [PATH...]\n"));
+}
+
+test "writeFatalError omits usage for runtime search errors" {
+    const testing = std.testing;
+
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    try writeFatalError(&stderr_capture.writer, "zigrep", error.FileNotFound);
+
+    try testing.expectEqualStrings("error: FileNotFound\n", stderr_capture.written());
 }
 
 test "parseArgs treats version-like args as positional after the pattern starts" {
