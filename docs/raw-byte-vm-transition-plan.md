@@ -43,7 +43,7 @@ matrix again rather than by relying on the original boundary list.
 - [x] Define how negated UTF-8 classes behave when the next byte is not a valid scalar start
 - [x] Define anchor behavior on raw bytes
 - [x] Define capture-span behavior on raw bytes
-- [x] Write those rules into [docs/invalid-utf8-semantics.md](/home/oleg/prog/zigrep/docs/invalid-utf8-semantics.md) as the target semantics, not as a temporary fallback contract
+- [x] Write those rules into [docs/invalid-utf8-semantics.md](invalid-utf8-semantics.md) as the target semantics, not as a temporary fallback contract
 
 ## Phase 3: Introduce A General Raw-Byte Execution Path
 
@@ -86,9 +86,9 @@ Chosen implementation direction:
 ### Current Phase 3 Status
 
 The repo now has a general byte-oriented VM execution path in
-[src/regex/vm.zig](/home/oleg/prog/zigrep/src/regex/vm.zig) that reuses the
+[src/regex/vm.zig](../src/regex/vm.zig) that reuses the
 existing NFA program and capture-slot model. `Searcher.firstByteMatch` in
-[src/search/grep.zig](/home/oleg/prog/zigrep/src/search/grep.zig) still uses
+[src/search/grep.zig](../src/search/grep.zig) still uses
 the planner when available, but now falls back to that general raw-byte VM
 when no planner path exists.
 
@@ -102,7 +102,7 @@ when no planner path exists.
 ## Phase 5: Remove The Lossy Fallback
 
 - [x] Delete `sanitizeInvalidUtf8Lossy(...)`
-- [x] Remove the `allow_lossy_invalid_utf8` control flow from [src/main.zig](/home/oleg/prog/zigrep/src/main.zig)
+- [x] Remove the `allow_lossy_invalid_utf8` control flow from [src/main.zig](../src/main.zig)
 - [x] Remove lossy-fallback-only tests and replace them with raw-byte engine expectations
 - [x] Update docs to remove temporary lossy-fallback wording
 
@@ -117,9 +117,9 @@ when no planner path exists.
 
 ## Cleanup
 
-- [x] Update [docs/supported-syntax.md](/home/oleg/prog/zigrep/docs/supported-syntax.md) to describe the final invalid-UTF-8 behavior
-- [x] Update [README.md](/home/oleg/prog/zigrep/README.md) with the user-visible invalid-UTF-8 behavior
-- [x] Update [docs/idiomatic-zig-remediation-plan.md](/home/oleg/prog/zigrep/docs/idiomatic-zig-remediation-plan.md) when the lossy fallback is fully removed
+- [x] Update [docs/supported-syntax.md](supported-syntax.md) to describe the final invalid-UTF-8 behavior
+- [x] Update [README.md](../README.md) with the user-visible invalid-UTF-8 behavior
+- [x] Update [docs/idiomatic-zig-remediation-plan.md](idiomatic-zig-remediation-plan.md) when the lossy fallback is fully removed
 - [x] Run `zig build bench` and compare invalid-UTF-8 search behavior before and after
 
 ## Recommended Order
