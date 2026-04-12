@@ -17,13 +17,13 @@ encoding behavior without rewriting the whole architecture around generic
 
 ## Priority 2: Per-File Allocator Boundary Cleanup
 
-- [~] Document allocator lifetimes across process, search, worker, and file scopes
+- [x] Document allocator lifetimes across process, search, worker, and file scopes
 - [x] Identify per-file temporary allocations in the search path
 - [x] Add a per-file `ArenaAllocator` in the sequential search path
 - [x] Move lossy `--text` sanitizing buffers onto the per-file arena
 - [x] Move temporary report-formatting buffers onto the per-file arena where useful
-- [ ] Evaluate whether parallel workers should use per-file or per-chunk arenas
-- [ ] Confirm behavior remains unchanged with `zig build test`
+- [x] Evaluate whether parallel workers should use per-file or per-chunk arenas
+- [x] Confirm behavior remains unchanged with `zig build test`
 
 ## Priority 3: Reporting-Path Allocation Reduction
 
@@ -85,3 +85,7 @@ encoding behavior without rewriting the whole architecture around generic
 - Sequential search now uses a per-file arena for file-local temporary
   allocations, including buffered file reads, lossy `--text` sanitizing, and
   temporary formatted output.
+- Allocator lifetimes are now called out directly in `src/main.zig` for the
+  process, search, worker, and file scopes.
+- Parallel workers now use per-file arenas for temporary file-local work while
+  keeping ordered output lines on `smp_allocator` until the final flush.

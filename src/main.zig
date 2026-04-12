@@ -35,6 +35,8 @@ const ParseResult = union(enum) {
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
     defer _ = gpa.deinit();
+    // Process-lifetime allocator: owns argv, the collected file list, and other
+    // state that lives for the full CLI invocation.
     const allocator = gpa.allocator();
 
     const argv = try std.process.argsAlloc(allocator);
@@ -272,11 +274,15 @@ fn searchEntriesSequential(
     entries: []const zigrep.search.walk.Entry,
     options: CliOptions,
 ) !bool {
+    // Search-lifetime allocator: the compiled regex program and VM state are
+    // reused across every file in this search invocation.
     var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{});
     defer searcher.deinit();
 
     var matched = false;
     for (entries) |entry| {
+        // File-lifetime allocator: buffered reads, lossy text-mode sanitizing,
+        // and temporary formatted output for one file are reclaimed together.
         var file_arena_state = std.heap.ArenaAllocator.init(allocator);
         defer file_arena_state.deinit();
         const file_allocator = file_arena_state.allocator();
@@ -314,6 +320,8 @@ fn searchEntriesParallel(
     options: CliOptions,
     schedule: zigrep.search.schedule.Plan,
 ) !bool {
+    // Worker-lifetime allocator: shared worker state and stored output lines
+    // stay on smp_allocator, while each file gets its own short-lived arena.
     const worker_allocator = std.heap.smp_allocator;
     if (schedule.worker_count <= 1) {
         return searchEntriesSequential(worker_allocator, stdout, stderr, entries, options);
@@ -366,6 +374,10 @@ fn searchEntriesParallel(
             index: usize,
             entry: zigrep.search.walk.Entry,
         ) !void {
+            var file_arena_state = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
+            defer file_arena_state.deinit();
+            const file_allocator = file_arena_state.allocator();
+
             if (self.options.skip_binary) {
                 const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
                     if (try self.warnAndSkip(entry.path, err)) return;
@@ -374,16 +386,16 @@ fn searchEntriesParallel(
                 if (decision == .binary) return;
             }
 
-            const buffer = zigrep.search.io.readFile(std.heap.smp_allocator, entry.path, .{
+            const buffer = zigrep.search.io.readFile(file_allocator, entry.path, .{
                 .strategy = self.options.read_strategy,
             }) catch |err| {
                 if (try self.warnAndSkip(entry.path, err)) return;
                 return err;
             };
-            defer buffer.deinit(std.heap.smp_allocator);
+            defer buffer.deinit(file_allocator);
 
-            if (try reportFileMatch(std.heap.smp_allocator, searcher, entry.path, buffer.bytes(), !self.options.skip_binary)) |report| {
-                defer report.deinit(std.heap.smp_allocator);
+            if (try reportFileMatch(file_allocator, searcher, entry.path, buffer.bytes(), !self.options.skip_binary)) |report| {
+                defer report.deinit(file_allocator);
                 self.result_lines[index] = try formatReport(std.heap.smp_allocator, report, self.options.output);
             }
         }
