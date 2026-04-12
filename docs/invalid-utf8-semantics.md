@@ -11,16 +11,21 @@ path. The long-term replacement plan remains in
 
 - Default mode does not abort the whole search on invalid UTF-8.
 - If a file is classified as binary, default mode still skips it before matching.
-- If a file is classified as text but the matcher hits invalid UTF-8, the file
-  currently behaves like "no match" in default mode.
-- `--text` retries matching through a temporary lossy shadow haystack after an
-  `InvalidUtf8` failure.
-- Before that lossy retry, exact, anchored, and simple alternated ASCII literal
-  patterns plus simple single-dot ASCII concat patterns get a true raw-byte
-  search path against the original file bytes.
-- The current raw-byte path also covers simple ASCII concat sequences built
-  from literals, dots, and character classes, such as `a[0-9]b`, `a[^x]b`, and
-  `a.[0-9]b`.
+- If a file is classified as text and the pattern is covered by the current
+  raw-byte planner, default mode uses that raw-byte path too.
+- If a file is classified as text but the pattern still falls outside the
+  raw-byte planner, the file currently behaves like "no match" in default
+  mode.
+- `--text` first uses the raw-byte planner when a pattern stays inside the
+  current planner-friendly subset and only falls back to a temporary lossy
+  shadow haystack for patterns outside that subset.
+- Before that lossy retry, exact, anchored, and simple alternated literal
+  patterns get a true raw-byte search path against the original file bytes.
+- Those literal-byte paths now cover UTF-8 literals from the pattern too, not
+  just ASCII-only literals.
+- The current raw-byte path also covers simple concat sequences built from
+  literals, dots, and character classes, such as `a[0-9]b`, `a[^x]b`,
+  `a.[0-9]b`, and `жар`.
 - Repetition over that same ASCII subset is also supported when it applies to a
   single literal, dot, or class atom, including `+`, `*`, `?`, and counted
   forms such as `ab+c`, `a.*b`, `a[0-9]{1,3}b`, and `a.{2}[0-9]{2}b`.
@@ -43,20 +48,24 @@ path. The long-term replacement plan remains in
   decoding with the single ASCII byte `?`.
 - Matching uses that lossy shadow haystack only as an internal aid. Printed
   output still comes from the original file bytes.
+- The lossy shadow haystack is now only used for patterns that still do not
+  have a planner-backed raw-byte path.
 
-## Regex Meaning In The Temporary `--text` Path
+## Regex Meaning In The Current Invalid-UTF-8 Path
 
-Under the current `--text` fallback:
+Under the current invalid-UTF-8 behavior:
 
-- Exact, anchored, and simple alternated ASCII literal patterns plus simple
-  ASCII concat sequences built from literals, dots, and character classes plus
-  repetition, transparent grouping, grouped alternation, and quantified grouped
-  alternation over that subset, plus empty branches including inside quantified
-  grouped alternation and anchored empty matches, match against the original
-  file bytes.
+- Exact, anchored, and simple alternated literal patterns plus simple concat
+  sequences built from literals, dots, and character classes plus repetition,
+  transparent grouping, grouped alternation, and quantified grouped alternation
+  over that subset, plus empty branches including inside quantified grouped
+  alternation and anchored empty matches, match against the original file
+  bytes.
 - Planner-friendly capture groups on that raw-byte subset keep capture spans
   instead of degrading to whole-match-only reporting.
-- `.` can match a replaced invalid byte because the matcher sees `?`.
+- Under `--text`, patterns outside that subset still retry through the lossy
+  shadow haystack, so `.` can match a replaced invalid byte because the matcher
+  sees `?`.
 - Anchors and newline behavior still follow the current regex engine rules.
 - Column numbers and line spans stay byte-oriented against the original file
   bytes.

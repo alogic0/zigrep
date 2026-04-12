@@ -564,10 +564,12 @@ fn reportFileMatch(
     }
 
     return searcher.reportFirstMatch(path, bytes) catch |err| switch (err) {
-        error.InvalidUtf8 => if (!allow_lossy_invalid_utf8) null else {
+        error.InvalidUtf8 => blk: {
             if (try searcher.reportFirstByteMatch(path, bytes)) |report| {
-                return report;
+                break :blk report;
             }
+            if (!allow_lossy_invalid_utf8) break :blk null;
+            if (searcher.hasBytePlan()) return null;
 
             const sanitized = try sanitizeInvalidUtf8Lossy(allocator, bytes);
             defer allocator.free(sanitized);
@@ -575,9 +577,9 @@ fn reportFileMatch(
                 var stable = report;
                 stable.line = bytes[report.line_span.start..report.line_span.end];
                 stable.owned_line = null;
-                return stable;
+                break :blk stable;
             }
-            return null;
+            break :blk null;
         },
         else => err,
     };
@@ -1220,6 +1222,28 @@ test "runCli text mode lets dot match a temporary invalid-byte placeholder" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli text mode matches UTF-8 literals through the byte path on invalid UTF-8 files" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf8.bin",
+        .data = "xx\xffжарyy\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "жар", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8.bin:1:4:xx\\xFFжарyy"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "sanitizeInvalidUtf8Lossy replaces isolated invalid bytes with question marks" {
     const testing = std.testing;
 
@@ -1229,7 +1253,7 @@ test "sanitizeInvalidUtf8Lossy replaces isolated invalid bytes with question mar
     try testing.expectEqualStrings("a?b", sanitized);
 }
 
-test "runCli default mode still searches invalid UTF-8 files classified as text" {
+test "runCli default mode uses the raw-byte path for planner-covered invalid UTF-8 files" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -1244,6 +1268,28 @@ test "runCli default mode still searches invalid UTF-8 files classified as text"
     defer testing.allocator.free(root_path);
 
     const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:1:4:xx\\xFFneedleyy"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode still returns no match for invalid UTF-8 patterns outside the byte planner" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "dot.bin",
+        .data = "\xffaжb\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a[ж]b", root_path });
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 1), run.exit_code);
@@ -1396,6 +1442,35 @@ test "reportFileMatch only owns line bytes for transformed haystacks" {
     defer lossy.deinit(testing.allocator);
     try testing.expect(lossy.owned_line == null);
     try testing.expectEqualStrings("xx\xffneedleyy", lossy.line);
+}
+
+test "reportFileMatch uses byte matching for planner-covered invalid UTF-8 even without lossy mode" {
+    const testing = std.testing;
+
+    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{});
+    defer searcher.deinit();
+
+    const report = (try reportFileMatch(testing.allocator, &searcher, "plain.bin", "xx\xffneedleyy", .auto, false)).?;
+    defer report.deinit(testing.allocator);
+    try testing.expect(report.owned_line == null);
+    try testing.expectEqualStrings("xx\xffneedleyy", report.line);
+}
+
+test "reportFileMatch skips lossy retry when the byte planner already covers the pattern" {
+    const testing = std.testing;
+
+    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "жар", .{});
+    defer searcher.deinit();
+
+    const report = (try reportFileMatch(testing.allocator, &searcher, "utf8.bin", "xx\xffжарyy", .auto, true)).?;
+    defer report.deinit(testing.allocator);
+    try testing.expect(report.owned_line == null);
+    try testing.expectEqualStrings("xx\xffжарyy", report.line);
+
+    var miss_searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "a.b", .{});
+    defer miss_searcher.deinit();
+
+    try testing.expect((try reportFileMatch(testing.allocator, &miss_searcher, "dot.bin", "a\xff\xffb", .auto, true)) == null);
 }
 
 test "runCli output toggles apply across the end-to-end path" {

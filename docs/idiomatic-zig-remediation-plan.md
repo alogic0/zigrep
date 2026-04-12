@@ -130,3 +130,15 @@ encoding behavior without rewriting the whole architecture around generic
   subset, so the remaining invalid-UTF-8 gap is concentrated on eliminating
   the lossy retry for patterns outside that subset rather than on missing byte
   capture support inside it.
+- The planner-friendly raw-byte path now accepts UTF-8 literal bytes from the
+  pattern as well, so valid non-ASCII literals and grouped literal captures no
+  longer fall back to the temporary lossy retry just because the haystack also
+  contains unrelated invalid bytes.
+- The `InvalidUtf8` `--text` fallback boundary is now narrower too: if a
+  pattern is fully covered by the raw-byte planner, zigrep now stops after the
+  raw-byte result instead of re-running the same pattern through the lossy `?`
+  sanitizer.
+- Default mode now also uses that raw-byte planner for text-like invalid UTF-8
+  files instead of silently degrading those planner-covered cases to no-match,
+  which removes another practical false-negative path without widening the
+  lossy retry itself.
