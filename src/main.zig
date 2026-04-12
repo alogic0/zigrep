@@ -14,6 +14,12 @@ pub const OutputOptions = struct {
     column_number: bool = true,
 };
 
+const ReportMode = enum {
+    lines,
+    count,
+    files_with_matches,
+};
+
 pub const CliOptions = struct {
     pattern: []const u8,
     paths: []const []const u8,
@@ -25,6 +31,7 @@ pub const CliOptions = struct {
     parallel_jobs: ?usize = null,
     max_depth: ?usize = null,
     output: OutputOptions = .{},
+    report_mode: ReportMode = .lines,
     buffer_output: bool = false,
 };
 
@@ -119,6 +126,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var parallel_jobs: ?usize = null;
     var max_depth: ?usize = null;
     var output: OutputOptions = .{};
+    var report_mode: ReportMode = .lines;
     var pattern: ?[]const u8 = null;
     var paths = std.ArrayList([]const u8).empty;
     defer paths.deinit(allocator);
@@ -181,6 +189,14 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
                 output.with_filename = true;
                 continue;
             }
+            if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--count")) {
+                report_mode = .count;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--files-with-matches")) {
+                report_mode = .files_with_matches;
+                continue;
+            }
             if (std.mem.eql(u8, arg, "--no-filename")) {
                 output.with_filename = false;
                 continue;
@@ -225,6 +241,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .parallel_jobs = parallel_jobs,
         .max_depth = max_depth,
         .output = output,
+        .report_mode = report_mode,
     } };
 }
 
@@ -325,7 +342,16 @@ fn searchEntriesSequential(
         };
         defer buffer.deinit(file_allocator);
 
-        if (try writeFileReports(file_allocator, stdout, &searcher, entry.path, buffer.bytes(), options.encoding, options.output)) {
+        if (try writeFileOutput(
+            file_allocator,
+            stdout,
+            &searcher,
+            entry.path,
+            buffer.bytes(),
+            options.encoding,
+            options.output,
+            options.report_mode,
+        )) {
             matched = true;
         }
     }
@@ -348,10 +374,11 @@ fn searchEntriesParallel(
     }
 
     const StoredOutput = struct {
-        bytes: []u8,
+        bytes: std.ArrayListUnmanaged(u8),
 
         fn deinit(self: @This()) void {
-            std.heap.smp_allocator.free(self.bytes);
+            var bytes = self.bytes;
+            bytes.deinit(std.heap.smp_allocator);
         }
     };
 
@@ -425,7 +452,7 @@ fn searchEntriesParallel(
             var capture: std.Io.Writer.Allocating = .init(std.heap.smp_allocator);
             defer capture.deinit();
 
-            if (try writeFileReports(
+            if (try writeFileOutput(
                 file_allocator,
                 &capture.writer,
                 searcher,
@@ -433,9 +460,10 @@ fn searchEntriesParallel(
                 buffer.bytes(),
                 self.options.encoding,
                 self.options.output,
+                self.options.report_mode,
             )) {
                 self.result_reports[index] = .{
-                    .bytes = try std.heap.smp_allocator.dupe(u8, capture.written()),
+                    .bytes = capture.toArrayList(),
                 };
             }
         }
@@ -483,7 +511,7 @@ fn searchEntriesParallel(
     for (result_reports) |maybe_report| {
         if (maybe_report) |report| {
             defer report.deinit();
-            try stdout.writeAll(report.bytes);
+            try stdout.writeAll(report.bytes.items);
             matched = true;
         }
     }
@@ -582,6 +610,73 @@ fn writeFileReports(
     }
 
     return searcher.forEachLineReport(path, bytes, &context, WriterContext.emit);
+}
+
+fn writeFileOutput(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+    output: OutputOptions,
+    report_mode: ReportMode,
+) !bool {
+    return switch (report_mode) {
+        .lines => writeFileReports(allocator, writer, searcher, path, bytes, encoding, output),
+        .count => writeFileCount(allocator, writer, searcher, path, bytes, encoding, output),
+        .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding),
+    };
+}
+
+fn writeFileCount(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+    output: OutputOptions,
+) !bool {
+    const Counter = struct {
+        count: usize = 0,
+
+        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
+            _ = report;
+            self.count += 1;
+        }
+    };
+
+    var counter = Counter{};
+
+    if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
+        defer allocator.free(decoded);
+        _ = try searcher.forEachLineReport(path, decoded, &counter, Counter.emit);
+    } else {
+        _ = try searcher.forEachLineReport(path, bytes, &counter, Counter.emit);
+    }
+
+    if (counter.count == 0) return false;
+    if (output.with_filename) {
+        try writer.print("{s}:{d}\n", .{ path, counter.count });
+    } else {
+        try writer.print("{d}\n", .{counter.count});
+    }
+    return true;
+}
+
+fn writeFilePathOnMatch(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+) !bool {
+    const report = try reportFileMatch(allocator, searcher, path, bytes, encoding) orelse return false;
+    defer report.deinit(allocator);
+    try writer.print("{s}\n", .{path});
+    return true;
 }
 
 fn reportFileMatch(
@@ -694,6 +789,9 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -E, --encoding ENC    force input encoding: auto, utf8, utf16le, utf16be
         \\  -j, --threads N       use up to N worker threads
         \\  --max-depth N         limit recursive walk depth
+        \\  -c, --count           print matching line counts
+        \\  -l, --files-with-matches
+        \\                        print only matching file paths
         \\  -H, --with-filename   always print the file path
         \\  --no-filename         suppress the file path prefix
         \\  -n, --line-number     print line numbers
@@ -760,6 +858,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(opts.output.with_filename);
             try testing.expect(opts.output.line_number);
             try testing.expect(opts.output.column_number);
+            try testing.expectEqual(ReportMode.lines, opts.report_mode);
         },
         .help => unreachable,
         .version => unreachable,
@@ -846,6 +945,7 @@ test "parseArgs accepts numeric and formatting flags" {
         "4",
         "--max-depth",
         "2",
+        "--count",
         "--encoding",
         "utf16le",
         "--no-filename",
@@ -868,6 +968,7 @@ test "parseArgs accepts numeric and formatting flags" {
             try testing.expect(!opts.output.with_filename);
             try testing.expect(opts.output.line_number);
             try testing.expect(!opts.output.column_number);
+            try testing.expectEqual(ReportMode.count, opts.report_mode);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("src", opts.paths[0]);
         },
@@ -1041,6 +1142,92 @@ test "runSearch buffered output stays identical to the default path" {
     try testing.expectEqualStrings(default_stderr.written(), buffered_stderr.written());
 }
 
+test "runSearch output stays identical across allocator and output modes on mixed input" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "plain.txt",
+        .data = "needle one\nskip\nneedle two\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "invalid.bin",
+        .data = "xx\xffneedleyy\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf16le.txt",
+        .data =
+            "\xff\xfe" ++
+            "n\x00e\x00e\x00d\x00l\x00e\x00 \x00u\x00n\x00o\x00\n\x00" ++
+            "s\x00k\x00i\x00p\x00\n\x00" ++
+            "n\x00e\x00e\x00d\x00l\x00e\x00 \x00d\x00o\x00s\x00\n\x00",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const modes = [_]CliOptions{
+        .{
+            .pattern = "needle",
+            .paths = &.{root_path},
+            .parallel_jobs = 1,
+            .read_strategy = .buffered,
+        },
+        .{
+            .pattern = "needle",
+            .paths = &.{root_path},
+            .parallel_jobs = 1,
+            .read_strategy = .mmap,
+            .buffer_output = true,
+        },
+        .{
+            .pattern = "needle",
+            .paths = &.{root_path},
+            .parallel_jobs = 4,
+            .read_strategy = .mmap,
+        },
+        .{
+            .pattern = "needle",
+            .paths = &.{root_path},
+            .parallel_jobs = 4,
+            .read_strategy = .mmap,
+            .buffer_output = true,
+        },
+    };
+
+    var expected_stdout: ?[]u8 = null;
+    defer if (expected_stdout) |bytes| testing.allocator.free(bytes);
+    var expected_stderr: ?[]u8 = null;
+    defer if (expected_stderr) |bytes| testing.allocator.free(bytes);
+    var expected_exit: ?u8 = null;
+
+    for (modes) |mode| {
+        var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer stdout_capture.deinit();
+        var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer stderr_capture.deinit();
+
+        const exit_code = try runSearch(
+            testing.allocator,
+            &stdout_capture.writer,
+            &stderr_capture.writer,
+            mode,
+        );
+
+        if (expected_stdout == null) {
+            expected_stdout = try testing.allocator.dupe(u8, stdout_capture.written());
+            expected_stderr = try testing.allocator.dupe(u8, stderr_capture.written());
+            expected_exit = exit_code;
+        } else {
+            try testing.expectEqual(expected_exit.?, exit_code);
+            try testing.expectEqualStrings(expected_stdout.?, stdout_capture.written());
+            try testing.expectEqualStrings(expected_stderr.?, stderr_capture.written());
+        }
+    }
+}
+
 test "runCli prints every matching line from one file" {
     const testing = std.testing;
 
@@ -1066,6 +1253,59 @@ test "runCli prints every matching line from one file" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:needle one"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:3:1:needle two"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:4:1:needle needle"));
+}
+
+test "runCli count mode prints per-file matching line counts" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data =
+            "needle one\n" ++
+            "skip\n" ++
+            "needle two\n" ++
+            "needle needle\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--count", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:3\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli files-with-matches mode prints matching file paths once" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\nneedle two\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "two.txt",
+        .data = "skip\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--files-with-matches", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "two.txt\n"));
+    try testing.expectEqualStrings("", run.stderr);
 }
 
 test "runSearch parallel path prints every matching line from one file" {
@@ -1854,6 +2094,39 @@ test "reportFileMatch only owns line bytes for transformed haystacks" {
     defer invalid.deinit(testing.allocator);
     try testing.expect(invalid.owned_line == null);
     try testing.expectEqualStrings("xx\xffneedleyy", invalid.line);
+}
+
+test "writeFileReports does not require owned line bytes for decoded multi-line input" {
+    const testing = std.testing;
+
+    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{});
+    defer searcher.deinit();
+
+    const utf16le =
+        "\xff\xfe" ++
+        "n\x00e\x00e\x00d\x00l\x00e\x00 \x00o\x00n\x00e\x00\n\x00" ++
+        "s\x00k\x00i\x00p\x00\n\x00" ++
+        "n\x00e\x00e\x00d\x00l\x00e\x00 \x00t\x00w\x00o\x00\n\x00";
+
+    var capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer capture.deinit();
+
+    const matched = try writeFileReports(
+        testing.allocator,
+        &capture.writer,
+        &searcher,
+        "utf16.txt",
+        utf16le,
+        .auto,
+        .{},
+    );
+
+    try testing.expect(matched);
+    try testing.expectEqualStrings(
+        "utf16.txt:1:1:needle one\n" ++
+            "utf16.txt:3:1:needle two\n",
+        capture.written(),
+    );
 }
 
 test "reportFileMatch uses byte matching for planner-covered invalid UTF-8 input" {

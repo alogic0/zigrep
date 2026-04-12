@@ -1,0 +1,201 @@
+# Ripgrep Gap Implementation Plan
+
+This plan summarizes the major functionality present in the local `ripgrep`
+repository that `zigrep` does not yet implement, with emphasis on what makes
+sense for a Zig-native implementation.
+
+It is not a goal to clone ripgrep flag-for-flag or crate-for-crate. The goal is
+to close the most important user-visible gaps while keeping `zigrep` coherent,
+portable, and maintainable in Zig.
+
+## Current Position
+
+`zigrep` already has:
+
+- a custom automata-friendly regex engine
+- raw-byte handling for invalid UTF-8
+- UTF-16 support with `-E/--encoding`
+- recursive search, ignore-file handling, binary detection, mmap/buffered reads
+- ordered parallel search
+- output formatting for normal line-oriented matches
+
+Compared with the local `ripgrep` repo, the main missing functionality is now
+less about core matching and more about search-tool breadth, UX depth, and
+ecosystem features.
+
+## Priority 1: Core Search UX Gaps
+
+- [x] Add `-c/--count` style reporting.
+  `zigrep` now supports count-only reporting for matching lines.
+
+- [ ] Add `-o/--only-matching`.
+  The engine already tracks match spans. Exposing match-only output is a high
+  leverage CLI feature.
+
+- [x] Add `-l/--files-with-matches` and `-L/--files-without-match` equivalents.
+  `zigrep` now supports `-l/--files-with-matches`; `files-without-match` is
+  still open.
+
+- [ ] Add before/after/context line support (`-A`, `-B`, `-C` style behavior).
+  This is one of the biggest practical output gaps versus ripgrep and standard
+  grep workflows.
+
+- [ ] Add `--max-count`.
+  This becomes especially useful once full per-file multi-match output and
+  context modes are already in place.
+
+### Zig-specific guidance
+
+- Reuse the current span-based reporting path instead of introducing a separate
+  line-streaming engine just for context.
+- Keep context extraction byte-oriented and file-buffer-based so it stays
+  compatible with the current read/match model.
+
+## Priority 2: Search Filtering And CLI Surface
+
+- [ ] Add glob filtering like `-g/--glob` and possibly `--iglob`.
+  ripgrep’s manual include/exclude globs are a major missing search-tool feature.
+
+- [ ] Add richer ignore controls:
+  `--ignore-file`, `--no-ignore`, `--no-ignore-vcs`, `--no-ignore-parent`,
+  and related toggles.
+
+- [ ] Add smart case and ignore-case modes.
+  `zigrep` currently rejects case-insensitive search. That is a major practical
+  feature gap.
+
+- [ ] Add file type filters:
+  `-t`, `-T`, `--type-add`, `--type-list`, and related type definitions.
+
+- [ ] Add `--hidden` / ignore interactions closer to ripgrep’s actual model.
+  `zigrep` has basic hidden-file support, but not the broader ripgrep-style flag
+  family or its interaction model.
+
+### Zig-specific guidance
+
+- Treat globs, ignore rules, and file-type definitions as first-class data
+  structures in `src/search/`, not ad hoc conditionals in `main.zig`.
+- Prefer explicit structs and compact internal representations over trying to
+  emulate ripgrep’s Rust crate boundaries directly.
+
+## Priority 3: Output Modes And Integration
+
+- [ ] Add heading / grouped file output.
+  ripgrep supports heading-style output and related formatting aliases.
+
+- [ ] Add NUL-delimited path output where appropriate (`--null` style support).
+  This matters for safe scripting with unusual file names.
+
+- [ ] Add JSON output.
+  This is one of ripgrep’s strongest integration features for downstream tools.
+
+- [ ] Add stats output.
+  Even a smaller first version would improve observability for performance and
+  search behavior.
+
+- [ ] Add passthrough / non-match-printing modes only if justified.
+  This is lower priority than count/context/json, but it is part of the broader
+  ripgrep output surface.
+
+### Zig-specific guidance
+
+- Implement JSON output with a dedicated event model instead of formatting text
+  and reparsing it.
+- Keep text and JSON reporting paths separate but driven by shared internal
+  match events.
+
+## Priority 4: Regex Surface Gaps
+
+- [ ] Add case-insensitive regex support in the native engine.
+  This is currently the single biggest regex usability gap.
+
+- [ ] Decide whether to support multiline search (`-U/--multiline` style).
+  This is a major ripgrep feature but has real architectural cost.
+
+- [ ] Decide whether to support a richer regex fallback such as PCRE2-like
+  functionality or to keep the current deliberate non-goal.
+
+- [ ] Add more grep/ripgrep-compatible character class and escape syntax only if
+  it fits the engine model cleanly.
+
+### Zig-specific guidance
+
+- Do not compromise the current linear-time engine design just to chase full
+  PCRE2 compatibility.
+- If richer regex support is added later, isolate it behind an explicit fallback
+  boundary rather than contaminating the main engine path.
+
+## Priority 5: Binary, Encoding, And Input Parity
+
+- [ ] Add a distinct `--binary` mode similar to ripgrep’s
+  “search and suppress binary output” behavior.
+
+- [ ] Decide whether to add `-E none` style raw-byte mode explicitly.
+  ripgrep exposes a sharper encoding boundary here than `zigrep` does today.
+
+- [ ] Expand encoding coverage beyond UTF-8 / UTF-16 if this project wants real
+  ripgrep-like text-encoding breadth.
+
+- [ ] Revisit binary detection behavior under mmap vs buffered reads.
+  ripgrep documents subtle differences here; `zigrep` should decide whether to
+  normalize behavior or document intentional differences.
+
+### Zig-specific guidance
+
+- Keep binary/encoding policy explicit in `src/search/io.zig` instead of
+  scattering it across CLI and matcher code.
+- Prefer a small number of clearly documented input modes over a complicated
+  matrix of partially implicit behavior.
+
+## Priority 6: External Input Pipelines
+
+- [ ] Add compressed-file search (`-z/--search-zip` style).
+  This is a meaningful gap versus ripgrep for real-world log and artifact search.
+
+- [ ] Add preprocessor support (`--pre`, `--pre-glob` style) if the project
+  wants ripgrep-like arbitrary input transforms.
+
+### Zig-specific guidance
+
+- Keep decompression and preprocessing isolated behind a narrow input-provider
+  interface.
+- Avoid baking shell-process assumptions into the core matcher or reporting
+  layers.
+
+## Priority 7: Config And Tooling Surface
+
+- [ ] Add configuration file support.
+  ripgrep’s config file support is a real UX multiplier for regular users.
+
+- [ ] Add better exit/status and warning behavior around new modes as they land.
+
+- [ ] Expand end-to-end CLI tests to cover flag interactions, not just isolated
+  features.
+
+### Zig-specific guidance
+
+- Keep config parsing simple and explicit.
+- Avoid introducing a complex “global state” model just to support a config
+  file.
+
+## Suggested Implementation Order
+
+- [x] 1. Add count-only and files-with-matches modes.
+- [ ] 2. Add only-matching output.
+- [ ] 3. Add context line support.
+- [ ] 4. Add glob filtering and richer ignore controls.
+- [ ] 5. Add case-insensitive / smart-case search.
+- [ ] 6. Add file type filters.
+- [ ] 7. Add JSON output and NUL-delimited path output.
+- [ ] 8. Revisit binary-mode parity and explicit raw-byte input modes.
+- [ ] 9. Decide whether multiline search is worth the complexity.
+- [ ] 10. Only then consider compressed search, preprocessors, or richer regex
+  fallback work.
+
+## Explicit Non-Goals For Now
+
+- [ ] Do not chase full flag parity with ripgrep before closing the common grep
+  workflows.
+- [ ] Do not mirror ripgrep’s Rust crate structure mechanically in Zig.
+- [ ] Do not add PCRE2-style complexity to the native engine unless an explicit
+  fallback architecture exists first.
