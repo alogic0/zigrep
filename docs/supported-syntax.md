@@ -140,13 +140,14 @@ Context mode note:
 Multiline status note:
 
 - `-U` / `--multiline` and `--multiline-dotall` are reserved in the CLI surface now
-- the current build parses those flags but still stops with `MultilineNotImplemented`
+- the current build supports multiline in normal text line output
 - the pinned target semantics for implementation are:
   - multiline mode permits matches to span line terminators
   - `.` still does not match `\n` by default
   - `--multiline-dotall` makes `.` match `\n`
   - multiline reporting will stay line-oriented by projecting full match spans back to covered display lines
-- until that engine work lands, multiline output formatting remains unimplemented
+- the current text output prints one merged display block per multiline match group, with line and column prefixes anchored to the first matched line
+- unsupported multiline combinations are still rejected for now, including `--only-matching`, context mode, `--count`, JSON output, invert-match, heading mode, and `--max-count`
 
 For non-technical users:
 
@@ -268,7 +269,7 @@ The current search tool does not yet implement:
 - `.gitignore` compatibility beyond the small internal ignore-rule subset
 - stdin search
 - replacement/substitution
-- multiline search execution and multiline output formatting
+- full multiline output-mode support beyond the current normal text line mode
 - full ripgrep flag compatibility
 
 ## Performance Model

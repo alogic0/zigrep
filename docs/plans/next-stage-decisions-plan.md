@@ -79,7 +79,7 @@ maintenance cost.
 
 ### Phase 4: Output Modes
 
-- [ ] Wire normal text output:
+- [x] Wire normal text output:
   - print the merged covered line block for each multiline match group
 
 - [ ] Wire `--only-matching`:
