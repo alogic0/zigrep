@@ -5,6 +5,13 @@ pub const ReadStrategy = enum {
     mmap,
 };
 
+pub const InputEncoding = enum {
+    auto,
+    utf8,
+    utf16le,
+    utf16be,
+};
+
 pub const ReadOptions = struct {
     strategy: ReadStrategy = .buffered,
     buffer_size: usize = 16 * 1024,
@@ -117,6 +124,19 @@ pub fn decodeBomToUtf8Alloc(allocator: std.mem.Allocator, bytes: []const u8) Dec
     };
 }
 
+pub fn decodeToUtf8Alloc(
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+    encoding: InputEncoding,
+) DecodeError!?[]u8 {
+    return switch (encoding) {
+        .auto => try decodeBomToUtf8Alloc(allocator, bytes),
+        .utf8 => null,
+        .utf16le => try decodeUtf16ToUtf8Alloc(allocator, bytes, .little),
+        .utf16be => try decodeUtf16ToUtf8Alloc(allocator, bytes, .big),
+    };
+}
+
 pub fn detectBinaryFile(path: []const u8, options: BinaryOptions) !BinaryDecision {
     var file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
@@ -194,6 +214,26 @@ fn decodeUtf16BomToUtf8Alloc(
     endian: std.builtin.Endian,
 ) DecodeError![]u8 {
     const body = bytes[2..];
+    return decodeUtf16UnitsToUtf8Alloc(allocator, body, endian);
+}
+
+fn decodeUtf16ToUtf8Alloc(
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+    endian: std.builtin.Endian,
+) DecodeError![]u8 {
+    const body = switch (endian) {
+        .little => if (detectBom(bytes) == .utf16_le) bytes[2..] else bytes,
+        .big => if (detectBom(bytes) == .utf16_be) bytes[2..] else bytes,
+    };
+    return decodeUtf16UnitsToUtf8Alloc(allocator, body, endian);
+}
+
+fn decodeUtf16UnitsToUtf8Alloc(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    endian: std.builtin.Endian,
+) DecodeError![]u8 {
     if (body.len % 2 != 0) return error.InvalidUtf16Length;
 
     const unit_count = body.len / 2;
@@ -281,6 +321,27 @@ test "UTF-16 BOM decoder converts UTF-16LE and UTF-16BE inputs to UTF-8" {
     try testing.expectEqualStrings("hi", decoded_be);
 
     try testing.expect((try decodeBomToUtf8Alloc(testing.allocator, "plain text")) == null);
+}
+
+test "explicit UTF-16 decoder converts BOM and non-BOM inputs to UTF-8" {
+    const testing = std.testing;
+
+    const utf16le = "h\x00i\x00";
+    const decoded_le = (try decodeToUtf8Alloc(testing.allocator, utf16le, .utf16le)).?;
+    defer testing.allocator.free(decoded_le);
+    try testing.expectEqualStrings("hi", decoded_le);
+
+    const utf16be = "\x00h\x00i";
+    const decoded_be = (try decodeToUtf8Alloc(testing.allocator, utf16be, .utf16be)).?;
+    defer testing.allocator.free(decoded_be);
+    try testing.expectEqualStrings("hi", decoded_be);
+
+    const utf16le_with_bom = "\xff\xfeh\x00i\x00";
+    const decoded_le_bom = (try decodeToUtf8Alloc(testing.allocator, utf16le_with_bom, .utf16le)).?;
+    defer testing.allocator.free(decoded_le_bom);
+    try testing.expectEqualStrings("hi", decoded_le_bom);
+
+    try testing.expect((try decodeToUtf8Alloc(testing.allocator, "plain text", .utf8)) == null);
 }
 
 test "buffered I/O reads whole files into owned buffers" {

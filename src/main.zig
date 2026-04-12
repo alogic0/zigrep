@@ -21,6 +21,7 @@ const CliOptions = struct {
     follow_symlinks: bool = false,
     skip_binary: bool = true,
     read_strategy: zigrep.search.io.ReadStrategy = .mmap,
+    encoding: zigrep.search.io.InputEncoding = .auto,
     parallel_jobs: ?usize = null,
     max_depth: ?usize = null,
     output: OutputOptions = .{},
@@ -113,6 +114,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var follow_symlinks = false;
     var skip_binary = true;
     var read_strategy: zigrep.search.io.ReadStrategy = .mmap;
+    var encoding: zigrep.search.io.InputEncoding = .auto;
     var parallel_jobs: ?usize = null;
     var max_depth: ?usize = null;
     var output: OutputOptions = .{};
@@ -154,6 +156,12 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "--mmap")) {
                 read_strategy = .mmap;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-E") or std.mem.eql(u8, arg, "--encoding")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                encoding = try parseEncoding(argv[index]);
                 continue;
             }
             if (std.mem.eql(u8, arg, "-j") or std.mem.eql(u8, arg, "--threads")) {
@@ -212,6 +220,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .follow_symlinks = follow_symlinks,
         .skip_binary = skip_binary,
         .read_strategy = read_strategy,
+        .encoding = encoding,
         .parallel_jobs = parallel_jobs,
         .max_depth = max_depth,
         .output = output,
@@ -287,7 +296,7 @@ fn searchEntriesSequential(
         defer file_arena_state.deinit();
         const file_allocator = file_arena_state.allocator();
 
-        if (options.skip_binary) {
+        if (options.skip_binary and options.encoding == .auto) {
             const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
                 if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
                 return err;
@@ -303,7 +312,7 @@ fn searchEntriesSequential(
         };
         defer buffer.deinit(file_allocator);
 
-        if (try reportFileMatch(file_allocator, &searcher, entry.path, buffer.bytes(), !options.skip_binary)) |report| {
+        if (try reportFileMatch(file_allocator, &searcher, entry.path, buffer.bytes(), options.encoding, !options.skip_binary)) |report| {
             defer report.deinit(file_allocator);
             try printReport(stdout, report, options.output);
             matched = true;
@@ -400,7 +409,7 @@ fn searchEntriesParallel(
             defer file_arena_state.deinit();
             const file_allocator = file_arena_state.allocator();
 
-            if (self.options.skip_binary) {
+            if (self.options.skip_binary and self.options.encoding == .auto) {
                 const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
                     if (try self.warnAndSkip(entry.path, err)) return;
                     return err;
@@ -416,7 +425,7 @@ fn searchEntriesParallel(
             };
             defer buffer.deinit(file_allocator);
 
-            if (try reportFileMatch(file_allocator, searcher, entry.path, buffer.bytes(), !self.options.skip_binary)) |report| {
+            if (try reportFileMatch(file_allocator, searcher, entry.path, buffer.bytes(), self.options.encoding, !self.options.skip_binary)) |report| {
                 defer report.deinit(file_allocator);
                 self.result_reports[index] = .{
                     .path = entry.path,
@@ -538,9 +547,10 @@ fn reportFileMatch(
     searcher: *zigrep.search.grep.Searcher,
     path: []const u8,
     bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
     allow_lossy_invalid_utf8: bool,
 ) !?zigrep.search.grep.MatchReport {
-    if (try zigrep.search.io.decodeBomToUtf8Alloc(allocator, bytes)) |decoded| {
+    if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
         defer allocator.free(decoded);
         if (try searcher.reportFirstMatch(path, decoded)) |report| {
             const owned_line = try allocator.dupe(u8, report.line);
@@ -615,6 +625,14 @@ fn formatReport(
     return try allocator.dupe(u8, buffer.written());
 }
 
+fn parseEncoding(arg: []const u8) CliError!zigrep.search.io.InputEncoding {
+    if (std.ascii.eqlIgnoreCase(arg, "auto")) return .auto;
+    if (std.ascii.eqlIgnoreCase(arg, "utf8")) return .utf8;
+    if (std.ascii.eqlIgnoreCase(arg, "utf16le")) return .utf16le;
+    if (std.ascii.eqlIgnoreCase(arg, "utf16be")) return .utf16be;
+    return error.InvalidFlagValue;
+}
+
 fn parsePositiveUsize(arg: []const u8) CliError!usize {
     const value = parseNonNegativeUsize(arg) catch return error.InvalidFlagValue;
     if (value == 0) return error.InvalidFlagValue;
@@ -636,6 +654,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --text                search binary files too
         \\  --buffered            use the simpler file-reading method
         \\  --mmap                use the faster file-reading method when possible
+        \\  -E, --encoding ENC    force input encoding: auto, utf8, utf16le, utf16be
         \\  -j, --threads N       use up to N worker threads
         \\  --max-depth N         limit recursive walk depth
         \\  -H, --with-filename   always print the file path
@@ -698,6 +717,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(!opts.follow_symlinks);
             try testing.expect(opts.skip_binary);
             try testing.expectEqual(zigrep.search.io.ReadStrategy.mmap, opts.read_strategy);
+            try testing.expectEqual(zigrep.search.io.InputEncoding.auto, opts.encoding);
             try testing.expectEqual(@as(?usize, null), opts.parallel_jobs);
             try testing.expectEqual(@as(?usize, null), opts.max_depth);
             try testing.expect(opts.output.with_filename);
@@ -789,6 +809,8 @@ test "parseArgs accepts numeric and formatting flags" {
         "4",
         "--max-depth",
         "2",
+        "--encoding",
+        "utf16le",
         "--no-filename",
         "--no-column",
         "--",
@@ -805,6 +827,7 @@ test "parseArgs accepts numeric and formatting flags" {
             try testing.expectEqualStrings("-literal", opts.pattern);
             try testing.expectEqual(@as(?usize, 4), opts.parallel_jobs);
             try testing.expectEqual(@as(?usize, 2), opts.max_depth);
+            try testing.expectEqual(zigrep.search.io.InputEncoding.utf16le, opts.encoding);
             try testing.expect(!opts.output.with_filename);
             try testing.expect(opts.output.line_number);
             try testing.expect(!opts.output.column_number);
@@ -827,6 +850,12 @@ test "parseArgs rejects invalid numeric flags" {
     try testing.expectError(error.MissingFlagValue, parseArgs(testing.allocator, &.{
         "zigrep",
         "--max-depth",
+    }));
+    try testing.expectError(error.InvalidFlagValue, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--encoding",
+        "latin1",
+        "needle",
     }));
 }
 
@@ -1188,17 +1217,75 @@ test "runCli can search UTF-16BE BOM files in default mode" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf16be.txt:1:1:needle"));
 }
 
+test "runCli can force UTF-16LE decoding without a BOM" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf16le-no-bom.txt",
+        .data = "n\x00e\x00e\x00d\x00l\x00e\x00\n\x00",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const default_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer default_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), default_run.exit_code);
+
+    const forced_run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--encoding",
+        "utf16le",
+        "needle",
+        root_path,
+    });
+    defer forced_run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), forced_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "utf16le-no-bom.txt:1:1:needle"));
+}
+
+test "runCli can force UTF-16BE decoding without a BOM" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf16be-no-bom.txt",
+        .data = "\x00n\x00e\x00e\x00d\x00l\x00e\x00\x0a",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const forced_run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-E",
+        "utf16be",
+        "needle",
+        root_path,
+    });
+    defer forced_run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), forced_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "utf16be-no-bom.txt:1:1:needle"));
+}
+
 test "reportFileMatch only owns line bytes for lossy text-mode fallback" {
     const testing = std.testing;
 
     var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{});
     defer searcher.deinit();
 
-    const normal = (try reportFileMatch(testing.allocator, &searcher, "normal.txt", "xxneedleyy", false)).?;
+    const normal = (try reportFileMatch(testing.allocator, &searcher, "normal.txt", "xxneedleyy", .auto, false)).?;
     defer normal.deinit(testing.allocator);
     try testing.expect(normal.owned_line == null);
 
-    const lossy = (try reportFileMatch(testing.allocator, &searcher, "lossy.bin", "xx\xffneedleyy", true)).?;
+    const lossy = (try reportFileMatch(testing.allocator, &searcher, "lossy.bin", "xx\xffneedleyy", .auto, true)).?;
     defer lossy.deinit(testing.allocator);
     try testing.expect(lossy.owned_line != null);
     try testing.expectEqualStrings("xx?needleyy", lossy.line);

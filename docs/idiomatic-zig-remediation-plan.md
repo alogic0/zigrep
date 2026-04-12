@@ -47,14 +47,14 @@ encoding behavior without rewriting the whole architecture around generic
 
 ## Priority 5: Encoding And Byte-Oriented Search Work
 
-- [ ] Keep [docs/rg-binary-encoding-plan.md](/home/oleg/prog/zigrep/docs/rg-binary-encoding-plan.md) as the main long-term roadmap
+- [x] Keep [docs/rg-binary-encoding-plan.md](/home/oleg/prog/zigrep/docs/rg-binary-encoding-plan.md) as the main long-term roadmap
 - [x] Add more regression tests around invalid UTF-8 under default mode and `--text`
 - [x] Add more regression tests around binary-file heuristics
 - [ ] Design a true byte-oriented search path
 - [ ] Define regex semantics for invalid UTF-8 input
 - [x] Add BOM detection
 - [x] Add UTF-16LE and UTF-16BE decoding support
-- [ ] Add explicit encoding configuration
+- [x] Add explicit encoding configuration
 - [ ] Normalize output behavior for non-UTF-8 matches
 - [ ] Remove the current lossy `?` fallback once byte-oriented handling replaces it
 
@@ -108,3 +108,6 @@ encoding behavior without rewriting the whole architecture around generic
   UTF-16BE inputs, which gives the later encoding work a concrete entry point.
 - UTF-16LE and UTF-16BE BOM files now decode to UTF-8 for matching and are
   treated as text by the current binary detector.
+- The CLI now supports `-E/--encoding auto|utf8|utf16le|utf16be`, and forced
+  UTF-16 modes bypass the binary-file heuristic so unmarked UTF-16 input can
+  still be searched through the current decode-to-UTF-8 path.
