@@ -25,7 +25,10 @@ pub const vm = @import("vm.zig");
 pub const Vm = vm;
 pub const Dfa = @import("dfa.zig");
 
-pub const CompileOptions = struct {};
+pub const CompileOptions = struct {
+    multiline: bool = false,
+    multiline_dotall: bool = false,
+};
 
 pub fn compile(allocator: @import("std").mem.Allocator, pattern: []const u8, _: CompileOptions) (ParseError || error{OutOfMemory})!Hir {
     var p = try Parser.init(allocator, pattern);

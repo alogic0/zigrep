@@ -103,7 +103,7 @@ fn runSyntheticCase(allocator: std.mem.Allocator, bench_case: SyntheticBenchCase
     const hir = try zigrep.compile(allocator, bench_case.pattern, .{});
     defer hir.deinit(allocator);
 
-    const program = try zigrep.regex.Nfa.compile(allocator, hir);
+    const program = try zigrep.regex.Nfa.compile(allocator, hir, .{});
     defer program.deinit(allocator);
 
     var engine = zigrep.regex.Vm.MatchEngine.init(allocator);
@@ -140,7 +140,7 @@ fn runCorpusCase(allocator: std.mem.Allocator, bench_case: CorpusBenchCase) !Res
     const hir = try zigrep.compile(allocator, bench_case.pattern, .{});
     defer hir.deinit(allocator);
 
-    const program = try zigrep.regex.Nfa.compile(allocator, hir);
+    const program = try zigrep.regex.Nfa.compile(allocator, hir, .{});
     defer program.deinit(allocator);
 
     const entries = try zigrep.search.walk.collectFiles(allocator, bench_case.root, .{

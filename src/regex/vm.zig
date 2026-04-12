@@ -210,7 +210,7 @@ pub const MatchEngine = struct {
                 return self.addThread(program, list, visited, class.out.?, thread.slots, next_pos, input_len);
             },
             .any => |any| {
-                if (cp == '\n') return null;
+                if (!program.dot_matches_new_line and cp == '\n') return null;
                 return self.addThread(program, list, visited, any.out.?, thread.slots, next_pos, input_len);
             },
             else => return null,
@@ -236,7 +236,7 @@ pub const MatchEngine = struct {
                 return self.addThread(program, list, visited, class.out.?, thread.slots, unit.end, input_len);
             },
             .any => |any| {
-                if (unit.isNewline()) return null;
+                if (!program.dot_matches_new_line and unit.isNewline()) return null;
                 return self.addThread(program, list, visited, any.out.?, thread.slots, unit.end, input_len);
             },
             else => return null,
@@ -438,19 +438,22 @@ fn isAsciiBytes(bytes: []const u8) bool {
     return true;
 }
 
-fn compileProgram(allocator: std.mem.Allocator, pattern: []const u8) !nfa.Program {
+fn compileProgram(allocator: std.mem.Allocator, pattern: []const u8, options: @import("root.zig").CompileOptions) !nfa.Program {
     const regex = @import("root.zig");
 
-    const lowered = try regex.compile(allocator, pattern, .{});
+    const lowered = try regex.compile(allocator, pattern, options);
     defer lowered.deinit(allocator);
 
-    return nfa.compile(allocator, lowered);
+    return nfa.compile(allocator, lowered, .{
+        .multiline = options.multiline,
+        .multiline_dotall = options.multiline_dotall,
+    });
 }
 
 fn expectMatch(pattern: []const u8, haystack: []const u8) !void {
     const testing = std.testing;
 
-    const program = try compileProgram(testing.allocator, pattern);
+    const program = try compileProgram(testing.allocator, pattern, .{});
     defer program.deinit(testing.allocator);
 
     var engine = MatchEngine.init(testing.allocator);
@@ -460,7 +463,7 @@ fn expectMatch(pattern: []const u8, haystack: []const u8) !void {
 fn expectNoMatch(pattern: []const u8, haystack: []const u8) !void {
     const testing = std.testing;
 
-    const program = try compileProgram(testing.allocator, pattern);
+    const program = try compileProgram(testing.allocator, pattern, .{});
     defer program.deinit(testing.allocator);
 
     var engine = MatchEngine.init(testing.allocator);
@@ -470,7 +473,7 @@ fn expectNoMatch(pattern: []const u8, haystack: []const u8) !void {
 fn expectByteMatch(pattern: []const u8, haystack: []const u8, expected: Capture) !void {
     const testing = std.testing;
 
-    const program = try compileProgram(testing.allocator, pattern);
+    const program = try compileProgram(testing.allocator, pattern, .{});
     defer program.deinit(testing.allocator);
 
     var engine = MatchEngine.init(testing.allocator);
@@ -483,7 +486,7 @@ fn expectByteMatch(pattern: []const u8, haystack: []const u8, expected: Capture)
 test "VM matches literals, alternation, and repetition" {
     const testing = std.testing;
 
-    const program = try compileProgram(testing.allocator, "ab|c+");
+    const program = try compileProgram(testing.allocator, "ab|c+", .{});
     defer program.deinit(testing.allocator);
 
     var engine = MatchEngine.init(testing.allocator);
@@ -496,7 +499,7 @@ test "VM matches literals, alternation, and repetition" {
 test "VM handles character classes, dot, and UTF-8 code points" {
     const testing = std.testing;
 
-    const program = try compileProgram(testing.allocator, "[a-c].©");
+    const program = try compileProgram(testing.allocator, "[a-c].©", .{});
     defer program.deinit(testing.allocator);
 
     var engine = MatchEngine.init(testing.allocator);
@@ -509,7 +512,7 @@ test "VM handles character classes, dot, and UTF-8 code points" {
 test "VM respects start and end anchors" {
     const testing = std.testing;
 
-    const program = try compileProgram(testing.allocator, "^ab+$");
+    const program = try compileProgram(testing.allocator, "^ab+$", .{});
     defer program.deinit(testing.allocator);
 
     var engine = MatchEngine.init(testing.allocator);
@@ -518,6 +521,46 @@ test "VM respects start and end anchors" {
     try testing.expect(try engine.isMatch(program, "abbb"));
     try testing.expect(!(try engine.isMatch(program, "zabbb")));
     try testing.expect(!(try engine.isMatch(program, "abbbz")));
+}
+
+test "VM requires multiline for newline literal patterns" {
+    const testing = std.testing;
+    const program_result = compileProgram(testing.allocator, "a\\nb", .{});
+    try testing.expectError(error.MultilineRequired, program_result);
+}
+
+test "VM multiline mode matches newline literals" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "a\\nb", .{ .multiline = true });
+    defer program.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect(try engine.isMatch(program, "xxa\nbyy"));
+    try testing.expect(!(try engine.isMatch(program, "xxabyy")));
+}
+
+test "VM multiline mode keeps dot from matching newline without dotall" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "a.b", .{ .multiline = true });
+    defer program.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect(!(try engine.isMatch(program, "a\nb")));
+}
+
+test "VM multiline dotall makes dot match newline" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "a.b", .{
+        .multiline = true,
+        .multiline_dotall = true,
+    });
+    defer program.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect(try engine.isMatch(program, "a\nb"));
 }
 
 test "VM matches empty expressions and optional paths" {

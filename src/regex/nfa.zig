@@ -51,6 +51,7 @@ pub const Program = struct {
     slot_count: u32,
     prefilter: ?literal_mod.Prefilter,
     ascii_only: bool,
+    dot_matches_new_line: bool,
 
     pub fn deinit(self: Program, allocator: std.mem.Allocator) void {
         for (self.instructions) |inst| {
@@ -67,6 +68,12 @@ pub const Program = struct {
 pub const CompileError = error{
     OutOfMemory,
     InvalidRepeat,
+    MultilineRequired,
+};
+
+pub const CompileOptions = struct {
+    multiline: bool = false,
+    multiline_dotall: bool = false,
 };
 
 const Fragment = struct {
@@ -74,7 +81,11 @@ const Fragment = struct {
     outs: std.ArrayList(PatchRef),
 };
 
-pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir) CompileError!Program {
+pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options: CompileOptions) CompileError!Program {
+    if (!options.multiline and hirCanMatchNewline(compiled_hir, compiled_hir.root, options.multiline_dotall)) {
+        return error.MultilineRequired;
+    }
+
     var compiler = Compiler{
         .allocator = allocator,
         .instructions = .empty,
@@ -102,7 +113,49 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir) CompileE
         .slot_count = 2 * (compiled_hir.capture_count + 1),
         .prefilter = try literal_mod.duplicatePrefilter(allocator, compiled_hir.literals),
         .ascii_only = isAsciiOnly(compiler.instructions.items),
+        .dot_matches_new_line = options.multiline_dotall,
     };
+}
+
+fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, dotall: bool) bool {
+    return switch (compiled_hir.nodes[@intFromEnum(node_id)]) {
+        .empty, .anchor_start, .anchor_end => false,
+        .literal => |cp| cp == '\n',
+        .dot => dotall,
+        .char_class => |class| classCanMatchNewline(class),
+        .group => |group| hirCanMatchNewline(compiled_hir, group.child, dotall),
+        .concat => |children| blk: {
+            for (children) |child| {
+                if (hirCanMatchNewline(compiled_hir, child, dotall)) break :blk true;
+            }
+            break :blk false;
+        },
+        .alternation => |branches| blk: {
+            for (branches) |branch| {
+                if (hirCanMatchNewline(compiled_hir, branch, dotall)) break :blk true;
+            }
+            break :blk false;
+        },
+        .repetition => |rep| {
+            const can_repeat = rep.quantifier.max == null or rep.quantifier.max.? > 0;
+            return can_repeat and hirCanMatchNewline(compiled_hir, rep.child, dotall);
+        },
+    };
+}
+
+fn classCanMatchNewline(class: hir_mod.CharacterClass) bool {
+    if (class.negated) return false;
+    return classContainsCodePoint(class.items, '\n');
+}
+
+fn classContainsCodePoint(items: []const hir_mod.ClassItem, cp: u32) bool {
+    for (items) |item| {
+        switch (item) {
+            .literal => |literal| if (literal == cp) return true,
+            .range => |range| if (range.start <= cp and cp <= range.end) return true,
+        }
+    }
+    return false;
 }
 
 fn isAsciiOnly(instructions: []const Inst) bool {
@@ -377,7 +430,7 @@ test "NFA compiles concatenation and alternation into Thompson instructions" {
     const lowered = try regex.compile(testing.allocator, "ab|c", .{});
     defer lowered.deinit(testing.allocator);
 
-    const program = try compile(testing.allocator, lowered);
+    const program = try compile(testing.allocator, lowered, .{});
     defer program.deinit(testing.allocator);
 
     try testing.expectEqual(.save, std.meta.activeTag(program.instructions[program.start]));
@@ -401,7 +454,7 @@ test "NFA compiles bounded and unbounded repetition" {
     const lowered = try regex.compile(testing.allocator, "a{2,3}b+", .{});
     defer lowered.deinit(testing.allocator);
 
-    const program = try compile(testing.allocator, lowered);
+    const program = try compile(testing.allocator, lowered, .{});
     defer program.deinit(testing.allocator);
 
     try testing.expect(program.instructions.len >= 8);
@@ -424,7 +477,7 @@ test "NFA emits save instructions for capture groups" {
     const lowered = try regex.compile(testing.allocator, "(ab)c", .{});
     defer lowered.deinit(testing.allocator);
 
-    const program = try compile(testing.allocator, lowered);
+    const program = try compile(testing.allocator, lowered, .{});
     defer program.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u32, 1), program.capture_count);
@@ -446,8 +499,31 @@ test "NFA marks non-ASCII programs as not ASCII-only" {
     const lowered = try regex.compile(testing.allocator, "©", .{});
     defer lowered.deinit(testing.allocator);
 
-    const program = try compile(testing.allocator, lowered);
+    const program = try compile(testing.allocator, lowered, .{});
     defer program.deinit(testing.allocator);
 
     try testing.expect(!program.ascii_only);
+}
+
+test "NFA requires multiline for newline-matching patterns" {
+    const testing = std.testing;
+    const regex = @import("root.zig");
+
+    const lowered = try regex.compile(testing.allocator, "a\\nb", .{});
+    defer lowered.deinit(testing.allocator);
+
+    try testing.expectError(error.MultilineRequired, compile(testing.allocator, lowered, .{}));
+}
+
+test "NFA accepts newline-matching patterns when multiline is enabled" {
+    const testing = std.testing;
+    const regex = @import("root.zig");
+
+    const lowered = try regex.compile(testing.allocator, "a\\nb", .{});
+    defer lowered.deinit(testing.allocator);
+
+    const program = try compile(testing.allocator, lowered, .{ .multiline = true });
+    defer program.deinit(testing.allocator);
+
+    try testing.expect(!program.dot_matches_new_line);
 }

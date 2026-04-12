@@ -43,12 +43,12 @@ maintenance cost.
 
 ### Phase 2: Engine Enablement
 
-- [ ] Add multiline and dotall options to the regex compile / VM path.
+- [x] Add multiline and dotall options to the regex compile / VM path.
 
-- [ ] Make the matcher accept newline-spanning patterns only when multiline is
+- [x] Make the matcher accept newline-spanning patterns only when multiline is
   enabled.
 
-- [ ] Preserve the ripgrep boundary where multiline does not imply dotall.
+- [x] Preserve the ripgrep boundary where multiline does not imply dotall.
 
 - [ ] Add engine-level tests for:
   - `\n` matching across lines in multiline mode

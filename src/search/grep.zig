@@ -5,6 +5,7 @@ const io = @import("io.zig");
 
 pub const SearchError = regex.ParseError || regex.Nfa.CompileError || regex.Vm.MatchError || error{
     UnsupportedCaseInsensitivePattern,
+    InvalidMultilineOptions,
 };
 
 pub const CaseMode = enum {
@@ -112,6 +113,10 @@ pub const Searcher = struct {
         pattern: []const u8,
         options: SearchOptions,
     ) SearchError!Searcher {
+        if (options.multiline_dotall and !options.multiline) {
+            return error.InvalidMultilineOptions;
+        }
+
         var hir = try regex.compile(allocator, pattern, .{});
         defer hir.deinit(allocator);
 
@@ -125,7 +130,10 @@ pub const Searcher = struct {
         return .{
             .allocator = allocator,
             .engine = regex.Vm.MatchEngine.init(allocator),
-            .program = try regex.Nfa.compile(allocator, hir),
+            .program = try regex.Nfa.compile(allocator, hir, .{
+                .multiline = options.multiline,
+                .multiline_dotall = options.multiline_dotall,
+            }),
             .byte_plan = try extractByteSearchPlan(allocator, hir),
         };
     }
@@ -1971,6 +1979,37 @@ test "Searcher reportFirstMatch uses raw-byte semantics on invalid UTF-8 input" 
 
     try testing.expectEqual(@as(usize, 1), report.column_number);
     try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
+}
+
+test "Searcher rejects multiline-dotall without multiline" {
+    const testing = std.testing;
+
+    try testing.expectError(error.InvalidMultilineOptions, Searcher.init(testing.allocator, "a.b", .{
+        .multiline_dotall = true,
+    }));
+}
+
+test "Searcher requires multiline for newline-matching patterns" {
+    const testing = std.testing;
+
+    try testing.expectError(error.MultilineRequired, Searcher.init(testing.allocator, "a\\nb", .{}));
+}
+
+test "Searcher multiline and dotall flags change newline matching semantics" {
+    const testing = std.testing;
+
+    var multiline = try Searcher.init(testing.allocator, "a.b", .{
+        .multiline = true,
+    });
+    defer multiline.deinit();
+    try testing.expect((try multiline.reportFirstMatch("sample.txt", "a\nb")) == null);
+
+    var dotall = try Searcher.init(testing.allocator, "a.b", .{
+        .multiline = true,
+        .multiline_dotall = true,
+    });
+    defer dotall.deinit();
+    try testing.expect((try dotall.reportFirstMatch("sample.txt", "a\nb")) != null);
 }
 
 test "Searcher covers every HIR node kind on invalid UTF-8 input" {
