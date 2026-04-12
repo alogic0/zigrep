@@ -154,6 +154,11 @@ encoding behavior without rewriting the whole architecture around generic
 - Negated literal-only UTF-8 classes now ride that planner too, so cases like
   `[^ж]` no longer fall through to the lossy retry or to default-mode
   no-match. Negated small UTF-8 ranges now ride it too, so practical cases
-  like `[^а-я]` also stay off the lossy path. Larger unquantified Unicode
-  ranges now ride it too, so the remaining class gap is narrower again:
-  quantified larger Unicode ranges.
+  like `[^а-я]` also stay off the lossy path. Larger Unicode ranges now ride
+  it too, including quantified forms, so the remaining invalid-UTF-8 gap is
+  concentrated in broader regex structures that still sit outside the current
+  planner subset. Bare anchor-only patterns now ride it too, and anchored
+  branches inside grouped alternation now do as well, so those are no longer
+  special invalid-UTF-8 fallback cases. Nested alternation now also lowers as
+  a first-class byte pattern instead of depending on narrower special-case
+  lowering paths, and anchored grouped repetition now rides the planner too.

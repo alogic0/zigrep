@@ -1283,13 +1283,13 @@ test "runCli default mode still returns no match for invalid UTF-8 patterns outs
 
     try tmp.dir.writeFile(.{
         .sub_path = "dot.bin",
-        .data = "\xffaжѣb\n",
+        .data = "\xffa字b\n",
     });
 
     const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
     defer testing.allocator.free(root_path);
 
-    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a[Ā-ӿ]+b", root_path });
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a\\db", root_path });
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 1), run.exit_code);
@@ -1426,6 +1426,116 @@ test "runCli default mode matches negated larger UTF-8 ranges through the byte p
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-large-negated.bin:1:2:\\xFFa字b"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches quantified larger UTF-8 ranges through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "utf8-large-quant.bin",
+        .data = "x\xffжѣz\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "[Ā-ӿ]+", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-large-quant.bin:1:3:x\\xFFжѣz"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches bare start anchors through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "anchor-start.bin",
+        .data = "\xffabc\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "^", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchor-start.bin:1:1:\\xFFabc"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches bare end anchors through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "anchor-end.bin",
+        .data = "abc\xff",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "$", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchor-end.bin:1:5:abc\\xFF"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches grouped alternation with anchored branches through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "anchored-alt.bin",
+        .data = "\xffcde\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(^ab|cd)e", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchored-alt.bin:1:2:\\xFFcde"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode matches anchored grouped repetition through the byte path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "anchored-group.bin",
+        .data = "abc",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(^ab)+c", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchored-group.bin:1:1:abc"));
     try testing.expectEqualStrings("", run.stderr);
 }
 

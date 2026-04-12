@@ -84,7 +84,7 @@ Current `--text` note:
 - if a file contains invalid UTF-8 bytes, the current implementation first uses its raw-byte planner and only uses a lossy internal retry for patterns that still fall outside that planner
 - before that lossy retry, many planner-friendly literal, grouping, and simple byte-sequence regexes are matched directly against the original bytes, including their capture spans
 - default mode now uses that same raw-byte planner for text-like invalid UTF-8 files; patterns outside the planner still behave like no-match unless `--text` is used
-- literal-only UTF-8 classes like `[ж]`, negated literal-only UTF-8 classes like `[^ж]`, small positive UTF-8 ranges like `[а-я]`, negated small UTF-8 ranges like `[^а-я]`, and larger unquantified Unicode ranges like `[Ā-ӿ]` or `[^Ā-ӿ]` are covered by that planner too; quantified larger Unicode ranges are not yet
+- literal-only UTF-8 classes like `[ж]`, negated literal-only UTF-8 classes like `[^ж]`, small positive UTF-8 ranges like `[а-я]`, negated small UTF-8 ranges like `[^а-я]`, larger Unicode ranges like `[Ā-ӿ]`, `[^Ā-ӿ]`, or `[Ā-ӿ]+`, bare anchors like `^` or `$`, grouped alternation branches that use those anchored forms, and anchored grouped patterns like `(^ab)+c` are covered by that planner too while keeping normal anchor semantics; the remaining misses are broader regex shapes that still fall outside the planner
 - when a reported line contains invalid bytes or unsafe control bytes, the CLI prints those bytes as `\xNN` escapes instead of sending them raw to the terminal
 - this is a practical fallback, not full ripgrep-compatible encoding behavior
 - the exact temporary rules are documented in [docs/invalid-utf8-semantics.md](/home/oleg/prog/zigrep/docs/invalid-utf8-semantics.md)

@@ -257,6 +257,23 @@ fn extractBytePattern(
             .mode = .contains,
             .terms = try allocator.alloc(ByteTerm, 0),
         },
+        .alternation => blk: {
+            const term = (try extractAlternationByteTerm(allocator, nodes, root)) orelse break :blk null;
+            const terms = try allocator.alloc(ByteTerm, 1);
+            terms[0] = term;
+            break :blk .{
+                .mode = .contains,
+                .terms = terms,
+            };
+        },
+        .anchor_start => .{
+            .mode = .start,
+            .terms = try allocator.alloc(ByteTerm, 0),
+        },
+        .anchor_end => .{
+            .mode = .end,
+            .terms = try allocator.alloc(ByteTerm, 0),
+        },
         .group => |group| blk: {
             var pattern = (try extractBytePattern(allocator, nodes, group.child)) orelse break :blk null;
             pattern = try wrapPatternWithCapture(allocator, pattern, group.index);
@@ -345,7 +362,6 @@ fn extractBytePattern(
                 .terms = try terms.toOwnedSlice(allocator),
             };
         },
-        else => null,
     };
 }
 
@@ -360,7 +376,11 @@ fn appendNodeToByteTerms(
         .group => |group| {
             try flushLiteralTerm(allocator, terms, literal_bytes);
             try terms.append(allocator, .{ .atom = .{ .save_start = group.index } });
-            if (!(try appendNodeToByteTerms(allocator, nodes, group.child, terms, literal_bytes))) return false;
+            if (try extractAlternationByteTerm(allocator, nodes, group.child)) |term| {
+                try terms.append(allocator, term);
+            } else if (!(try appendNodeToByteTerms(allocator, nodes, group.child, terms, literal_bytes))) {
+                return false;
+            }
             try flushLiteralTerm(allocator, terms, literal_bytes);
             try terms.append(allocator, .{ .atom = .{ .save_end = group.index } });
             return true;
@@ -436,7 +456,6 @@ fn extractRepeatableByteTerm(
         .group => |group| {
             var pattern = (try extractBytePattern(allocator, nodes, group.child)) orelse return null;
             errdefer pattern.deinit(allocator);
-            if (pattern.mode != .contains) return null;
             pattern = try wrapPatternWithCapture(allocator, pattern, group.index);
 
             const patterns = try allocator.alloc(BytePattern, 1);
@@ -495,10 +514,6 @@ fn extractRepeatableByteTerm(
                 break :blk term.atom;
             }
             if (try classToUtf8Atom(allocator, class)) |atom| {
-                if (std.meta.activeTag(atom) == .utf8_class) {
-                    atom.deinit(allocator);
-                    return null;
-                }
                 break :blk atom;
             }
             return null;
@@ -528,12 +543,7 @@ fn extractAlternationByteTerm(
     errdefer for (patterns.items) |pattern| pattern.deinit(allocator);
 
     for (branches) |branch| {
-        var pattern = try extractBytePattern(allocator, nodes, branch) orelse return null;
-        if (pattern.mode != .contains) {
-            pattern.deinit(allocator);
-            return null;
-        }
-        try patterns.append(allocator, pattern);
+        try patterns.append(allocator, (try extractBytePattern(allocator, nodes, branch)) orelse return null);
     }
 
     if (patterns.items.len == 0) return null;
@@ -742,11 +752,7 @@ fn matchByteTermsAt(terms: []const ByteTerm, haystack: []const u8, term_index: u
     const term = terms[term_index];
     switch (term.atom) {
         .alternation => |patterns| return matchAlternationTerm(patterns, term.min, term.max, terms, term_index, haystack, pos),
-        .utf8_class => {
-            if (term.min != 1 or term.max == null or term.max.? != 1) return null;
-            const next_pos = matchByteAtomAt(term.atom, haystack, pos) orelse return null;
-            return matchByteTermsAt(terms, haystack, term_index + 1, next_pos);
-        },
+        .utf8_class => return matchUtf8ClassTerm(term, terms, term_index, haystack, pos),
         else => {},
     }
 
@@ -777,6 +783,45 @@ fn matchByteTermsAt(terms: []const ByteTerm, haystack: []const u8, term_index: u
     return null;
 }
 
+fn matchUtf8ClassTerm(
+    term: ByteTerm,
+    terms: []const ByteTerm,
+    term_index: usize,
+    haystack: []const u8,
+    pos: usize,
+) ?usize {
+    var positions: [256]usize = undefined;
+    var positions_len: usize = 1;
+    positions[0] = pos;
+
+    var current_pos = pos;
+    var matched_min: u32 = 0;
+    while (matched_min < term.min) : (matched_min += 1) {
+        current_pos = matchByteAtomAt(term.atom, haystack, current_pos) orelse return null;
+        if (positions_len >= positions.len) return null;
+        positions[positions_len] = current_pos;
+        positions_len += 1;
+    }
+
+    var max_count = matched_min;
+    while (term.max == null or max_count < term.max.?) {
+        current_pos = matchByteAtomAt(term.atom, haystack, current_pos) orelse break;
+        max_count += 1;
+        if (positions_len >= positions.len) return null;
+        positions[positions_len] = current_pos;
+        positions_len += 1;
+    }
+
+    var count = max_count;
+    while (true) {
+        if (matchByteTermsAt(terms, haystack, term_index + 1, positions[count])) |end| return end;
+        if (count == term.min) break;
+        count -= 1;
+    }
+
+    return null;
+}
+
 fn matchByteTermsAtWithSlots(
     allocator: std.mem.Allocator,
     terms: []const ByteTerm,
@@ -790,8 +835,18 @@ fn matchByteTermsAtWithSlots(
 }
 
 fn matchContainedBytePatternAt(pattern: BytePattern, haystack: []const u8, pos: usize) ?usize {
-    if (pattern.mode != .contains) return null;
-    return matchByteTermsAt(pattern.terms, haystack, 0, pos);
+    return switch (pattern.mode) {
+        .contains => matchByteTermsAt(pattern.terms, haystack, 0, pos),
+        .start => if (pos == 0) matchByteTermsAt(pattern.terms, haystack, 0, pos) else null,
+        .end => blk: {
+            const end = matchByteTermsAt(pattern.terms, haystack, 0, pos) orelse break :blk null;
+            break :blk if (end == haystack.len) end else null;
+        },
+        .full => if (pos == 0) blk: {
+            const end = matchByteTermsAt(pattern.terms, haystack, 0, pos) orelse break :blk null;
+            break :blk if (end == haystack.len) end else null;
+        } else null,
+    };
 }
 
 fn matchContainedBytePatternAtWithSlots(
@@ -801,8 +856,87 @@ fn matchContainedBytePatternAtWithSlots(
     pos: usize,
     slots: []?usize,
 ) regex.Vm.MatchError!?usize {
-    if (pattern.mode != .contains) return null;
-    return matchByteTermsAtWithSlots(allocator, pattern.terms, haystack, 0, pos, slots);
+    return switch (pattern.mode) {
+        .contains => matchByteTermsAtWithSlots(allocator, pattern.terms, haystack, 0, pos, slots),
+        .start => if (pos == 0)
+            matchByteTermsAtWithSlots(allocator, pattern.terms, haystack, 0, pos, slots)
+        else
+            null,
+        .end => blk: {
+            const end = try matchByteTermsAtWithSlots(allocator, pattern.terms, haystack, 0, pos, slots) orelse break :blk null;
+            break :blk if (end == haystack.len) end else null;
+        },
+        .full => if (pos == 0) blk: {
+            const end = try matchByteTermsAtWithSlots(allocator, pattern.terms, haystack, 0, pos, slots) orelse break :blk null;
+            break :blk if (end == haystack.len) end else null;
+        } else null,
+    };
+}
+
+fn matchUtf8ClassTermWithSlots(
+    allocator: std.mem.Allocator,
+    term: ByteTerm,
+    terms: []const ByteTerm,
+    term_index: usize,
+    haystack: []const u8,
+    pos: usize,
+    slots: []?usize,
+) regex.Vm.MatchError!?usize {
+    const State = struct {
+        pos: usize,
+        snapshot: []?usize,
+    };
+    var states: [256]State = undefined;
+    var states_len: usize = 0;
+    errdefer {
+        for (states[0..states_len]) |state| allocator.free(state.snapshot);
+    }
+
+    states[states_len] = .{
+        .pos = pos,
+        .snapshot = try cloneSlots(allocator, slots),
+    };
+    states_len += 1;
+
+    var current_pos = pos;
+    var matched_min: u32 = 0;
+    while (matched_min < term.min) : (matched_min += 1) {
+        current_pos = try matchByteAtomAtWithSlots(allocator, term.atom, haystack, current_pos, slots) orelse return null;
+        if (states_len >= states.len) return null;
+        states[states_len] = .{
+            .pos = current_pos,
+            .snapshot = try cloneSlots(allocator, slots),
+        };
+        states_len += 1;
+    }
+
+    var max_count = matched_min;
+    while (term.max == null or max_count < term.max.?) {
+        current_pos = try matchByteAtomAtWithSlots(allocator, term.atom, haystack, current_pos, slots) orelse break;
+        max_count += 1;
+        if (states_len >= states.len) return null;
+        states[states_len] = .{
+            .pos = current_pos,
+            .snapshot = try cloneSlots(allocator, slots),
+        };
+        states_len += 1;
+    }
+
+    var count = max_count;
+    while (true) {
+        const state = states[count];
+        restoreSlots(slots, state.snapshot);
+        if (try matchByteTermsAtWithSlots(allocator, terms, haystack, term_index + 1, state.pos, slots)) |end| {
+            for (states[0..states_len]) |saved| allocator.free(saved.snapshot);
+            return end;
+        }
+        if (count == term.min) break;
+        count -= 1;
+    }
+
+    restoreSlots(slots, states[0].snapshot);
+    for (states[0..states_len]) |state| allocator.free(state.snapshot);
+    return null;
 }
 
 fn matchAlternationTerm(
@@ -876,6 +1010,10 @@ fn matchByteTermRepsWithSlots(
     count: u32,
 ) regex.Vm.MatchError!?usize {
     const term = terms[term_index];
+
+    if (term.atom == .utf8_class) {
+        return matchUtf8ClassTermWithSlots(allocator, term, terms, term_index, haystack, pos, slots);
+    }
 
     if (count >= term.min) {
         const rest_snapshot = try cloneSlots(allocator, slots);
@@ -1269,6 +1407,32 @@ test "Searcher byte fallback supports negated larger UTF-8 ranges without expans
     try testing.expect((try searcher.reportFirstByteMatch("utf8-large-range.bin", "aжb")) == null);
 }
 
+test "Searcher byte fallback supports quantified larger UTF-8 ranges" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "[Ā-ӿ]+", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-large-range.bin", "xжѣz")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), report.column_number);
+    try testing.expectEqual(Span{ .start = 1, .end = 5 }, report.match_span);
+}
+
+test "Searcher byte fallback supports counted larger UTF-8 ranges" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "[Ā-ӿ]{2}", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("utf8-large-range.bin", "xжѣz")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), report.column_number);
+    try testing.expectEqual(Span{ .start = 1, .end = 5 }, report.match_span);
+}
+
 test "Searcher byte fallback is limited to exact literal patterns" {
     const testing = std.testing;
 
@@ -1578,6 +1742,40 @@ test "Searcher byte fallback supports quantified grouped alternation" {
     try testing.expectEqual(Span{ .start = 2, .end = 9 }, report.match_span);
 }
 
+test "Searcher byte fallback supports repeated grouped alternation without extra wrapper groups" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(ab|cd)+e", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("alt-repeat.bin", "xxabcdabe")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 9 }, report.match_span);
+}
+
+test "Searcher byte fallback supports grouped alternation with anchored branches" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(^ab|cd)e", .{});
+    defer searcher.deinit();
+
+    try testing.expect((try searcher.reportFirstByteMatch("anchored-alt.bin", "abe")) != null);
+    try testing.expect((try searcher.reportFirstByteMatch("anchored-alt.bin", "xxcde")) != null);
+    try testing.expect((try searcher.reportFirstByteMatch("anchored-alt.bin", "xxabe")) == null);
+}
+
+test "Searcher byte fallback supports quantified grouped alternation with anchored branches" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "((^ab)|(cd))+e", .{});
+    defer searcher.deinit();
+
+    try testing.expect((try searcher.reportFirstByteMatch("anchored-alt.bin", "abe")) != null);
+    try testing.expect((try searcher.reportFirstByteMatch("anchored-alt.bin", "cdcde")) != null);
+}
+
 test "Searcher byte fallback supports counted repetition over grouped alternation" {
     const testing = std.testing;
 
@@ -1589,6 +1787,30 @@ test "Searcher byte fallback supports counted repetition over grouped alternatio
 
     try testing.expectEqual(@as(usize, 2), report.column_number);
     try testing.expectEqual(Span{ .start = 1, .end = 6 }, report.match_span);
+}
+
+test "Searcher byte fallback supports repetition over anchored grouped patterns" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(^ab)+c", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("anchored-group.bin", "abc")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
+    try testing.expect((try searcher.reportFirstByteMatch("anchored-group.bin", "xxababc")) == null);
+    try testing.expect((try searcher.reportFirstByteMatch("anchored-group.bin", "ababc")) == null);
+}
+
+test "Searcher byte fallback preserves anchor semantics for counted anchored grouped patterns" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(^ab){2}c", .{});
+    defer searcher.deinit();
+
+    try testing.expect((try searcher.reportFirstByteMatch("anchored-group.bin", "ababc")) == null);
 }
 
 test "Searcher byte fallback supports quantified grouped alternation with an empty branch" {
@@ -1633,6 +1855,32 @@ test "Searcher byte fallback supports anchored empty matches" {
     try testing.expectEqual(@as(usize, 1), report.line_number);
     try testing.expectEqual(@as(usize, 1), report.column_number);
     try testing.expectEqual(Span{ .start = 0, .end = 0 }, report.match_span);
+}
+
+test "Searcher byte fallback supports bare start anchors" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "^", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("anchor.bin", "\xffabc")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 0 }, report.match_span);
+}
+
+test "Searcher byte fallback supports bare end anchors" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "$", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("anchor.bin", "abc\xff")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 5), report.column_number);
+    try testing.expectEqual(Span{ .start = 4, .end = 4 }, report.match_span);
 }
 
 test "reportFirstMatch stays aligned across buffered and mmap file reads" {

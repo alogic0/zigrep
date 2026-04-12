@@ -27,8 +27,11 @@ path. The long-term replacement plan remains in
   literals, dots, and character classes, such as `a[0-9]b`, `a[^x]b`,
   `a.[0-9]b`, `жар`, literal-only UTF-8 classes like `[ж]`, and small
   positive UTF-8 ranges like `[а-я]`, plus negated literal-only UTF-8 classes
-  like `[^ж]`, negated small UTF-8 ranges like `[^а-я]`, and larger single
-  UTF-8 ranges like `[Ā-ӿ]` or `[^Ā-ӿ]` when they are not quantified.
+  like `[^ж]`, negated small UTF-8 ranges like `[^а-я]`, and larger UTF-8
+  ranges like `[Ā-ӿ]`, `[^Ā-ӿ]`, or `[Ā-ӿ]+`, plus bare anchors like `^` and
+  `$`, grouped alternation branches that carry those anchors, and anchored
+  grouped patterns like `(^ab)+c` while still keeping the normal anchor
+  semantics.
 - Repetition over that same ASCII subset is also supported when it applies to a
   single literal, dot, or class atom, including `+`, `*`, `?`, and counted
   forms such as `ab+c`, `a.*b`, `a[0-9]{1,3}b`, and `a.{2}[0-9]{2}b`.
@@ -69,9 +72,9 @@ Under the current invalid-UTF-8 behavior:
   ranges are also part of it when they can be expanded safely, such as
   `[а-я]`. Negated literal-only UTF-8 classes like `[^ж]` and negated small
   UTF-8 ranges like `[^а-я]` are also part of it. Larger Unicode ranges are
-  also part of it when they are unquantified, such as `[Ā-ӿ]` or `[^Ā-ӿ]`.
-  Quantified larger Unicode ranges still fall outside the current byte
-  planner.
+  also part of it, including quantified forms, such as `[Ā-ӿ]`, `[^Ā-ӿ]`, or
+  `[Ā-ӿ]+`. The remaining gap is now patterns that still fall outside the
+  planner for structural reasons, not because the class itself is larger.
 - Planner-friendly capture groups on that raw-byte subset keep capture spans
   instead of degrading to whole-match-only reporting.
 - Under `--text`, patterns outside that subset still retry through the lossy
