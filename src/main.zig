@@ -305,7 +305,7 @@ fn searchEntriesSequential(
 
         if (try reportFileMatch(file_allocator, &searcher, entry.path, buffer.bytes(), !options.skip_binary)) |report| {
             defer report.deinit(file_allocator);
-            try printReport(file_allocator, stdout, report, options.output);
+            try printReport(stdout, report, options.output);
             matched = true;
         }
     }
@@ -451,14 +451,41 @@ fn searchEntriesParallel(
 }
 
 fn printReport(
-    allocator: std.mem.Allocator,
     stdout: *std.Io.Writer,
     report: zigrep.search.grep.MatchReport,
     output: OutputOptions,
 ) !void {
-    const line = try formatReport(allocator, report, output);
-    defer allocator.free(line);
-    try stdout.writeAll(line);
+    try writeReport(stdout, report, output);
+}
+
+fn writeReport(
+    writer: *std.Io.Writer,
+    report: zigrep.search.grep.MatchReport,
+    output: OutputOptions,
+) !void {
+    var wrote_prefix = false;
+    if (output.with_filename) {
+        try writer.print("{s}", .{report.path});
+        wrote_prefix = true;
+    }
+    if (output.line_number) {
+        if (wrote_prefix) {
+            try writer.writeByte(':');
+        }
+        try writer.print("{d}", .{report.line_number});
+        wrote_prefix = true;
+    }
+    if (output.column_number) {
+        if (wrote_prefix) {
+            try writer.writeByte(':');
+        }
+        try writer.print("{d}", .{report.column_number});
+        wrote_prefix = true;
+    }
+    if (wrote_prefix) {
+        try writer.writeByte(':');
+    }
+    try writer.print("{s}\n", .{report.line});
 }
 
 fn warnAndSkipFileError(writer: *std.Io.Writer, path: []const u8, err: anyerror) !bool {
@@ -545,30 +572,7 @@ fn formatReport(
 ) ![]u8 {
     var buffer: std.Io.Writer.Allocating = .init(allocator);
     defer buffer.deinit();
-
-    var wrote_prefix = false;
-    if (output.with_filename) {
-        try buffer.writer.print("{s}", .{report.path});
-        wrote_prefix = true;
-    }
-    if (output.line_number) {
-        if (wrote_prefix) {
-            try buffer.writer.writeByte(':');
-        }
-        try buffer.writer.print("{d}", .{report.line_number});
-        wrote_prefix = true;
-    }
-    if (output.column_number) {
-        if (wrote_prefix) {
-            try buffer.writer.writeByte(':');
-        }
-        try buffer.writer.print("{d}", .{report.column_number});
-        wrote_prefix = true;
-    }
-    if (wrote_prefix) {
-        try buffer.writer.writeByte(':');
-    }
-    try buffer.writer.print("{s}\n", .{report.line});
+    try writeReport(&buffer.writer, report, output);
     return try allocator.dupe(u8, buffer.written());
 }
 

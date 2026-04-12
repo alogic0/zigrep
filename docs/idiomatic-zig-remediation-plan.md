@@ -27,10 +27,10 @@ encoding behavior without rewriting the whole architecture around generic
 
 ## Priority 3: Reporting-Path Allocation Reduction
 
-- [ ] Keep `MatchReport` slice-based as the default reporting contract
-- [ ] Treat `owned_line` as an exceptional fallback path only
-- [ ] Refactor sequential reporting to write directly to the output writer
-- [ ] Remove unnecessary formatted-line heap allocations in the sequential path
+- [x] Keep `MatchReport` slice-based as the default reporting contract
+- [~] Treat `owned_line` as an exceptional fallback path only
+- [x] Refactor sequential reporting to write directly to the output writer
+- [x] Remove unnecessary formatted-line heap allocations in the sequential path
 - [ ] Revisit parallel output storage to reduce one-line-per-file heap allocation
 - [ ] Decide whether parallel mode should store compact report structs or arena-backed output buffers
 - [ ] Add tests to ensure output ordering remains unchanged
@@ -89,3 +89,5 @@ encoding behavior without rewriting the whole architecture around generic
   process, search, worker, and file scopes.
 - Parallel workers now use per-file arenas for temporary file-local work while
   keeping ordered output lines on `smp_allocator` until the final flush.
+- Sequential reporting now writes directly to the output writer instead of
+  allocating an intermediate formatted line buffer.
