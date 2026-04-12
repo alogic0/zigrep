@@ -1,5 +1,6 @@
 const std = @import("std");
 const regex = @import("../regex/root.zig");
+const report_mod = @import("report.zig");
 
 pub const SearchError = regex.ParseError || regex.Nfa.CompileError || regex.Vm.MatchError || error{
     UnsupportedCaseInsensitive,
@@ -9,10 +10,7 @@ pub const SearchOptions = struct {
     case_insensitive: bool = false,
 };
 
-pub const Span = struct {
-    start: usize,
-    end: usize,
-};
+pub const Span = report_mod.Span;
 
 pub const MatchReport = struct {
     path: []const u8,
@@ -85,44 +83,19 @@ fn buildReport(path: []const u8, haystack: []const u8, span: regex.Vm.Capture) M
 
     const match_start = span.start.?;
     const match_end = span.end.?;
-    const line_start = findLineStart(haystack, match_start);
-    const line_end = findLineEnd(haystack, match_start);
+    const line_info = report_mod.deriveLineInfo(haystack, match_start);
 
     return .{
         .path = path,
-        .line_number = countLines(haystack[0..line_start]) + 1,
-        .column_number = (match_start - line_start) + 1,
-        .line = haystack[line_start..line_end],
-        .line_span = .{
-            .start = line_start,
-            .end = line_end,
-        },
+        .line_number = line_info.line_number,
+        .column_number = line_info.column_number,
+        .line = haystack[line_info.line_span.start..line_info.line_span.end],
+        .line_span = line_info.line_span,
         .match_span = .{
             .start = match_start,
             .end = match_end,
         },
     };
-}
-
-fn findLineStart(haystack: []const u8, offset: usize) usize {
-    var index = @min(offset, haystack.len);
-    while (index > 0) {
-        if (haystack[index - 1] == '\n') break;
-        index -= 1;
-    }
-    return index;
-}
-
-fn findLineEnd(haystack: []const u8, offset: usize) usize {
-    var index = @min(offset, haystack.len);
-    while (index < haystack.len) : (index += 1) {
-        if (haystack[index] == '\n') break;
-    }
-    return index;
-}
-
-fn countLines(bytes: []const u8) usize {
-    return std.mem.count(u8, bytes, "\n");
 }
 
 test "reportFirstMatch returns line-oriented match data" {

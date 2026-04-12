@@ -37,11 +37,11 @@ encoding behavior without rewriting the whole architecture around generic
 
 ## Priority 4: Line And Report Helper Cleanup
 
-- [ ] Extract line/column derivation into a dedicated helper under `src/search/`
-- [ ] Add tests for empty files
-- [ ] Add tests for files without trailing newlines
-- [ ] Add tests for very long lines
-- [ ] Add tests for matches late in large files
+- [x] Extract line/column derivation into a dedicated helper under `src/search/`
+- [x] Add tests for empty files
+- [x] Add tests for files without trailing newlines
+- [x] Add tests for very long lines
+- [x] Add tests for matches late in large files
 - [ ] Evaluate whether line-number derivation needs optional indexing for repeated reports
 - [ ] Keep mmap and buffered paths aligned in report behavior
 
@@ -95,3 +95,6 @@ encoding behavior without rewriting the whole architecture around generic
   output strings, and formats only during the ordered flush step.
 - `owned_line` is now explicitly documented and regression-tested as a lossy
   fallback-only path rather than a normal reporting mechanism.
+- Line and column derivation now lives in `src/search/report.zig` with focused
+  edge-case coverage for empty input, missing trailing newlines, long lines,
+  and late matches.
