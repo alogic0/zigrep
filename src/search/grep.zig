@@ -20,6 +20,8 @@ pub const MatchReport = struct {
     // Columns stay byte-oriented to match the rest of the current search layer.
     column_number: usize,
     line: []const u8,
+    // This stays null in the normal path. It is only used when a caller needs
+    // the line bytes to outlive a temporary transformed haystack.
     owned_line: ?[]u8 = null,
     line_span: Span,
     match_span: Span,
@@ -129,10 +131,12 @@ test "reportFirstMatch returns line-oriented match data" {
     const haystack = "first line\nzzzabcqq\nthird line\n";
     const report = (try reportFirstMatch(testing.allocator, "abc", "sample.txt", haystack, .{})).?;
 
+    defer report.deinit(testing.allocator);
     try testing.expectEqualStrings("sample.txt", report.path);
     try testing.expectEqual(@as(usize, 2), report.line_number);
     try testing.expectEqual(@as(usize, 4), report.column_number);
     try testing.expectEqualStrings("zzzabcqq", report.line);
+    try testing.expect(report.owned_line == null);
     try testing.expectEqual(Span{ .start = 11, .end = 19 }, report.line_span);
     try testing.expectEqual(Span{ .start = 14, .end = 17 }, report.match_span);
 }
@@ -143,9 +147,11 @@ test "reportFirstMatch handles matches on the first line" {
     const haystack = "abc on line one\nsecond line\n";
     const report = (try reportFirstMatch(testing.allocator, "abc", "first.txt", haystack, .{})).?;
 
+    defer report.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 1), report.line_number);
     try testing.expectEqual(@as(usize, 1), report.column_number);
     try testing.expectEqualStrings("abc on line one", report.line);
+    try testing.expect(report.owned_line == null);
     try testing.expectEqual(Span{ .start = 0, .end = 15 }, report.line_span);
     try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
 }

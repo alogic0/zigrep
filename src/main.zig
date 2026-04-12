@@ -327,13 +327,35 @@ fn searchEntriesParallel(
         return searchEntriesSequential(worker_allocator, stdout, stderr, entries, options);
     }
 
+    const StoredReport = struct {
+        path: []const u8,
+        line_number: usize,
+        column_number: usize,
+        line: []u8,
+
+        fn deinit(self: @This()) void {
+            std.heap.smp_allocator.free(self.line);
+        }
+
+        fn asMatchReport(self: @This()) zigrep.search.grep.MatchReport {
+            return .{
+                .path = self.path,
+                .line_number = self.line_number,
+                .column_number = self.column_number,
+                .line = self.line,
+                .line_span = .{ .start = 0, .end = self.line.len },
+                .match_span = .{ .start = 0, .end = 0 },
+            };
+        }
+    };
+
     const Context = struct {
         stderr: *std.Io.Writer,
         entries: []const zigrep.search.walk.Entry,
         options: CliOptions,
         schedule: zigrep.search.schedule.Plan,
         next_index: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
-        result_lines: []?[]u8,
+        result_reports: []?StoredReport,
         first_error: ?anyerror = null,
         error_mutex: std.Thread.Mutex = .{},
         warning_mutex: std.Thread.Mutex = .{},
@@ -396,7 +418,12 @@ fn searchEntriesParallel(
 
             if (try reportFileMatch(file_allocator, searcher, entry.path, buffer.bytes(), !self.options.skip_binary)) |report| {
                 defer report.deinit(file_allocator);
-                self.result_lines[index] = try formatReport(std.heap.smp_allocator, report, self.options.output);
+                self.result_reports[index] = .{
+                    .path = entry.path,
+                    .line_number = report.line_number,
+                    .column_number = report.column_number,
+                    .line = try std.heap.smp_allocator.dupe(u8, report.line),
+                };
             }
         }
 
@@ -407,9 +434,9 @@ fn searchEntriesParallel(
         }
     };
 
-    const result_lines = try worker_allocator.alloc(?[]u8, entries.len);
-    defer worker_allocator.free(result_lines);
-    @memset(result_lines, null);
+    const result_reports = try worker_allocator.alloc(?StoredReport, entries.len);
+    defer worker_allocator.free(result_reports);
+    @memset(result_reports, null);
 
     var pool: std.Thread.Pool = undefined;
     try pool.init(.{
@@ -424,7 +451,7 @@ fn searchEntriesParallel(
         .entries = entries,
         .options = options,
         .schedule = schedule,
-        .result_lines = result_lines,
+        .result_reports = result_reports,
     };
 
     for (0..schedule.worker_count) |_| {
@@ -433,17 +460,17 @@ fn searchEntriesParallel(
     wait_group.wait();
 
     if (context.first_error) |err| {
-        for (result_lines) |maybe_line| {
-            if (maybe_line) |line| std.heap.smp_allocator.free(line);
+        for (result_reports) |maybe_report| {
+            if (maybe_report) |report| report.deinit();
         }
         return err;
     }
 
     var matched = false;
-    for (result_lines) |maybe_line| {
-        if (maybe_line) |line| {
-            defer std.heap.smp_allocator.free(line);
-            try stdout.writeAll(line);
+    for (result_reports) |maybe_report| {
+        if (maybe_report) |report| {
+            defer report.deinit();
+            try writeReport(stdout, report.asMatchReport(), options.output);
             matched = true;
         }
     }
@@ -1057,6 +1084,22 @@ test "runCli text mode retries invalid UTF-8 files through lossy sanitizing" {
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "bad.bin:1:4:xx?needleyy"));
     try testing.expectEqualStrings("", run.stderr);
+}
+
+test "reportFileMatch only owns line bytes for lossy text-mode fallback" {
+    const testing = std.testing;
+
+    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{});
+    defer searcher.deinit();
+
+    const normal = (try reportFileMatch(testing.allocator, &searcher, "normal.txt", "xxneedleyy", false)).?;
+    defer normal.deinit(testing.allocator);
+    try testing.expect(normal.owned_line == null);
+
+    const lossy = (try reportFileMatch(testing.allocator, &searcher, "lossy.bin", "xx\xffneedleyy", true)).?;
+    defer lossy.deinit(testing.allocator);
+    try testing.expect(lossy.owned_line != null);
+    try testing.expectEqualStrings("xx?needleyy", lossy.line);
 }
 
 test "runCli output toggles apply across the end-to-end path" {
