@@ -50,7 +50,7 @@ maintenance cost.
 
 - [x] Preserve the ripgrep boundary where multiline does not imply dotall.
 
-- [ ] Add engine-level tests for:
+- [x] Add engine-level tests for:
   - `\n` matching across lines in multiline mode
   - `.` not matching `\n` in multiline mode without dotall
   - `.` matching `\n` with multiline plus dotall
@@ -58,21 +58,21 @@ maintenance cost.
 
 ### Phase 3: Span Projection And Reporting
 
-- [ ] Add a span-to-display projection layer:
+- [x] Add a span-to-display projection layer:
   - compute the full matched span over the haystack
   - expand each multiline match to the covered display line range
   - derive line numbers, columns, and surrounding line spans after matching
 
-- [ ] Add multiline block grouping similar to ripgrep’s `MultiLine` behavior:
+- [x] Add multiline block grouping similar to ripgrep’s `MultiLine` behavior:
   - merge overlapping display line ranges
   - merge adjacent display line ranges when they touch
   - emit one display block per merged range so no printed line is duplicated
 
-- [ ] Decide and encode column semantics for multiline output.
+- [x] Decide and encode column semantics for multiline output.
   Current default should remain byte-oriented and anchored to the first matched
   line unless a different rule is explicitly chosen.
 
-- [ ] Add reporting tests for:
+- [x] Add reporting tests for:
   - overlapping multiline matches
   - adjacent multiline matches
   - no duplicated printed lines when grouped blocks touch
