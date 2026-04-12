@@ -86,8 +86,8 @@ ecosystem features.
 
 ## Priority 3: Output Modes And Integration
 
-- [ ] Add heading / grouped file output.
-  ripgrep supports heading-style output and related formatting aliases.
+- [x] Add heading / grouped file output.
+  `zigrep` now supports heading-style grouped text output with `--heading`.
 
 - [x] Add NUL-delimited path output where appropriate (`--null` style support).
   `zigrep` now supports `--null` for file-path reporting modes, emitting

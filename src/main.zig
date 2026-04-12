@@ -17,6 +17,7 @@ pub const OutputOptions = struct {
     column_number: bool = true,
     only_matching: bool = false,
     null_path_terminator: bool = false,
+    heading: bool = false,
 };
 
 const OutputFormat = enum {
@@ -272,6 +273,10 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
                 output.null_path_terminator = true;
                 continue;
             }
+            if (std.mem.eql(u8, arg, "--heading")) {
+                output.heading = true;
+                continue;
+            }
             if (std.mem.eql(u8, arg, "--type-add")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
@@ -448,6 +453,12 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         (report_mode != .files_with_matches and report_mode != .files_without_match)))
     {
         return error.InvalidFlagCombination;
+    }
+    if (output.heading and (output_format != .text or report_mode != .lines)) {
+        return error.InvalidFlagCombination;
+    }
+    if (output.heading) {
+        output.with_filename = false;
     }
 
     const owned_paths = try paths.toOwnedSlice(allocator);
@@ -781,6 +792,7 @@ fn searchEntriesSequential(
     defer searcher.deinit();
 
     var result: SearchResult = .{ .matched = false };
+    var wrote_heading_group = false;
     for (entries) |entry| {
         // File-lifetime allocator: buffered reads and temporary per-file
         // matching/reporting allocations,
@@ -810,9 +822,13 @@ fn searchEntriesSequential(
         result.stats.searched_files += 1;
         result.stats.searched_bytes += buffer.bytes().len;
 
+        var capture: std.Io.Writer.Allocating = .init(file_allocator);
+        defer capture.deinit();
+        const writer = if (options.output.heading) &capture.writer else stdout;
+
         if (try writeFileOutput(
             file_allocator,
-            stdout,
+            writer,
             &searcher,
             entry.path,
             buffer.bytes(),
@@ -824,6 +840,9 @@ fn searchEntriesSequential(
             options.context_before,
             options.context_after,
         )) {
+            if (options.output.heading) {
+                try writeHeadingBlock(stdout, entry.path, capture.written(), &wrote_heading_group);
+            }
             result.matched = true;
             result.stats.matched_files += 1;
         }
@@ -851,10 +870,12 @@ fn searchEntriesParallel(
         searched_bytes: usize = 0,
         matched: bool = false,
         skipped_binary: bool = false,
+        path: ?[]u8 = null,
 
         fn deinit(self: @This()) void {
             var bytes = self.bytes;
             bytes.deinit(std.heap.smp_allocator);
+            if (self.path) |path| std.heap.smp_allocator.free(path);
         }
     };
 
@@ -922,6 +943,7 @@ fn searchEntriesParallel(
                         .searched_bytes = 0,
                         .matched = false,
                         .skipped_binary = true,
+                        .path = null,
                     };
                     return;
                 }
@@ -957,6 +979,7 @@ fn searchEntriesParallel(
                 .searched_bytes = buffer.bytes().len,
                 .matched = matched,
                 .skipped_binary = false,
+                .path = if (self.options.output.heading) try std.heap.smp_allocator.dupe(u8, entry.path) else null,
             };
         }
 
@@ -1000,6 +1023,7 @@ fn searchEntriesParallel(
     }
 
     var result: SearchResult = .{ .matched = false };
+    var wrote_heading_group = false;
     for (result_reports) |maybe_report| {
         if (maybe_report) |report| {
             defer report.deinit();
@@ -1010,7 +1034,11 @@ fn searchEntriesParallel(
             result.stats.searched_files += 1;
             result.stats.searched_bytes += report.searched_bytes;
             if (report.matched) {
-                try stdout.writeAll(report.bytes.items);
+                if (options.output.heading) {
+                    try writeHeadingBlock(stdout, report.path.?, report.bytes.items, &wrote_heading_group);
+                } else {
+                    try stdout.writeAll(report.bytes.items);
+                }
                 result.matched = true;
                 result.stats.matched_files += 1;
             }
@@ -1121,6 +1149,18 @@ fn writeStats(writer: *std.Io.Writer, stats: SearchStats) !void {
         "stats: searched_files={d} matched_files={d} searched_bytes={d} skipped_binary_files={d}\n",
         .{ stats.searched_files, stats.matched_files, stats.searched_bytes, stats.skipped_binary_files },
     );
+}
+
+fn writeHeadingBlock(
+    writer: *std.Io.Writer,
+    path: []const u8,
+    bytes: []const u8,
+    wrote_previous_group: *bool,
+) !void {
+    if (wrote_previous_group.*) try writer.writeByte('\n');
+    try writer.print("{s}\n", .{path});
+    try writer.writeAll(bytes);
+    wrote_previous_group.* = true;
 }
 
 fn writeReport(
@@ -1691,6 +1731,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --json                emit newline-delimited JSON events
         \\  --stats               print search summary statistics to stderr
         \\  --null                emit NUL-delimited paths in file path output modes
+        \\  --heading             group text line output by file path headings
         \\  -H, --with-filename   always print the file path
         \\  --no-filename         suppress the file path prefix
         \\  -n, --line-number     print line numbers
@@ -1766,6 +1807,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(opts.output.column_number);
             try testing.expect(!opts.output.only_matching);
             try testing.expect(!opts.output.null_path_terminator);
+            try testing.expect(!opts.output.heading);
             try testing.expectEqual(OutputFormat.text, opts.output_format);
             try testing.expectEqual(ReportMode.lines, opts.report_mode);
             try testing.expect(!opts.show_stats);
@@ -2087,6 +2129,26 @@ test "parseArgs accepts stats flag" {
     }
 }
 
+test "parseArgs accepts heading flag" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--heading", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.output.heading);
+            try testing.expect(!opts.output.with_filename);
+            try testing.expectEqual(ReportMode.lines, opts.report_mode);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
 test "parseArgs accepts ignore-case and smart-case flags" {
     const testing = std.testing;
 
@@ -2219,6 +2281,12 @@ test "parseArgs rejects invalid numeric flags" {
         "--json",
         "--null",
         "-l",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--heading",
+        "--count",
         "needle",
     }));
 }
@@ -3266,6 +3334,70 @@ test "runCli stats mode prints search summary to stderr" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "stats: searched_files=2"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "matched_files=1"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "skipped_binary_files=1"));
+}
+
+test "runCli heading mode groups matches by file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "two.txt",
+        .data = "skip\nneedle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--heading", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt\n1:1:needle one\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "two.txt\n2:1:needle two\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\n\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runSearch parallel path preserves heading groups" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "two.txt",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stdout_capture.deinit();
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    const exit_code = try runSearch(testing.allocator, &stdout_capture.writer, &stderr_capture.writer, .{
+        .pattern = "needle",
+        .paths = &.{root_path},
+        .parallel_jobs = 4,
+        .output = .{ .heading = true, .with_filename = false },
+    });
+
+    try testing.expectEqual(@as(u8, 0), exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt\n1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt\n1:1:needle two"));
+    try testing.expectEqualStrings("", stderr_capture.written());
 }
 
 test "runCli only-matching mode prints each match occurrence" {

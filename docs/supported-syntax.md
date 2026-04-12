@@ -78,6 +78,7 @@ The current CLI supports:
 - Newline-delimited JSON output with `--json`
 - NUL-delimited path output with `--null` for file-path reporting modes
 - Search summary output with `--stats`
+- Grouped text output with `--heading`
 - Output toggles with `-H`/`--with-filename`, `--no-filename`, `-n`/`--line-number`, `--no-line-number`, `--column`, and `--no-column`
 - `--` to terminate flag parsing
 
@@ -118,6 +119,14 @@ Context mode note:
 - `--stats` prints a compact search summary to stderr after the normal search output
 - the current summary includes searched file count, matched file count, searched byte count, and skipped binary-file count
 - `--stats` does not change normal exit codes or stdout search results
+
+`--heading` note:
+
+- `--heading` groups text line output by file
+- each matching file is printed once as a heading, followed by its matching lines without the filename prefix
+- groups are separated by a blank line
+- `--heading` is currently supported only for text line output, including context mode
+- `--heading` is rejected with count output, file-path-only output, `--json`, and `--null`
 
 For non-technical users:
 
