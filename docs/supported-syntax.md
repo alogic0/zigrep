@@ -63,6 +63,7 @@ The current CLI supports:
 - Symlink following with `--follow`
 - Case-insensitive search with `-i` / `--ignore-case` and `-S` / `--smart-case`
 - Case-sensitive path glob filtering with repeated `-g` / `--glob`
+- File type filters with `-t`, `-T`, `--type-add`, and `--type-list`
 - Binary-file search opt-in with `--text`
 - Buffered or mmap-backed reads with `--buffered` and `--mmap`
 - Worker-count control with `-j` or `--threads`
@@ -111,6 +112,15 @@ Practical guidance:
 - a bang-prefixed glob like `!main.zig` excludes matching paths
 - if any positive globs are present, `zigrep` treats them as an allow-list
 - matching is currently case-sensitive only; `--iglob` is not implemented yet
+
+File type note:
+
+- `-t TYPE` includes only files matching the named file type
+- `-T TYPE` excludes files matching the named file type
+- `--type-add name:glob[,glob...]` adds or extends a file type definition at runtime
+- `--type-list` prints the current built-in and runtime-added file type definitions and exits
+- type filtering is applied to file paths relative to each searched root
+- `zigrep` currently ships a small built-in type table; it is not yet ripgrep's full file type catalog
 
 Ignore-control note:
 

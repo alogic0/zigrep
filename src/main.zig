@@ -4,9 +4,11 @@ const zigrep = @import("zigrep");
 const CliError = error{
     MissingPattern,
     UnknownFlag,
+    UnknownType,
     MissingFlagValue,
     InvalidFlagValue,
     InvalidFlagCombination,
+    InvalidTypeAddSpec,
 };
 
 pub const OutputOptions = struct {
@@ -28,6 +30,9 @@ pub const CliOptions = struct {
     paths: []const []const u8,
     globs: []const []const u8 = &.{},
     ignore_files: []const []const u8 = &.{},
+    include_types: []const []const u8 = &.{},
+    exclude_types: []const []const u8 = &.{},
+    type_adds: []const []const u8 = &.{},
     include_hidden: bool = false,
     follow_symlinks: bool = false,
     no_ignore: bool = false,
@@ -45,11 +50,27 @@ pub const CliOptions = struct {
     output: OutputOptions = .{},
     report_mode: ReportMode = .lines,
     buffer_output: bool = false,
+
+    fn deinit(self: CliOptions, allocator: std.mem.Allocator) void {
+        allocator.free(self.paths);
+        allocator.free(self.globs);
+        allocator.free(self.ignore_files);
+        allocator.free(self.include_types);
+        allocator.free(self.exclude_types);
+        allocator.free(self.type_adds);
+    }
 };
 
 const ParseResult = union(enum) {
     help,
     version,
+    type_list: struct {
+        type_adds: []const []const u8,
+
+        fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+            allocator.free(self.type_adds);
+        }
+    },
     run: CliOptions,
 };
 
@@ -93,9 +114,11 @@ fn isUsageError(err: anyerror) bool {
     return switch (err) {
         error.MissingPattern,
         error.UnknownFlag,
+        error.UnknownType,
         error.MissingFlagValue,
         error.InvalidFlagValue,
         error.InvalidFlagCombination,
+        error.InvalidTypeAddSpec,
         => true,
         else => false,
     };
@@ -109,11 +132,8 @@ fn runCli(
 ) !u8 {
     const parsed = try parseArgs(allocator, argv);
     defer switch (parsed) {
-        .run => |opts| {
-            allocator.free(opts.paths);
-            allocator.free(opts.globs);
-            allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(allocator),
+        .type_list => |opts| opts.deinit(allocator),
         .help, .version => {},
     };
 
@@ -124,6 +144,12 @@ fn runCli(
         },
         .version => {
             try stdout.print("zigrep {s}\n", .{zigrep.app_version});
+            return 0;
+        },
+        .type_list => |opts| {
+            const matcher = try zigrep.search.types.init(allocator, opts.type_adds);
+            defer matcher.deinit(allocator);
+            try zigrep.search.types.writeTypeList(stdout, matcher);
             return 0;
         },
         .run => |opts| {
@@ -152,12 +178,19 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var output: OutputOptions = .{};
     var report_mode: ReportMode = .lines;
     var pattern: ?[]const u8 = null;
+    var show_type_list = false;
     var paths = std.ArrayList([]const u8).empty;
     var globs = std.ArrayList([]const u8).empty;
     var ignore_files = std.ArrayList([]const u8).empty;
+    var include_types = std.ArrayList([]const u8).empty;
+    var exclude_types = std.ArrayList([]const u8).empty;
+    var type_adds = std.ArrayList([]const u8).empty;
     defer paths.deinit(allocator);
     defer globs.deinit(allocator);
     defer ignore_files.deinit(allocator);
+    defer include_types.deinit(allocator);
+    defer exclude_types.deinit(allocator);
+    defer type_adds.deinit(allocator);
     var stop_parsing_flags = false;
 
     var index: usize = 1;
@@ -183,6 +216,28 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
                 try ignore_files.append(allocator, argv[index]);
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--type-list")) {
+                show_type_list = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--type-add")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                try type_adds.append(allocator, argv[index]);
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-t")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                try include_types.append(allocator, argv[index]);
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-T")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                try exclude_types.append(allocator, argv[index]);
                 continue;
             }
             if (std.mem.eql(u8, arg, "--no-ignore")) {
@@ -321,6 +376,13 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         }
     }
 
+    const owned_type_adds = try type_adds.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_type_adds);
+
+    if (show_type_list) {
+        return .{ .type_list = .{ .type_adds = owned_type_adds } };
+    }
+
     if (pattern == null) return error.MissingPattern;
     if (paths.items.len == 0) try paths.append(allocator, ".");
     if ((context_before != 0 or context_after != 0) and (report_mode != .lines or output.only_matching)) {
@@ -333,12 +395,19 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     errdefer allocator.free(owned_globs);
     const owned_ignore_files = try ignore_files.toOwnedSlice(allocator);
     errdefer allocator.free(owned_ignore_files);
+    const owned_include_types = try include_types.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_include_types);
+    const owned_exclude_types = try exclude_types.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_exclude_types);
 
     return .{ .run = .{
         .pattern = pattern.?,
         .paths = owned_paths,
         .globs = owned_globs,
         .ignore_files = owned_ignore_files,
+        .include_types = owned_include_types,
+        .exclude_types = owned_exclude_types,
+        .type_adds = owned_type_adds,
         .include_hidden = include_hidden,
         .follow_symlinks = follow_symlinks,
         .no_ignore = no_ignore,
@@ -364,20 +433,24 @@ pub fn runSearch(
     stderr: *std.Io.Writer,
     options: CliOptions,
 ) !u8 {
+    const type_matcher = try zigrep.search.types.init(allocator, options.type_adds);
+    defer type_matcher.deinit(allocator);
+    try zigrep.search.types.validateSelectedTypes(type_matcher, options.include_types, options.exclude_types);
+
     var matched = false;
     for (options.paths) |path| {
         if (options.buffer_output) {
             var buffered_output: std.Io.Writer.Allocating = .init(allocator);
             defer buffered_output.deinit();
 
-            if (try searchPath(allocator, &buffered_output.writer, stderr, path, options)) {
+            if (try searchPath(allocator, &buffered_output.writer, stderr, path, options, type_matcher)) {
                 matched = true;
             }
             try stdout.writeAll(buffered_output.written());
             continue;
         }
 
-        if (try searchPath(allocator, stdout, stderr, path, options)) {
+        if (try searchPath(allocator, stdout, stderr, path, options, type_matcher)) {
             matched = true;
         }
     }
@@ -390,6 +463,7 @@ fn searchPath(
     stderr: *std.Io.Writer,
     root_path: []const u8,
     options: CliOptions,
+    type_matcher: zigrep.search.types.Matcher,
 ) !bool {
     const TraversalWarningHandler = struct {
         writer: *std.Io.Writer,
@@ -418,6 +492,9 @@ fn searchPath(
         entries,
         options.globs,
         loaded_ignores,
+        type_matcher,
+        options.include_types,
+        options.exclude_types,
     );
     defer allocator.free(filtered_entries);
 
@@ -446,6 +523,9 @@ fn filterEntries(
     entries: []const zigrep.search.walk.Entry,
     globs: []const []const u8,
     loaded_ignores: []const LoadedIgnore,
+    type_matcher: zigrep.search.types.Matcher,
+    include_types: []const []const u8,
+    exclude_types: []const []const u8,
 ) ![]const zigrep.search.walk.Entry {
     var filtered: std.ArrayList(zigrep.search.walk.Entry) = .empty;
     defer filtered.deinit(allocator);
@@ -453,6 +533,7 @@ fn filterEntries(
     for (entries) |entry| {
         const relative = relativeGlobPath(root_path, entry.path);
         if (!zigrep.search.glob.allowsPath(globs, relative)) continue;
+        if (!type_matcher.fileAllowed(include_types, exclude_types, relative)) continue;
         if (try pathIsIgnored(allocator, entry.path, loaded_ignores)) continue;
         try filtered.append(allocator, entry);
     }
@@ -1359,6 +1440,10 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --no-ignore           disable ignore filtering
         \\  --no-ignore-vcs       ignore VCS ignore files like .gitignore
         \\  --no-ignore-parent    ignore parent VCS ignore files
+        \\  -t TYPE              include only files matching TYPE
+        \\  -T TYPE              exclude files matching TYPE
+        \\  --type-add SPEC      add file type definition name:glob[,glob...]
+        \\  --type-list          list known file types and exit
         \\  --follow              follow symlinks
         \\  -i, --ignore-case     search case-insensitively
         \\  -S, --smart-case      use ignore-case unless the pattern has uppercase letters
@@ -1428,11 +1513,8 @@ test "parseArgs defaults to current directory search" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "needle" });
     defer switch (parsed) {
-        .run => |opts| {
-            testing.allocator.free(opts.paths);
-            testing.allocator.free(opts.globs);
-            testing.allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
         .help, .version => {},
     };
 
@@ -1462,6 +1544,7 @@ test "parseArgs defaults to current directory search" {
         },
         .help => unreachable,
         .version => unreachable,
+        .type_list => unreachable,
     }
 }
 
@@ -1503,11 +1586,8 @@ test "parseArgs treats version-like args as positional after the pattern starts"
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "needle", "--version" });
     defer switch (parsed) {
-        .run => |opts| {
-            testing.allocator.free(opts.paths);
-            testing.allocator.free(opts.globs);
-            testing.allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
         .help, .version => {},
     };
 
@@ -1517,7 +1597,7 @@ test "parseArgs treats version-like args as positional after the pattern starts"
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("--version", opts.paths[0]);
         },
-        .help, .version => return error.TestExpectedEqual,
+        .help, .version, .type_list => return error.TestExpectedEqual,
     }
 }
 
@@ -1526,11 +1606,8 @@ test "parseArgs treats help-like args as positional after terminator" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--", "--help" });
     defer switch (parsed) {
-        .run => |opts| {
-            testing.allocator.free(opts.paths);
-            testing.allocator.free(opts.globs);
-            testing.allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
         .help, .version => {},
     };
 
@@ -1540,7 +1617,7 @@ test "parseArgs treats help-like args as positional after terminator" {
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings(".", opts.paths[0]);
         },
-        .help, .version => return error.TestExpectedEqual,
+        .help, .version, .type_list => return error.TestExpectedEqual,
     }
 }
 
@@ -1566,11 +1643,8 @@ test "parseArgs accepts numeric and formatting flags" {
         "src",
     });
     defer switch (parsed) {
-        .run => |opts| {
-            testing.allocator.free(opts.paths);
-            testing.allocator.free(opts.globs);
-            testing.allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
         .help, .version => {},
     };
 
@@ -1589,7 +1663,7 @@ test "parseArgs accepts numeric and formatting flags" {
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("src", opts.paths[0]);
         },
-        .help, .version => unreachable,
+        .help, .version, .type_list => unreachable,
     }
 }
 
@@ -1598,11 +1672,8 @@ test "parseArgs accepts files-without-match mode" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--files-without-match", "needle", "src" });
     defer switch (parsed) {
-        .run => |opts| {
-            testing.allocator.free(opts.paths);
-            testing.allocator.free(opts.globs);
-            testing.allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
         .help, .version => {},
     };
 
@@ -1613,7 +1684,7 @@ test "parseArgs accepts files-without-match mode" {
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("src", opts.paths[0]);
         },
-        .help, .version => unreachable,
+        .help, .version, .type_list => unreachable,
     }
 }
 
@@ -1622,11 +1693,8 @@ test "parseArgs accepts max-count mode" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-m", "2", "needle", "src" });
     defer switch (parsed) {
-        .run => |opts| {
-            testing.allocator.free(opts.paths);
-            testing.allocator.free(opts.globs);
-            testing.allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
         .help, .version => {},
     };
 
@@ -1637,7 +1705,7 @@ test "parseArgs accepts max-count mode" {
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("src", opts.paths[0]);
         },
-        .help, .version => unreachable,
+        .help, .version, .type_list => unreachable,
     }
 }
 
@@ -1646,11 +1714,8 @@ test "parseArgs accepts before and after context flags" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-B", "2", "-A", "3", "needle", "src" });
     defer switch (parsed) {
-        .run => |opts| {
-            testing.allocator.free(opts.paths);
-            testing.allocator.free(opts.globs);
-            testing.allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
         .help, .version => {},
     };
 
@@ -1659,7 +1724,7 @@ test "parseArgs accepts before and after context flags" {
             try testing.expectEqual(@as(usize, 2), opts.context_before);
             try testing.expectEqual(@as(usize, 3), opts.context_after);
         },
-        .help, .version => unreachable,
+        .help, .version, .type_list => unreachable,
     }
 }
 
@@ -1668,11 +1733,8 @@ test "parseArgs accepts repeated glob flags" {
 
     const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-g", "*.zig", "--glob", "!main.zig", "needle", "src" });
     defer switch (parsed) {
-        .run => |opts| {
-            testing.allocator.free(opts.paths);
-            testing.allocator.free(opts.globs);
-            testing.allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
         .help, .version => {},
     };
 
@@ -1683,7 +1745,7 @@ test "parseArgs accepts repeated glob flags" {
             try testing.expectEqualStrings("!main.zig", opts.globs[1]);
             try testing.expectEqualStrings("needle", opts.pattern);
         },
-        .help, .version => unreachable,
+        .help, .version, .type_list => unreachable,
     }
 }
 
@@ -1700,11 +1762,8 @@ test "parseArgs accepts ignore control flags" {
         "src",
     });
     defer switch (parsed) {
-        .run => |opts| {
-            testing.allocator.free(opts.paths);
-            testing.allocator.free(opts.globs);
-            testing.allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
         .help, .version => {},
     };
 
@@ -1716,7 +1775,7 @@ test "parseArgs accepts ignore control flags" {
             try testing.expect(opts.no_ignore_vcs);
             try testing.expect(opts.no_ignore_parent);
         },
-        .help, .version => unreachable,
+        .help, .version, .type_list => unreachable,
     }
 }
 
@@ -1731,11 +1790,8 @@ test "parseArgs accepts ignore-case and smart-case flags" {
         "src",
     });
     defer switch (parsed) {
-        .run => |opts| {
-            testing.allocator.free(opts.paths);
-            testing.allocator.free(opts.globs);
-            testing.allocator.free(opts.ignore_files);
-        },
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
         .help, .version => {},
     };
 
@@ -1743,7 +1799,65 @@ test "parseArgs accepts ignore-case and smart-case flags" {
         .run => |opts| {
             try testing.expectEqual(zigrep.search.grep.CaseMode.smart, opts.case_mode);
         },
-        .help, .version => unreachable,
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts file type flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-t",
+        "zig",
+        "-T",
+        "markdown",
+        "--type-add",
+        "web:*.web,*.page",
+        "needle",
+        "src",
+    });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("needle", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.include_types.len);
+            try testing.expectEqualStrings("zig", opts.include_types[0]);
+            try testing.expectEqual(@as(usize, 1), opts.exclude_types.len);
+            try testing.expectEqualStrings("markdown", opts.exclude_types[0]);
+            try testing.expectEqual(@as(usize, 1), opts.type_adds.len);
+            try testing.expectEqualStrings("web:*.web,*.page", opts.type_adds[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts type-list without pattern" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--type-add",
+        "web:*.web",
+        "--type-list",
+    });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .type_list => |opts| {
+            try testing.expectEqual(@as(usize, 1), opts.type_adds.len);
+            try testing.expectEqualStrings("web:*.web", opts.type_adds[0]);
+        },
+        .help, .version, .run => unreachable,
     }
 }
 
@@ -2429,6 +2543,135 @@ test "runCli glob mode supports negative globs" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt:1:1:needle one"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "main.txt:1:1:needle two"));
     try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli type include filter limits matches" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "main.zig",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "README.md",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-t", "zig", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "main.zig:1:1:needle one"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "README.md"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli type exclude filter skips matching type" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "main.zig",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "README.md",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-T", "markdown", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "main.zig:1:1:needle one"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "README.md"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli type-add defines custom type" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "home.web",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "main.zig",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--type-add",
+        "web:*.web",
+        "-t",
+        "web",
+        "needle",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "home.web:1:1:needle one"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "main.zig"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli type-list prints known types" {
+    const testing = std.testing;
+
+    const run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--type-add",
+        "web:*.web,*.page",
+        "--type-list",
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "zig: *.zig\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "web: *.web, *.page\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli unknown type fails cleanly" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "main.zig",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    try testing.expectError(error.UnknownType, runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-t",
+        "missing",
+        "needle",
+        root_path,
+    }));
 }
 
 test "runCli count mode respects max-count" {

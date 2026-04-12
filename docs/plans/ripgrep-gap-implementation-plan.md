@@ -68,8 +68,9 @@ ecosystem features.
   case-folded HIR rewrite, with explicit rejection for overly broad folded
   ranges instead of silent under-matching.
 
-- [ ] Add file type filters:
-  `-t`, `-T`, `--type-add`, `--type-list`, and related type definitions.
+- [x] Add file type filters:
+  `zigrep` now supports `-t`, `-T`, `--type-add`, and `--type-list` with a
+  small built-in type table plus runtime type additions.
 
 - [ ] Add `--hidden` / ignore interactions closer to ripgrep’s actual model.
   `zigrep` has basic hidden-file support, but not the broader ripgrep-style flag
@@ -191,7 +192,7 @@ ecosystem features.
 - [ ] 3. Add context line support.
 - [ ] 4. Add glob filtering and richer ignore controls.
 - [ ] 5. Add case-insensitive / smart-case search.
-- [ ] 6. Add file type filters.
+- [x] 6. Add file type filters.
 - [ ] 7. Add JSON output and NUL-delimited path output.
 - [ ] 8. Revisit binary-mode parity and explicit raw-byte input modes.
 - [ ] 9. Decide whether multiline search is worth the complexity.
