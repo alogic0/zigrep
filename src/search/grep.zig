@@ -208,6 +208,50 @@ fn expectBytePlan(pattern: []const u8, expected: bool) !void {
     try testing.expectEqual(expected, searcher.hasBytePlan());
 }
 
+fn expectPlannerAndVmEquivalent(pattern: []const u8, haystack: []const u8) !void {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, pattern, .{});
+    defer searcher.deinit();
+
+    try testing.expect(searcher.hasBytePlan());
+
+    const planner_match = (try searcher.firstByteMatch(haystack)).?;
+    defer planner_match.deinit(testing.allocator);
+
+    const vm_match = (try searcher.engine.firstMatchBytes(searcher.program, haystack)).?;
+    defer vm_match.deinit(testing.allocator);
+
+    try testing.expectEqual(planner_match.span, vm_match.span);
+    try testing.expectEqual(@as(usize, planner_match.groups.len), vm_match.groups.len);
+    for (planner_match.groups, vm_match.groups) |planner_group, vm_group| {
+        try testing.expectEqual(planner_group, vm_group);
+    }
+
+    const planner_report = buildReport("sample.bin", haystack, planner_match.span);
+    const vm_report = buildReport("sample.bin", haystack, vm_match.span);
+    try testing.expectEqual(planner_report.line_number, vm_report.line_number);
+    try testing.expectEqual(planner_report.column_number, vm_report.column_number);
+    try testing.expectEqual(planner_report.line_span, vm_report.line_span);
+    try testing.expectEqual(planner_report.match_span, vm_report.match_span);
+    try testing.expectEqualStrings(planner_report.line, vm_report.line);
+}
+
+fn expectInvalidUtf8MatchSpan(pattern: []const u8, haystack: []const u8, expected: Span) !void {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, pattern, .{});
+    defer searcher.deinit();
+
+    const found = (try searcher.firstByteMatch(haystack)).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(expected, .{
+        .start = found.span.start.?,
+        .end = found.span.end.?,
+    });
+}
+
 fn buildReport(path: []const u8, haystack: []const u8, span: regex.Vm.Capture) MatchReport {
     std.debug.assert(span.start != null);
     std.debug.assert(span.end != null);
@@ -1552,6 +1596,41 @@ test "Searcher byte matching falls back to the general VM when no byte plan exis
 
     try testing.expectEqual(@as(usize, 1), report.column_number);
     try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
+}
+
+test "Searcher planner and raw-byte VM agree on invalid UTF-8 spans" {
+    try expectPlannerAndVmEquivalent("needle", "xx\xffneedleyy");
+    try expectPlannerAndVmEquivalent("a.b", "xxa\xffbyy");
+    try expectPlannerAndVmEquivalent("[ж]", "xx\xffжyy");
+    try expectPlannerAndVmEquivalent("(^ab)+c", "abc");
+}
+
+test "Searcher planner and raw-byte VM agree on invalid UTF-8 capture spans" {
+    try expectPlannerAndVmEquivalent("(a.)([0-9]b)", "xxa\xff7byy");
+    try expectPlannerAndVmEquivalent("(ж)(ар)", "xx\xffжарyy");
+}
+
+test "Searcher covers every HIR node kind on invalid UTF-8 input" {
+    // empty
+    try expectInvalidUtf8MatchSpan("", "\xff", .{ .start = 0, .end = 0 });
+    // literal
+    try expectInvalidUtf8MatchSpan("ж", "x\xffжy", .{ .start = 2, .end = 4 });
+    // dot
+    try expectInvalidUtf8MatchSpan(".", "\xff", .{ .start = 0, .end = 1 });
+    // anchor_start
+    try expectInvalidUtf8MatchSpan("^", "\xffx", .{ .start = 0, .end = 0 });
+    // anchor_end
+    try expectInvalidUtf8MatchSpan("$", "x\xff", .{ .start = 2, .end = 2 });
+    // char_class
+    try expectInvalidUtf8MatchSpan("[ж]", "\xffж", .{ .start = 1, .end = 3 });
+    // group
+    try expectInvalidUtf8MatchSpan("(ж)", "\xffж", .{ .start = 1, .end = 3 });
+    // concat
+    try expectInvalidUtf8MatchSpan("aж", "\xffaж", .{ .start = 1, .end = 4 });
+    // alternation
+    try expectInvalidUtf8MatchSpan("x|ж", "\xffж", .{ .start = 1, .end = 3 });
+    // repetition
+    try expectInvalidUtf8MatchSpan("ж+", "\xffжжx", .{ .start = 1, .end = 5 });
 }
 
 test "Searcher byte fallback supports ASCII literal alternation" {

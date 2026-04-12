@@ -8,8 +8,8 @@ matcher path.
 
 - [x] Remove `sanitizeInvalidUtf8Lossy(...)` from [src/main.zig](/home/oleg/prog/zigrep/src/main.zig)
 - [x] Stop using the lossy shadow haystack for any regex shape
-- [ ] Keep reported output based on the original file bytes
-- [ ] Preserve current line/column and capture reporting behavior
+- [x] Keep reported output based on the original file bytes
+- [x] Preserve current line/column and capture reporting behavior
 
 ## Phase 1: Inventory The Remaining Planner Gaps
 
@@ -108,19 +108,19 @@ when no planner path exists.
 
 ## Testing
 
-- [ ] Add matcher tests covering every HIR node kind on invalid UTF-8 input
-- [ ] Add end-to-end CLI tests for default mode on text-like invalid UTF-8 files
-- [ ] Add end-to-end CLI tests for `--text` on binary-like invalid UTF-8 files
-- [ ] Add regression tests for captures on invalid UTF-8 input
-- [ ] Add equivalence tests showing planner-covered patterns and general raw-byte engine patterns report the same spans
-- [ ] Run `zig build test`
+- [x] Add matcher tests covering every HIR node kind on invalid UTF-8 input
+- [x] Add end-to-end CLI tests for default mode on text-like invalid UTF-8 files
+- [x] Add end-to-end CLI tests for `--text` on binary-like invalid UTF-8 files
+- [x] Add regression tests for captures on invalid UTF-8 input
+- [x] Add equivalence tests showing planner-covered patterns and general raw-byte engine patterns report the same spans
+- [x] Run `zig build test`
 
 ## Cleanup
 
-- [ ] Update [docs/supported-syntax.md](/home/oleg/prog/zigrep/docs/supported-syntax.md) to describe the final invalid-UTF-8 behavior
-- [ ] Update [README.md](/home/oleg/prog/zigrep/README.md) with the user-visible invalid-UTF-8 behavior
-- [ ] Update [docs/idiomatic-zig-remediation-plan.md](/home/oleg/prog/zigrep/docs/idiomatic-zig-remediation-plan.md) when the lossy fallback is fully removed
-- [ ] Run `zig build bench` and compare invalid-UTF-8 search behavior before and after
+- [x] Update [docs/supported-syntax.md](/home/oleg/prog/zigrep/docs/supported-syntax.md) to describe the final invalid-UTF-8 behavior
+- [x] Update [README.md](/home/oleg/prog/zigrep/README.md) with the user-visible invalid-UTF-8 behavior
+- [x] Update [docs/idiomatic-zig-remediation-plan.md](/home/oleg/prog/zigrep/docs/idiomatic-zig-remediation-plan.md) when the lossy fallback is fully removed
+- [x] Run `zig build bench` and compare invalid-UTF-8 search behavior before and after
 
 ## Recommended Order
 
