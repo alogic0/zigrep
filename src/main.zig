@@ -53,6 +53,7 @@ pub const CliOptions = struct {
     no_ignore_vcs: bool = false,
     no_ignore_parent: bool = false,
     binary_mode: BinaryMode = .skip,
+    search_compressed: bool = false,
     case_mode: zigrep.search.grep.CaseMode = .sensitive,
     read_strategy: zigrep.search.io.ReadStrategy = .mmap,
     encoding: zigrep.search.io.InputEncoding = .auto,
@@ -203,6 +204,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var no_ignore_vcs = false;
     var no_ignore_parent = false;
     var binary_mode: BinaryMode = .skip;
+    var search_compressed = false;
     var unrestricted_level: u8 = 0;
     var case_mode: zigrep.search.grep.CaseMode = .sensitive;
     var read_strategy: zigrep.search.io.ReadStrategy = .mmap;
@@ -337,6 +339,10 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "--binary")) {
                 binary_mode = .suppress;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-z") or std.mem.eql(u8, arg, "--search-zip")) {
+                search_compressed = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-g") or std.mem.eql(u8, arg, "--glob")) {
@@ -509,6 +515,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .no_ignore_vcs = no_ignore_vcs,
         .no_ignore_parent = no_ignore_parent,
         .binary_mode = binary_mode,
+        .search_compressed = search_compressed,
         .case_mode = case_mode,
         .read_strategy = read_strategy,
         .encoding = encoding,
@@ -824,7 +831,9 @@ fn searchEntriesSequential(
         defer file_arena_state.deinit();
         const file_allocator = file_arena_state.allocator();
 
-        const suppress_binary_output = blk: {
+        const suppress_binary_output = if (options.search_compressed)
+            null
+        else blk: {
             if (options.encoding != .auto) break :blk false;
             switch (options.binary_mode) {
                 .text => break :blk false,
@@ -852,8 +861,22 @@ fn searchEntriesSequential(
             return err;
         };
         defer buffer.deinit(file_allocator);
+        const search_bytes = if (options.search_compressed)
+            prepareSearchBytes(file_allocator, buffer.bytes(), true) catch |err| {
+                if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
+                return err;
+            }
+        else
+            buffer.bytes();
+        const effective_binary_output = if (options.search_compressed)
+            decideBinaryBehavior(search_bytes, options.encoding, options.binary_mode) orelse {
+                result.stats.skipped_binary_files += 1;
+                continue;
+            }
+        else
+            suppress_binary_output.?;
         result.stats.searched_files += 1;
-        result.stats.searched_bytes += buffer.bytes().len;
+        result.stats.searched_bytes += search_bytes.len;
 
         var capture: std.Io.Writer.Allocating = .init(file_allocator);
         defer capture.deinit();
@@ -864,9 +887,9 @@ fn searchEntriesSequential(
             writer,
             &searcher,
             entry.path,
-            buffer.bytes(),
+            search_bytes,
             options.encoding,
-            suppress_binary_output,
+            effective_binary_output,
             options.invert_match,
             options.output,
             options.output_format,
@@ -967,7 +990,9 @@ fn searchEntriesParallel(
             defer file_arena_state.deinit();
             const file_allocator = file_arena_state.allocator();
 
-            const suppress_binary_output = blk: {
+            const suppress_binary_output = if (self.options.search_compressed)
+                null
+            else blk: {
                 if (self.options.encoding != .auto) break :blk false;
                 switch (self.options.binary_mode) {
                     .text => break :blk false,
@@ -1001,6 +1026,26 @@ fn searchEntriesParallel(
                 return err;
             };
             defer buffer.deinit(file_allocator);
+            const search_bytes = if (self.options.search_compressed)
+                prepareSearchBytes(file_allocator, buffer.bytes(), true) catch |err| {
+                    if (try self.warnAndSkip(entry.path, err)) return;
+                    return err;
+                }
+            else
+                buffer.bytes();
+            const effective_binary_output = if (self.options.search_compressed)
+                decideBinaryBehavior(search_bytes, self.options.encoding, self.options.binary_mode) orelse {
+                    self.result_reports[index] = .{
+                        .bytes = .empty,
+                        .searched_bytes = 0,
+                        .matched = false,
+                        .skipped_binary = true,
+                        .path = null,
+                    };
+                    return;
+                }
+            else
+                suppress_binary_output.?;
 
             var capture: std.Io.Writer.Allocating = .init(std.heap.smp_allocator);
             defer capture.deinit();
@@ -1010,9 +1055,9 @@ fn searchEntriesParallel(
                 &capture.writer,
                 searcher,
                 entry.path,
-                buffer.bytes(),
+                search_bytes,
                 self.options.encoding,
-                suppress_binary_output,
+                effective_binary_output,
                 self.options.invert_match,
                 self.options.output,
                 self.options.output_format,
@@ -1023,7 +1068,7 @@ fn searchEntriesParallel(
             );
             self.result_reports[index] = .{
                 .bytes = capture.toArrayList(),
-                .searched_bytes = buffer.bytes().len,
+                .searched_bytes = search_bytes.len,
                 .matched = matched,
                 .skipped_binary = false,
                 .path = if (self.options.output.heading) try std.heap.smp_allocator.dupe(u8, entry.path) else null,
@@ -1262,8 +1307,36 @@ fn shouldWarnAndSkipFileError(err: anyerror) bool {
         error.NotDir,
         error.NameTooLong,
         error.SymLinkLoop,
+        error.InvalidCompressedInput,
         => true,
         else => false,
+    };
+}
+
+fn prepareSearchBytes(
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+    search_compressed: bool,
+) ![]const u8 {
+    if (!search_compressed) return bytes;
+    return if (try zigrep.search.io.decompressAlloc(allocator, bytes)) |decoded|
+        decoded
+    else
+        bytes;
+}
+
+fn decideBinaryBehavior(
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+    binary_mode: BinaryMode,
+) ?bool {
+    if (encoding != .auto) return false;
+    return switch (binary_mode) {
+        .text => false,
+        .skip, .suppress => switch (zigrep.search.io.detectBinary(bytes, .{})) {
+            .text => false,
+            .binary => if (binary_mode == .skip) null else true,
+        },
     };
 }
 
@@ -1895,6 +1968,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -S, --smart-case      use ignore-case unless the pattern has uppercase letters
         \\  --text                search binary files and print normal match output
         \\  --binary              search binary files but suppress matching line content
+        \\  -z, --search-zip      search gzip-compressed files too
         \\  -g, --glob GLOB       include or exclude paths by glob
         \\  --buffered            use the simpler file-reading method
         \\  --mmap                use the faster file-reading method when possible
@@ -2396,6 +2470,21 @@ test "parseArgs accepts binary mode flag" {
     switch (parsed) {
         .run => |opts| try testing.expectEqual(BinaryMode.suppress, opts.binary_mode),
         .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts compressed search flag" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-z", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        else => unreachable,
+    };
+
+    switch (parsed) {
+        .run => |opts| try testing.expect(opts.search_compressed),
+        else => unreachable,
     }
 }
 
@@ -4037,6 +4126,38 @@ test "runCli raw-byte encoding mode searches binary payloads without text mode" 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "payload.bin:1:4:aa"));
     try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli compressed search mode finds matches in gzip files" {
+    const testing = std.testing;
+
+    const gzip_hello = [_]u8{
+        0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x03,
+        0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0x57, 0x28, 0xcf,
+        0x2f, 0xca, 0x49, 0xe1, 0x02, 0x00,
+        0xd5, 0xe0, 0x39, 0xb7, 0x0c, 0x00, 0x00, 0x00,
+    };
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt.gz",
+        .data = &gzip_hello,
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const default_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "Hello", root_path });
+    defer default_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), default_run.exit_code);
+    try testing.expectEqualStrings("", default_run.stdout);
+
+    const zip_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-z", "Hello", root_path });
+    defer zip_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), zip_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, zip_run.stdout, 1, "sample.txt.gz:1:1:Hello world"));
 }
 
 test "runCli skips invalid UTF-8 files instead of aborting the whole search" {

@@ -165,8 +165,10 @@ ecosystem features.
 
 ## Priority 6: External Input Pipelines
 
-- [ ] Add compressed-file search (`-z/--search-zip` style).
-  This is a meaningful gap versus ripgrep for real-world log and artifact search.
+- [x] Add compressed-file search (`-z/--search-zip` style).
+  `zigrep` now supports gzip-compressed file search via `-z` or
+  `--search-zip`. This is the first compressed-stream step, not full
+  multi-format archive parity.
 
 - [ ] Add preprocessor support (`--pre`, `--pre-glob` style) if the project
   wants ripgrep-like arbitrary input transforms.

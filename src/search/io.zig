@@ -14,6 +14,11 @@ pub const InputEncoding = enum {
     utf16be,
 };
 
+pub const CompressionFormat = enum {
+    none,
+    gzip,
+};
+
 pub const ReadOptions = struct {
     strategy: ReadStrategy = .buffered,
     buffer_size: usize = 16 * 1024,
@@ -32,6 +37,10 @@ pub const BinaryOptions = struct {
 pub const DecodeError = std.mem.Allocator.Error || error{
     InvalidUtf16Length,
 } || std.unicode.Utf16LeToUtf8Error;
+
+pub const DecompressError = std.mem.Allocator.Error || error{
+    InvalidCompressedInput,
+};
 
 pub const Bom = enum {
     none,
@@ -116,6 +125,21 @@ pub fn detectBom(bytes: []const u8) Bom {
     if (std.mem.startsWith(u8, bytes, "\xff\xfe")) return .utf16_le;
     if (std.mem.startsWith(u8, bytes, "\xfe\xff")) return .utf16_be;
     return .none;
+}
+
+pub fn detectCompression(bytes: []const u8) CompressionFormat {
+    if (std.mem.startsWith(u8, bytes, "\x1f\x8b")) return .gzip;
+    return .none;
+}
+
+pub fn decompressAlloc(
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+) DecompressError!?[]u8 {
+    return switch (detectCompression(bytes)) {
+        .none => null,
+        .gzip => try decompressGzipAlloc(allocator, bytes),
+    };
 }
 
 pub fn decodeBomToUtf8Alloc(allocator: std.mem.Allocator, bytes: []const u8) DecodeError!?[]u8 {
@@ -279,6 +303,20 @@ fn decodeUtf16UnitsToUtf8Alloc(
     return try std.unicode.utf16LeToUtf8Alloc(allocator, units);
 }
 
+fn decompressGzipAlloc(
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+) DecompressError![]u8 {
+    var input: std.Io.Reader = .fixed(bytes);
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+
+    var decompress: std.compress.flate.Decompress = .init(&input, .gzip, &.{});
+    _ = decompress.reader.streamRemaining(&output.writer) catch return error.InvalidCompressedInput;
+
+    return output.toOwnedSlice();
+}
+
 test "binary detector treats UTF-8 and plain text as text" {
     const testing = std.testing;
 
@@ -335,6 +373,30 @@ test "BOM detector recognizes common Unicode BOMs" {
     try testing.expectEqual(Bom.utf16_be, detectBom("\xfe\xff\x00h\x00i"));
     try testing.expectEqual(Bom.none, detectBom("plain text"));
     try testing.expectEqual(Bom.none, detectBom(""));
+}
+
+test "compression detector recognizes gzip magic" {
+    const testing = std.testing;
+
+    try testing.expectEqual(CompressionFormat.gzip, detectCompression("\x1f\x8b\x08hello"));
+    try testing.expectEqual(CompressionFormat.none, detectCompression("plain text"));
+    try testing.expectEqual(CompressionFormat.none, detectCompression(""));
+}
+
+test "gzip decompressor converts gzip bytes to plain text" {
+    const testing = std.testing;
+
+    const gzip_hello = [_]u8{
+        0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x03,
+        0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0x57, 0x28, 0xcf,
+        0x2f, 0xca, 0x49, 0xe1, 0x02, 0x00,
+        0xd5, 0xe0, 0x39, 0xb7, 0x0c, 0x00, 0x00, 0x00,
+    };
+
+    const decoded = (try decompressAlloc(testing.allocator, &gzip_hello)).?;
+    defer testing.allocator.free(decoded);
+
+    try testing.expectEqualStrings("Hello world\n", decoded);
 }
 
 test "UTF-16 BOM decoder converts UTF-16LE and UTF-16BE inputs to UTF-8" {

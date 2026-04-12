@@ -206,6 +206,13 @@ Encoding note:
 - `-E none` treats input as raw bytes and bypasses decode/transcode handling
 - explicit non-`auto` encodings also bypass the default binary-file skip check tied to auto-detection
 
+Compressed-input note:
+
+- `-z` and `--search-zip` enable gzip-compressed file search
+- this currently searches single gzip-compressed file payloads, not archive members
+- compressed bytes are decompressed before binary detection, encoding handling, and match reporting
+- this is an initial compressed-stream step, not full ripgrep-compatible compressed-input coverage
+
 `--binary` note:
 
 - `--binary` searches binary files but suppresses matching line content
