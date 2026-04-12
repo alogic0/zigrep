@@ -8,13 +8,13 @@ const CliError = error{
     InvalidFlagValue,
 };
 
-const OutputOptions = struct {
+pub const OutputOptions = struct {
     with_filename: bool = true,
     line_number: bool = true,
     column_number: bool = true,
 };
 
-const CliOptions = struct {
+pub const CliOptions = struct {
     pattern: []const u8,
     paths: []const []const u8,
     include_hidden: bool = false,
@@ -25,6 +25,7 @@ const CliOptions = struct {
     parallel_jobs: ?usize = null,
     max_depth: ?usize = null,
     output: OutputOptions = .{},
+    buffer_output: bool = false,
 };
 
 const ParseResult = union(enum) {
@@ -227,7 +228,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     } };
 }
 
-fn runSearch(
+pub fn runSearch(
     allocator: std.mem.Allocator,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
@@ -235,6 +236,17 @@ fn runSearch(
 ) !u8 {
     var matched = false;
     for (options.paths) |path| {
+        if (options.buffer_output) {
+            var buffered_output: std.Io.Writer.Allocating = .init(allocator);
+            defer buffered_output.deinit();
+
+            if (try searchPath(allocator, &buffered_output.writer, stderr, path, options)) {
+                matched = true;
+            }
+            try stdout.writeAll(buffered_output.written());
+            continue;
+        }
+
         if (try searchPath(allocator, stdout, stderr, path, options)) {
             matched = true;
         }
@@ -980,6 +992,52 @@ test "runSearch reports matches across files on the parallel path" {
     try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:1:1:needle one"));
     try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt:1:1:needle two"));
     try testing.expectEqualStrings("", stderr_capture.written());
+}
+
+test "runSearch buffered output stays identical to the default path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\nneedle two\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "two.txt",
+        .data = "xx\xffneedleyy\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    var default_stdout: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer default_stdout.deinit();
+    var default_stderr: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer default_stderr.deinit();
+
+    const default_exit = try runSearch(testing.allocator, &default_stdout.writer, &default_stderr.writer, .{
+        .pattern = "needle",
+        .paths = &.{root_path},
+        .parallel_jobs = 1,
+    });
+
+    var buffered_stdout: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer buffered_stdout.deinit();
+    var buffered_stderr: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer buffered_stderr.deinit();
+
+    const buffered_exit = try runSearch(testing.allocator, &buffered_stdout.writer, &buffered_stderr.writer, .{
+        .pattern = "needle",
+        .paths = &.{root_path},
+        .parallel_jobs = 1,
+        .buffer_output = true,
+    });
+
+    try testing.expectEqual(default_exit, buffered_exit);
+    try testing.expectEqualStrings(default_stdout.written(), buffered_stdout.written());
+    try testing.expectEqualStrings(default_stderr.written(), buffered_stderr.written());
 }
 
 test "runCli prints every matching line from one file" {

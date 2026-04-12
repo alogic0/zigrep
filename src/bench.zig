@@ -1,5 +1,6 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
+const cli = @import("main.zig");
 
 const SyntheticBenchCase = struct {
     name: []const u8,
@@ -16,6 +17,15 @@ const CorpusBenchCase = struct {
     iterations: usize,
     captures: bool,
     parallel_jobs: ?usize = null,
+};
+
+const OutputBenchCase = struct {
+    name: []const u8,
+    root: []const u8,
+    pattern: []const u8,
+    iterations: usize,
+    parallel_jobs: ?usize = null,
+    buffer_output: bool = false,
 };
 
 const Result = struct {
@@ -41,6 +51,9 @@ pub fn main() !void {
     }
 
     const corpus_cases = buildCorpusCases();
+    const output_root = try buildOutputBenchCorpus(allocator);
+    defer allocator.free(output_root);
+    const output_cases = buildOutputCases(output_root);
 
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
@@ -62,6 +75,18 @@ pub fn main() !void {
     for (corpus_cases) |bench_case| {
         const result = try runCorpusCase(allocator, bench_case);
         try stdout.print("corpus,{s},{d},{d},{d},{},{d},{d}\n", .{
+            bench_case.name,
+            bench_case.iterations,
+            result.ns_total,
+            result.ns_per_iter,
+            result.matched,
+            result.files,
+            result.bytes,
+        });
+    }
+    for (output_cases) |bench_case| {
+        const result = try runOutputCase(allocator, bench_case);
+        try stdout.print("output,{s},{d},{d},{d},{},{d},{d}\n", .{
             bench_case.name,
             bench_case.iterations,
             result.ns_total,
@@ -152,6 +177,61 @@ fn runCorpusCase(allocator: std.mem.Allocator, bench_case: CorpusBenchCase) !Res
         .matched = last_run.matched,
         .files = last_run.files,
         .bytes = last_run.bytes,
+    };
+}
+
+fn runOutputCase(allocator: std.mem.Allocator, bench_case: OutputBenchCase) !Result {
+    const entries = try zigrep.search.walk.collectFiles(allocator, bench_case.root, .{
+        .include_hidden = false,
+    });
+    defer {
+        for (entries) |entry| entry.deinit(allocator);
+        allocator.free(entries);
+    }
+
+    var bytes: usize = 0;
+    for (entries) |entry| {
+        const buffer = try zigrep.search.io.readFile(allocator, entry.path, .{ .strategy = .mmap });
+        defer buffer.deinit(allocator);
+        bytes += buffer.bytes().len;
+    }
+
+    const sink = try openOutputSink();
+    defer sink.deinit();
+
+    const start = std.time.nanoTimestamp();
+    var matched = false;
+    var i: usize = 0;
+    while (i < bench_case.iterations) : (i += 1) {
+        var stdout_buffer: [4096]u8 = undefined;
+        var stdout_writer = sink.file.writer(&stdout_buffer);
+        const stdout = &stdout_writer.interface;
+
+        var stderr_buffer: [1024]u8 = undefined;
+        var stderr_writer = sink.file.writer(&stderr_buffer);
+        const stderr = &stderr_writer.interface;
+
+        const exit_code = try cli.runSearch(allocator, stdout, stderr, .{
+            .pattern = bench_case.pattern,
+            .paths = &.{bench_case.root},
+            .parallel_jobs = bench_case.parallel_jobs,
+            .read_strategy = .mmap,
+            .buffer_output = bench_case.buffer_output,
+        });
+        try stdout.flush();
+        try stderr.flush();
+        try sink.reset();
+        matched = exit_code == 0;
+    }
+    const end = std.time.nanoTimestamp();
+
+    const total_ns: u64 = @intCast(end - start);
+    return .{
+        .ns_total = total_ns,
+        .ns_per_iter = total_ns / bench_case.iterations,
+        .matched = matched,
+        .files = entries.len,
+        .bytes = bytes,
     };
 }
 
@@ -363,6 +443,96 @@ fn buildCorpusCases() []const CorpusBenchCase {
             .parallel_jobs = 1,
         },
     };
+}
+
+fn buildOutputCases(root: []const u8) [4]OutputBenchCase {
+    return .{
+        .{
+            .name = "high_match_seq",
+            .root = root,
+            .pattern = "needle",
+            .iterations = 6,
+            .parallel_jobs = 1,
+        },
+        .{
+            .name = "high_match_seq_buffered",
+            .root = root,
+            .pattern = "needle",
+            .iterations = 6,
+            .parallel_jobs = 1,
+            .buffer_output = true,
+        },
+        .{
+            .name = "high_match_parallel",
+            .root = root,
+            .pattern = "needle",
+            .iterations = 6,
+            .parallel_jobs = 4,
+        },
+        .{
+            .name = "high_match_parallel_buffered",
+            .root = root,
+            .pattern = "needle",
+            .iterations = 6,
+            .parallel_jobs = 4,
+            .buffer_output = true,
+        },
+    };
+}
+
+fn buildOutputBenchCorpus(allocator: std.mem.Allocator) ![]u8 {
+    const cwd = std.fs.cwd();
+    const root = ".zig-cache/bench-output-corpus";
+    try cwd.makePath(root);
+
+    var line_buffer: std.ArrayList(u8) = .empty;
+    defer line_buffer.deinit(allocator);
+
+    var file_index: usize = 0;
+    while (file_index < 8) : (file_index += 1) {
+        line_buffer.clearRetainingCapacity();
+        var line_index: usize = 0;
+        while (line_index < 256) : (line_index += 1) {
+            try line_buffer.writer(allocator).print("needle line {d:0>3} in file {d:0>2}\n", .{ line_index, file_index });
+        }
+
+        var name_buffer: [64]u8 = undefined;
+        const sub_path = try std.fmt.bufPrint(&name_buffer, "{s}/match-{d:0>2}.txt", .{ root, file_index });
+        try cwd.writeFile(.{
+            .sub_path = sub_path,
+            .data = line_buffer.items,
+        });
+    }
+
+    return allocator.dupe(u8, root);
+}
+
+const OutputSink = struct {
+    file: std.fs.File,
+    truncates: bool,
+
+    fn deinit(self: @This()) void {
+        self.file.close();
+    }
+
+    fn reset(self: @This()) !void {
+        if (!self.truncates) return;
+        try self.file.setEndPos(0);
+        try self.file.seekTo(0);
+    }
+};
+
+fn openOutputSink() !OutputSink {
+    const null_file = std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only }) catch null;
+    if (null_file) |file| {
+        return .{ .file = file, .truncates = false };
+    }
+
+    const file = try std.fs.cwd().createFile(".zig-cache/bench-output-sink.tmp", .{
+        .read = false,
+        .truncate = true,
+    });
+    return .{ .file = file, .truncates = true };
 }
 
 fn buildHaystack(allocator: std.mem.Allocator, chunk: []const u8, repeat_count: usize, suffix: []const u8) ![]u8 {
