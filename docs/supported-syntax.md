@@ -137,6 +137,17 @@ Context mode note:
 - `--heading` is currently supported only for text line output, including context mode
 - `--heading` is rejected with count output, file-path-only output, `--json`, and `--null`
 
+Multiline status note:
+
+- `-U` / `--multiline` and `--multiline-dotall` are reserved in the CLI surface now
+- the current build parses those flags but still stops with `MultilineNotImplemented`
+- the pinned target semantics for implementation are:
+  - multiline mode permits matches to span line terminators
+  - `.` still does not match `\n` by default
+  - `--multiline-dotall` makes `.` match `\n`
+  - multiline reporting will stay line-oriented by projecting full match spans back to covered display lines
+- until that engine work lands, multiline output formatting remains unimplemented
+
 For non-technical users:
 
 - `--buffered` means "use the simpler, safer read method for every file"
@@ -257,7 +268,7 @@ The current search tool does not yet implement:
 - `.gitignore` compatibility beyond the small internal ignore-rule subset
 - stdin search
 - replacement/substitution
-- multiline output formatting
+- multiline search execution and multiline output formatting
 - full ripgrep flag compatibility
 
 ## Performance Model

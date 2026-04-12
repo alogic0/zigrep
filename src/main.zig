@@ -59,6 +59,8 @@ pub const CliOptions = struct {
     case_mode: zigrep.search.grep.CaseMode = .sensitive,
     read_strategy: zigrep.search.io.ReadStrategy = .mmap,
     encoding: zigrep.search.io.InputEncoding = .auto,
+    multiline: bool = false,
+    multiline_dotall: bool = false,
     parallel_jobs: ?usize = null,
     max_depth: ?usize = null,
     max_count: ?usize = null,
@@ -218,6 +220,8 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var case_mode: zigrep.search.grep.CaseMode = .sensitive;
     var read_strategy: zigrep.search.io.ReadStrategy = .mmap;
     var encoding: zigrep.search.io.InputEncoding = .auto;
+    var multiline = false;
+    var multiline_dotall = false;
     var parallel_jobs: ?usize = null;
     var max_depth: ?usize = null;
     var max_count: ?usize = null;
@@ -388,6 +392,14 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
                 encoding = try parseEncoding(argv[index]);
                 continue;
             }
+            if (std.mem.eql(u8, arg, "-U") or std.mem.eql(u8, arg, "--multiline")) {
+                multiline = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--multiline-dotall")) {
+                multiline_dotall = true;
+                continue;
+            }
             if (std.mem.eql(u8, arg, "-j") or std.mem.eql(u8, arg, "--threads")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
@@ -485,6 +497,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
 
     if (pattern == null) return error.MissingPattern;
     if (preprocessor == null and pre_globs.items.len != 0) return error.InvalidFlagCombination;
+    if (multiline_dotall and !multiline) return error.InvalidFlagCombination;
     if (unrestricted_level >= 1) no_ignore = true;
     if (unrestricted_level >= 2) include_hidden = true;
     if (unrestricted_level >= 3) binary_mode = .text;
@@ -547,6 +560,8 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .case_mode = case_mode,
         .read_strategy = read_strategy,
         .encoding = encoding,
+        .multiline = multiline,
+        .multiline_dotall = multiline_dotall,
         .parallel_jobs = parallel_jobs,
         .max_depth = max_depth,
         .max_count = max_count,
@@ -573,6 +588,8 @@ pub fn runSearch(
     stderr: *std.Io.Writer,
     options: CliOptions,
 ) !u8 {
+    if (options.multiline or options.multiline_dotall) return error.MultilineNotImplemented;
+
     const type_matcher = try zigrep.search.types.init(allocator, options.type_adds);
     defer type_matcher.deinit(allocator);
     try zigrep.search.types.validateSelectedTypes(type_matcher, options.include_types, options.exclude_types);
@@ -2036,6 +2053,8 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --buffered            use the simpler file-reading method
         \\  --mmap                use the faster file-reading method when possible
         \\  -E, --encoding ENC    force input encoding: auto, none, utf8, latin1, utf16le, utf16be
+        \\  -U, --multiline       enable searching across multiple lines
+        \\  --multiline-dotall    make '.' match newlines in multiline mode
         \\  -j, --threads N       use up to N worker threads
         \\  --max-depth N         limit recursive walk depth
         \\  -A, --after-context N
@@ -2122,6 +2141,8 @@ test "parseArgs defaults to current directory search" {
             try testing.expectEqual(zigrep.search.grep.CaseMode.sensitive, opts.case_mode);
             try testing.expectEqual(zigrep.search.io.ReadStrategy.mmap, opts.read_strategy);
             try testing.expectEqual(zigrep.search.io.InputEncoding.auto, opts.encoding);
+            try testing.expect(!opts.multiline);
+            try testing.expect(!opts.multiline_dotall);
             try testing.expectEqual(@as(?usize, null), opts.parallel_jobs);
             try testing.expectEqual(@as(?usize, null), opts.max_depth);
             try testing.expect(opts.output.with_filename);
@@ -2447,6 +2468,52 @@ test "parseArgs accepts latin1 encoding mode" {
         .run => |opts| try testing.expectEqual(zigrep.search.io.InputEncoding.latin1, opts.encoding),
         .help, .version, .type_list => unreachable,
     }
+}
+
+test "parseArgs accepts multiline flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-U", "--multiline-dotall", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.multiline);
+            try testing.expect(opts.multiline_dotall);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs rejects multiline-dotall without multiline" {
+    const testing = std.testing;
+
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--multiline-dotall",
+        "needle",
+        "src",
+    }));
+}
+
+test "runCli reports multiline as not implemented yet" {
+    const testing = std.testing;
+
+    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stdout_capture.deinit();
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    try testing.expectError(error.MultilineNotImplemented, runCli(
+        testing.allocator,
+        &stdout_capture.writer,
+        &stderr_capture.writer,
+        &.{ "zigrep", "-U", "needle", "." },
+    ));
 }
 
 test "parseArgs accepts null output flag for path modes" {

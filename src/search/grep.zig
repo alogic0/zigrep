@@ -15,6 +15,10 @@ pub const CaseMode = enum {
 
 pub const SearchOptions = struct {
     case_mode: CaseMode = .sensitive,
+    // Phase 1 multiline plumbing: these flags define the intended engine
+    // surface, even though multiline execution is not wired yet.
+    multiline: bool = false,
+    multiline_dotall: bool = false,
 };
 
 pub const Span = report_mod.Span;
