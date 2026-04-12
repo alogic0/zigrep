@@ -64,6 +64,7 @@ The current CLI supports:
 - Buffered or mmap-backed reads with `--buffered` and `--mmap`
 - Worker-count control with `-j` or `--threads`
 - Walk depth limiting with `--max-depth`
+- Context lines with `-A` / `--after-context`, `-B` / `--before-context`, and `-C` / `--context`
 - Matching-line limit with `-m` or `--max-count`
 - Count-only output with `-c` or `--count`
 - Matching-file output with `-l` or `--files-with-matches`
@@ -78,6 +79,15 @@ The current CLI supports:
 - in normal output, that limits printed matching lines
 - with `--count`, that limits the counted matching lines too
 - with `--only-matching`, `zigrep` still prints every match occurrence from the first `N` matching lines
+
+Context mode note:
+
+- `-A N` prints `N` trailing context lines after each matching line
+- `-B N` prints `N` leading context lines before each matching line
+- `-C N` prints both leading and trailing context lines
+- overlapping context groups are merged, and disjoint groups are separated by `--`
+- context mode is currently supported only for normal line output
+- combinations with `--count`, `--files-with-matches`, `--files-without-match`, or `--only-matching` are rejected
 
 For non-technical users:
 

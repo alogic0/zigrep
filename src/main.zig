@@ -6,6 +6,7 @@ const CliError = error{
     UnknownFlag,
     MissingFlagValue,
     InvalidFlagValue,
+    InvalidFlagCombination,
 };
 
 pub const OutputOptions = struct {
@@ -33,6 +34,8 @@ pub const CliOptions = struct {
     parallel_jobs: ?usize = null,
     max_depth: ?usize = null,
     max_count: ?usize = null,
+    context_before: usize = 0,
+    context_after: usize = 0,
     output: OutputOptions = .{},
     report_mode: ReportMode = .lines,
     buffer_output: bool = false,
@@ -86,6 +89,7 @@ fn isUsageError(err: anyerror) bool {
         error.UnknownFlag,
         error.MissingFlagValue,
         error.InvalidFlagValue,
+        error.InvalidFlagCombination,
         => true,
         else => false,
     };
@@ -129,6 +133,8 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var parallel_jobs: ?usize = null;
     var max_depth: ?usize = null;
     var max_count: ?usize = null;
+    var context_before: usize = 0;
+    var context_after: usize = 0;
     var output: OutputOptions = .{};
     var report_mode: ReportMode = .lines;
     var pattern: ?[]const u8 = null;
@@ -189,6 +195,26 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
                 max_depth = try parseNonNegativeUsize(argv[index]);
                 continue;
             }
+            if (std.mem.eql(u8, arg, "-A") or std.mem.eql(u8, arg, "--after-context")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                context_after = try parseNonNegativeUsize(argv[index]);
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-B") or std.mem.eql(u8, arg, "--before-context")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                context_before = try parseNonNegativeUsize(argv[index]);
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-C") or std.mem.eql(u8, arg, "--context")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                const context = try parseNonNegativeUsize(argv[index]);
+                context_before = context;
+                context_after = context;
+                continue;
+            }
             if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--max-count")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
@@ -247,6 +273,9 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
 
     if (pattern == null) return error.MissingPattern;
     if (paths.items.len == 0) try paths.append(allocator, ".");
+    if ((context_before != 0 or context_after != 0) and (report_mode != .lines or output.only_matching)) {
+        return error.InvalidFlagCombination;
+    }
 
     return .{ .run = .{
         .pattern = pattern.?,
@@ -259,6 +288,8 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .parallel_jobs = parallel_jobs,
         .max_depth = max_depth,
         .max_count = max_count,
+        .context_before = context_before,
+        .context_after = context_after,
         .output = output,
         .report_mode = report_mode,
     } };
@@ -371,6 +402,8 @@ fn searchEntriesSequential(
             options.output,
             options.report_mode,
             options.max_count,
+            options.context_before,
+            options.context_after,
         )) {
             matched = true;
         }
@@ -482,6 +515,8 @@ fn searchEntriesParallel(
                 self.options.output,
                 self.options.report_mode,
                 self.options.max_count,
+                self.options.context_before,
+                self.options.context_after,
             )) {
                 self.result_reports[index] = .{
                     .bytes = capture.toArrayList(),
@@ -610,6 +645,9 @@ fn writeFileReports(
     output: OutputOptions,
     max_count: ?usize,
 ) !bool {
+    if (output.only_matching) {
+        std.debug.assert(max_count == null or max_count.? > 0);
+    }
     const IterationStop = error{MaxCountReached};
 
     const WriterContext = struct {
@@ -677,6 +715,123 @@ fn writeFileReports(
     };
 }
 
+fn writeContextLine(
+    writer: *std.Io.Writer,
+    path: []const u8,
+    line_number: usize,
+    line: []const u8,
+    output: OutputOptions,
+) !void {
+    var wrote_prefix = false;
+    if (output.with_filename) {
+        try writer.print("{s}", .{path});
+        wrote_prefix = true;
+    }
+    if (output.line_number) {
+        if (wrote_prefix) try writer.writeByte('-');
+        try writer.print("{d}", .{line_number});
+        wrote_prefix = true;
+    }
+    if (wrote_prefix) try writer.writeByte('-');
+    try writeDisplayLine(writer, line);
+    try writer.writeByte('\n');
+}
+
+fn writeFileReportsWithContext(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    haystack: []const u8,
+    output: OutputOptions,
+    max_count: ?usize,
+    context_before: usize,
+    context_after: usize,
+) !bool {
+    const IterationStop = error{MaxCountReached};
+
+    const MatchLine = struct {
+        line_index: usize,
+        report: zigrep.search.grep.MatchReport,
+    };
+
+    const Collector = struct {
+        allocator: std.mem.Allocator,
+        line_spans: []const zigrep.search.report.Span,
+        items: *std.ArrayList(MatchLine),
+        max_count: ?usize,
+        next_line_index: usize = 0,
+
+        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
+            while (self.next_line_index < self.line_spans.len and
+                self.line_spans[self.next_line_index].start != report.line_span.start)
+            {
+                self.next_line_index += 1;
+            }
+            if (self.next_line_index >= self.line_spans.len) return error.InvalidFlagCombination;
+            try self.items.append(self.allocator, .{
+                .line_index = self.next_line_index,
+                .report = report,
+            });
+            if (self.max_count) |limit| {
+                if (self.items.items.len >= limit) return IterationStop.MaxCountReached;
+            }
+        }
+    };
+
+    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
+    defer allocator.free(line_spans);
+
+    var matched_lines: std.ArrayList(MatchLine) = .empty;
+    defer matched_lines.deinit(allocator);
+
+    var collector = Collector{
+        .allocator = allocator,
+        .line_spans = line_spans,
+        .items = &matched_lines,
+        .max_count = max_count,
+    };
+
+    _ = searcher.forEachLineReport(path, haystack, &collector, Collector.emit) catch |err| switch (err) {
+        IterationStop.MaxCountReached => true,
+        else => return err,
+    };
+
+    if (matched_lines.items.len == 0) return false;
+
+    const include = try allocator.alloc(bool, line_spans.len);
+    defer allocator.free(include);
+    @memset(include, false);
+
+    const matched_indexes = try allocator.alloc(?usize, line_spans.len);
+    defer allocator.free(matched_indexes);
+    @memset(matched_indexes, null);
+
+    for (matched_lines.items, 0..) |match_line, match_index| {
+        matched_indexes[match_line.line_index] = match_index;
+        const start = match_line.line_index -| context_before;
+        const end = @min(match_line.line_index + context_after + 1, line_spans.len);
+        for (start..end) |line_index| include[line_index] = true;
+    }
+
+    var previous_included: ?usize = null;
+    for (line_spans, 0..) |line_span, line_index| {
+        if (!include[line_index]) continue;
+        if (previous_included) |prev| {
+            if (line_index > prev + 1) try writer.writeAll("--\n");
+        }
+        previous_included = line_index;
+
+        if (matched_indexes[line_index]) |match_index| {
+            try writeReport(writer, matched_lines.items[match_index].report, output);
+        } else {
+            try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output);
+        }
+    }
+
+    return true;
+}
+
 fn writeFileOutput(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
@@ -687,13 +842,72 @@ fn writeFileOutput(
     output: OutputOptions,
     report_mode: ReportMode,
     max_count: ?usize,
+    context_before: usize,
+    context_after: usize,
 ) !bool {
     return switch (report_mode) {
-        .lines => writeFileReports(allocator, writer, searcher, path, bytes, encoding, output, max_count),
+        .lines => writeFileLines(
+            allocator,
+            writer,
+            searcher,
+            path,
+            bytes,
+            encoding,
+            output,
+            max_count,
+            context_before,
+            context_after,
+        ),
         .count => writeFileCount(allocator, writer, searcher, path, bytes, encoding, output, max_count),
         .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding),
         .files_without_match => writeFilePathWithoutMatch(allocator, writer, searcher, path, bytes, encoding),
     };
+}
+
+fn writeFileLines(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+    output: OutputOptions,
+    max_count: ?usize,
+    context_before: usize,
+    context_after: usize,
+) !bool {
+    if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
+        defer allocator.free(decoded);
+        if (context_before != 0 or context_after != 0) {
+            return writeFileReportsWithContext(
+                allocator,
+                writer,
+                searcher,
+                path,
+                decoded,
+                output,
+                max_count,
+                context_before,
+                context_after,
+            );
+        }
+        return writeFileReports(allocator, writer, searcher, path, decoded, .utf8, output, max_count);
+    }
+
+    if (context_before != 0 or context_after != 0) {
+        return writeFileReportsWithContext(
+            allocator,
+            writer,
+            searcher,
+            path,
+            bytes,
+            output,
+            max_count,
+            context_before,
+            context_after,
+        );
+    }
+    return writeFileReports(allocator, writer, searcher, path, bytes, .utf8, output, max_count);
 }
 
 fn writeFileCount(
@@ -886,6 +1100,11 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -E, --encoding ENC    force input encoding: auto, utf8, utf16le, utf16be
         \\  -j, --threads N       use up to N worker threads
         \\  --max-depth N         limit recursive walk depth
+        \\  -A, --after-context N
+        \\                        print N trailing context lines
+        \\  -B, --before-context N
+        \\                        print N leading context lines
+        \\  -C, --context N       print N leading and trailing context lines
         \\  -m, --max-count N     stop after N matching lines per file
         \\  -c, --count           print matching line counts
         \\  -l, --files-with-matches
@@ -1123,6 +1342,24 @@ test "parseArgs accepts max-count mode" {
     }
 }
 
+test "parseArgs accepts before and after context flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-B", "2", "-A", "3", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| testing.allocator.free(opts.paths),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(@as(usize, 2), opts.context_before);
+            try testing.expectEqual(@as(usize, 3), opts.context_after);
+        },
+        .help, .version => unreachable,
+    }
+}
+
 test "parseArgs rejects invalid numeric flags" {
     const testing = std.testing;
 
@@ -1140,6 +1377,20 @@ test "parseArgs rejects invalid numeric flags" {
         "zigrep",
         "--encoding",
         "latin1",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--count",
+        "-C",
+        "1",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--only-matching",
+        "-A",
+        "1",
         "needle",
     }));
 }
@@ -1453,6 +1704,73 @@ test "runCli max-count limits matching lines per file" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:needle one"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:3:1:needle two"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:4:1:needle three"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli context mode prints surrounding lines and separators" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ctx.txt",
+        .data =
+            "alpha\n" ++
+            "before\n" ++
+            "needle one\n" ++
+            "after\n" ++
+            "gap1\n" ++
+            "gap2\n" ++
+            "needle two\n" ++
+            "tail\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-C", "1", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-2-before\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:3:1:needle one\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-4-after\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "--\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-6-gap2\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:7:1:needle two\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-8-tail\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli context mode respects max-count" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ctx.txt",
+        .data =
+            "before\n" ++
+            "needle one\n" ++
+            "after\n" ++
+            "gap1\n" ++
+            "needle two\n" ++
+            "tail\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-C", "1", "--max-count", "1", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-1-before\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:2:1:needle one\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-3-after\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "needle two"));
     try testing.expectEqualStrings("", run.stderr);
 }
 

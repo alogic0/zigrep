@@ -36,9 +36,9 @@ ecosystem features.
   `zigrep` now supports both `-l/--files-with-matches` and
   `-L/--files-without-match`.
 
-- [ ] Add before/after/context line support (`-A`, `-B`, `-C` style behavior).
-  This is one of the biggest practical output gaps versus ripgrep and standard
-  grep workflows.
+- [x] Add before/after/context line support (`-A`, `-B`, `-C` style behavior).
+  `zigrep` now supports context output for normal line mode, with merged groups
+  and `--` separators between disjoint match groups.
 
 - [x] Add `-m/--max-count`.
   `zigrep` now supports a per-file matching-line cap via `-m` or
@@ -184,6 +184,7 @@ ecosystem features.
 - [x] 1. Add count-only and files-with-matches modes.
 - [x] 2. Add only-matching output.
 - [x] 3. Add `-m/--max-count`.
+- [x] 4. Add `-A/-B/-C` context output for normal line mode.
 - [ ] 3. Add context line support.
 - [ ] 4. Add glob filtering and richer ignore controls.
 - [ ] 5. Add case-insensitive / smart-case search.
