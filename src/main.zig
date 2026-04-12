@@ -16,6 +16,7 @@ pub const OutputOptions = struct {
     line_number: bool = true,
     column_number: bool = true,
     only_matching: bool = false,
+    null_path_terminator: bool = false,
 };
 
 const OutputFormat = enum {
@@ -242,6 +243,10 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
                 output_format = .json;
                 continue;
             }
+            if (std.mem.eql(u8, arg, "--null")) {
+                output.null_path_terminator = true;
+                continue;
+            }
             if (std.mem.eql(u8, arg, "--type-add")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
@@ -412,6 +417,11 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         return error.InvalidFlagCombination;
     }
     if (output_format == .json and (context_before != 0 or context_after != 0)) {
+        return error.InvalidFlagCombination;
+    }
+    if (output.null_path_terminator and (output_format == .json or
+        (report_mode != .files_with_matches and report_mode != .files_without_match)))
+    {
         return error.InvalidFlagCombination;
     }
 
@@ -1046,6 +1056,11 @@ fn writeJsonPathEvent(writer: *std.Io.Writer, path: []const u8, matched: bool) !
     try writer.print(",\"matched\":{s}}}\n", .{if (matched) "true" else "false"});
 }
 
+fn writePathResult(writer: *std.Io.Writer, path: []const u8, output: OutputOptions) !void {
+    try writer.writeAll(path);
+    try writer.writeByte(if (output.null_path_terminator) 0 else '\n');
+}
+
 fn writeReport(
     writer: *std.Io.Writer,
     report: zigrep.search.grep.MatchReport,
@@ -1331,8 +1346,8 @@ fn writeFileOutput(
             context_after,
         ),
         .count => writeFileCount(allocator, writer, searcher, path, bytes, encoding, output, output_format, max_count),
-        .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding, output_format),
-        .files_without_match => writeFilePathWithoutMatch(allocator, writer, searcher, path, bytes, encoding, output_format),
+        .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding, output, output_format),
+        .files_without_match => writeFilePathWithoutMatch(allocator, writer, searcher, path, bytes, encoding, output, output_format),
     };
 }
 
@@ -1443,12 +1458,13 @@ fn writeFilePathOnMatch(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
+    output: OutputOptions,
     output_format: OutputFormat,
 ) !bool {
     const report = try reportFileMatch(allocator, searcher, path, bytes, encoding) orelse return false;
     defer report.deinit(allocator);
     switch (output_format) {
-        .text => try writer.print("{s}\n", .{path}),
+        .text => try writePathResult(writer, path, output),
         .json => try writeJsonPathEvent(writer, path, true),
     }
     return true;
@@ -1461,6 +1477,7 @@ fn writeFilePathWithoutMatch(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
+    output: OutputOptions,
     output_format: OutputFormat,
 ) !bool {
     const report = try reportFileMatch(allocator, searcher, path, bytes, encoding);
@@ -1469,7 +1486,7 @@ fn writeFilePathWithoutMatch(
         return false;
     }
     switch (output_format) {
-        .text => try writer.print("{s}\n", .{path}),
+        .text => try writePathResult(writer, path, output),
         .json => try writeJsonPathEvent(writer, path, false),
     }
     return true;
@@ -1610,6 +1627,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\                        print only non-matching file paths
         \\  -o, --only-matching   print only the matched text
         \\  --json                emit newline-delimited JSON events
+        \\  --null                emit NUL-delimited paths in file path output modes
         \\  -H, --with-filename   always print the file path
         \\  --no-filename         suppress the file path prefix
         \\  -n, --line-number     print line numbers
@@ -1684,6 +1702,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(opts.output.line_number);
             try testing.expect(opts.output.column_number);
             try testing.expect(!opts.output.only_matching);
+            try testing.expect(!opts.output.null_path_terminator);
             try testing.expectEqual(OutputFormat.text, opts.output_format);
             try testing.expectEqual(ReportMode.lines, opts.report_mode);
         },
@@ -1969,6 +1988,25 @@ test "parseArgs accepts json output flag" {
     }
 }
 
+test "parseArgs accepts null output flag for path modes" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--null", "-l", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.output.null_path_terminator);
+            try testing.expectEqual(ReportMode.files_with_matches, opts.report_mode);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
 test "parseArgs accepts ignore-case and smart-case flags" {
     const testing = std.testing;
 
@@ -2089,6 +2127,18 @@ test "parseArgs rejects invalid numeric flags" {
         "--json",
         "-C",
         "1",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--null",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--json",
+        "--null",
+        "-l",
         "needle",
     }));
 }
@@ -2996,6 +3046,62 @@ test "runCli files-without-match mode prints only non-matching file paths" {
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt\n"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "two.txt\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli null mode emits NUL-delimited matching paths" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "two.txt",
+        .data = "skip\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--null", "--files-with-matches", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt"));
+    try testing.expect(std.mem.indexOfScalar(u8, run.stdout, 0) != null);
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli null mode emits NUL-delimited non-matching paths" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "two.txt",
+        .data = "skip\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--null", "--files-without-match", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "two.txt"));
+    try testing.expect(std.mem.indexOfScalar(u8, run.stdout, 0) != null);
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 

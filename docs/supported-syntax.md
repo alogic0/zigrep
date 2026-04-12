@@ -76,6 +76,7 @@ The current CLI supports:
 - Non-matching-file output with `-L` or `--files-without-match`
 - Match-only output with `-o` or `--only-matching`
 - Newline-delimited JSON output with `--json`
+- NUL-delimited path output with `--null` for file-path reporting modes
 - Output toggles with `-H`/`--with-filename`, `--no-filename`, `-n`/`--line-number`, `--no-line-number`, `--column`, and `--no-column`
 - `--` to terminate flag parsing
 
@@ -104,6 +105,12 @@ Context mode note:
 - `--files-with-matches` and `--files-without-match` emit `path` events
 - displayed line content uses the same escaping rules as text output, including `\xNN` escapes for invalid or unsafe bytes
 - this is a smaller event schema than ripgrep's full JSON format
+
+`--null` note:
+
+- `--null` currently applies to `--files-with-matches` and `--files-without-match`
+- those modes emit matching or non-matching file paths terminated with `\0` instead of `\n`
+- `--null` is currently rejected with normal line output, count output, context output, and `--json`
 
 For non-technical users:
 

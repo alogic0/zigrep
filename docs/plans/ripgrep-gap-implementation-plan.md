@@ -89,8 +89,9 @@ ecosystem features.
 - [ ] Add heading / grouped file output.
   ripgrep supports heading-style output and related formatting aliases.
 
-- [ ] Add NUL-delimited path output where appropriate (`--null` style support).
-  This matters for safe scripting with unusual file names.
+- [x] Add NUL-delimited path output where appropriate (`--null` style support).
+  `zigrep` now supports `--null` for file-path reporting modes, emitting
+  NUL-delimited paths for safe scripting.
 
 - [x] Add JSON output.
   `zigrep` now supports newline-delimited JSON events via `--json` for
@@ -195,7 +196,7 @@ ecosystem features.
 - [ ] 4. Add glob filtering and richer ignore controls.
 - [ ] 5. Add case-insensitive / smart-case search.
 - [x] 6. Add file type filters.
-- [ ] 7. Add JSON output and NUL-delimited path output.
+- [x] 7. Add JSON output and NUL-delimited path output.
 - [ ] 8. Revisit binary-mode parity and explicit raw-byte input modes.
 - [ ] 9. Decide whether multiline search is worth the complexity.
 - [ ] 10. Only then consider compressed search, preprocessors, or richer regex
