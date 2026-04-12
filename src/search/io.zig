@@ -9,6 +9,7 @@ pub const InputEncoding = enum {
     auto,
     none,
     utf8,
+    latin1,
     utf16le,
     utf16be,
 };
@@ -134,6 +135,7 @@ pub fn decodeToUtf8Alloc(
         .auto => try decodeBomToUtf8Alloc(allocator, bytes),
         .none => null,
         .utf8 => null,
+        .latin1 => try decodeLatin1ToUtf8Alloc(allocator, bytes),
         .utf16le => try decodeUtf16ToUtf8Alloc(allocator, bytes, .little),
         .utf16be => try decodeUtf16ToUtf8Alloc(allocator, bytes, .big),
     };
@@ -217,6 +219,32 @@ fn decodeUtf16BomToUtf8Alloc(
 ) DecodeError![]u8 {
     const body = bytes[2..];
     return decodeUtf16UnitsToUtf8Alloc(allocator, body, endian);
+}
+
+fn decodeLatin1ToUtf8Alloc(
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+) DecodeError![]u8 {
+    var utf8_len: usize = 0;
+    for (bytes) |byte| {
+        utf8_len += if (byte < 0x80) 1 else 2;
+    }
+
+    const out = try allocator.alloc(u8, utf8_len);
+    errdefer allocator.free(out);
+
+    var write_index: usize = 0;
+    for (bytes) |byte| {
+        if (byte < 0x80) {
+            out[write_index] = byte;
+            write_index += 1;
+        } else {
+            out[write_index] = 0xC0 | (byte >> 6);
+            out[write_index + 1] = 0x80 | (byte & 0x3F);
+            write_index += 2;
+        }
+    }
+    return out;
 }
 
 fn decodeUtf16ToUtf8Alloc(
@@ -344,6 +372,15 @@ test "explicit UTF-16 decoder converts BOM and non-BOM inputs to UTF-8" {
     try testing.expectEqualStrings("hi", decoded_le_bom);
 
     try testing.expect((try decodeToUtf8Alloc(testing.allocator, "plain text", .utf8)) == null);
+}
+
+test "latin1 decoder converts bytes to UTF-8" {
+    const testing = std.testing;
+
+    const decoded = (try decodeToUtf8Alloc(testing.allocator, "caf\xe9", .latin1)).?;
+    defer testing.allocator.free(decoded);
+
+    try testing.expectEqualStrings("café", decoded);
 }
 
 test "buffered I/O reads whole files into owned buffers" {

@@ -1857,6 +1857,7 @@ fn parseEncoding(arg: []const u8) CliError!zigrep.search.io.InputEncoding {
     if (std.ascii.eqlIgnoreCase(arg, "auto")) return .auto;
     if (std.ascii.eqlIgnoreCase(arg, "none")) return .none;
     if (std.ascii.eqlIgnoreCase(arg, "utf8")) return .utf8;
+    if (std.ascii.eqlIgnoreCase(arg, "latin1")) return .latin1;
     if (std.ascii.eqlIgnoreCase(arg, "utf16le")) return .utf16le;
     if (std.ascii.eqlIgnoreCase(arg, "utf16be")) return .utf16be;
     return error.InvalidFlagValue;
@@ -1897,7 +1898,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -g, --glob GLOB       include or exclude paths by glob
         \\  --buffered            use the simpler file-reading method
         \\  --mmap                use the faster file-reading method when possible
-        \\  -E, --encoding ENC    force input encoding: auto, none, utf8, utf16le, utf16be
+        \\  -E, --encoding ENC    force input encoding: auto, none, utf8, latin1, utf16le, utf16be
         \\  -j, --threads N       use up to N worker threads
         \\  --max-depth N         limit recursive walk depth
         \\  -A, --after-context N
@@ -2295,6 +2296,22 @@ test "parseArgs accepts raw-byte encoding mode" {
     }
 }
 
+test "parseArgs accepts latin1 encoding mode" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-E", "latin1", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| try testing.expectEqual(zigrep.search.io.InputEncoding.latin1, opts.encoding),
+        .help, .version, .type_list => unreachable,
+    }
+}
+
 test "parseArgs accepts null output flag for path modes" {
     const testing = std.testing;
 
@@ -2480,7 +2497,7 @@ test "parseArgs rejects invalid numeric flags" {
     try testing.expectError(error.InvalidFlagValue, parseArgs(testing.allocator, &.{
         "zigrep",
         "--encoding",
-        "latin1",
+        "latin2",
         "needle",
     }));
     try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
@@ -4612,6 +4629,37 @@ test "runCli can force UTF-16BE decoding without a BOM" {
 
     try testing.expectEqual(@as(u8, 0), forced_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "utf16be-no-bom.txt:1:1:needle"));
+}
+
+test "runCli can force latin1 decoding" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "latin1.txt",
+        .data = "caf\xe9 needle\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const default_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "café", root_path });
+    defer default_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), default_run.exit_code);
+
+    const forced_run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-E",
+        "latin1",
+        "café",
+        root_path,
+    });
+    defer forced_run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), forced_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "latin1.txt:1:1:café needle"));
 }
 
 test "reportFileMatch only owns line bytes for transformed haystacks" {

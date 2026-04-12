@@ -201,7 +201,7 @@ Current `--text` note:
 Encoding note:
 
 - `-E auto` is the default and allows BOM-based UTF-16 decoding
-- `-E utf8`, `-E utf16le`, and `-E utf16be` force those decode paths
+- `-E utf8`, `-E latin1`, `-E utf16le`, and `-E utf16be` force those decode paths
 - `-E none` treats input as raw bytes and bypasses decode/transcode handling
 - explicit non-`auto` encodings also bypass the default binary-file skip check tied to auto-detection
 

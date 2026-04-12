@@ -146,8 +146,10 @@ ecosystem features.
   bypasses decode/transcode handling and binary-file skipping tied to
   auto-detection.
 
-- [ ] Expand encoding coverage beyond UTF-8 / UTF-16 if this project wants real
+- [x] Expand encoding coverage beyond UTF-8 / UTF-16 if this project wants real
   ripgrep-like text-encoding breadth.
+  `zigrep` now supports `latin1` as the first explicit single-byte text
+  encoding beyond UTF-8 and UTF-16.
 
 - [ ] Revisit binary detection behavior under mmap vs buffered reads.
   ripgrep documents subtle differences here; `zigrep` should decide whether to
