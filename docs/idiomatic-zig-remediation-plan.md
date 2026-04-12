@@ -51,7 +51,7 @@ encoding behavior without rewriting the whole architecture around generic
 - [x] Add more regression tests around invalid UTF-8 under default mode and `--text`
 - [x] Add more regression tests around binary-file heuristics
 - [ ] Design a true byte-oriented search path
-- [ ] Define regex semantics for invalid UTF-8 input
+- [x] Define regex semantics for invalid UTF-8 input
 - [x] Add BOM detection
 - [x] Add UTF-16LE and UTF-16BE decoding support
 - [x] Add explicit encoding configuration
@@ -114,3 +114,9 @@ encoding behavior without rewriting the whole architecture around generic
 - The CLI now escapes invalid bytes and unsafe control bytes in displayed match
   lines, so `--text` output stays readable even when the underlying file bytes
   are not safe to print directly.
+- The current invalid-UTF-8 fallback semantics are now documented explicitly,
+  including which regex constructs observe the temporary `?` placeholder during
+  `--text` matching and how output still maps back to the original bytes.
+- `--text` now has a first true byte-oriented path for exact ASCII literal
+  patterns on invalid UTF-8 input, which reduces reliance on the lossy retry
+  for the simplest and most common search case.

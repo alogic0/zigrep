@@ -565,6 +565,10 @@ fn reportFileMatch(
 
     return searcher.reportFirstMatch(path, bytes) catch |err| switch (err) {
         error.InvalidUtf8 => if (!allow_lossy_invalid_utf8) null else {
+            if (searcher.reportFirstByteLiteralMatch(path, bytes)) |report| {
+                return report;
+            }
+
             const sanitized = try sanitizeInvalidUtf8Lossy(allocator, bytes);
             defer allocator.free(sanitized);
             if (try searcher.reportFirstMatch(path, sanitized)) |report| {
@@ -580,6 +584,11 @@ fn reportFileMatch(
 }
 
 fn sanitizeInvalidUtf8Lossy(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    // Temporary invalid-UTF-8 semantics:
+    // for non-literal patterns, replace each decoding-breaking byte with '?'
+    // so the current UTF-8 regex engine can retry the match. Exact ASCII
+    // literals use a byte-oriented fallback before this lossy path. Printed
+    // reports still come from the original file bytes.
     var sanitized = try allocator.alloc(u8, bytes.len);
     var read_index: usize = 0;
     var write_index: usize = 0;
@@ -1187,6 +1196,37 @@ test "runCli text mode retries invalid UTF-8 files through lossy sanitizing" {
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "bad.bin:1:4:xx\\xFFneedleyy"));
     try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli text mode lets dot match a temporary invalid-byte placeholder" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "dot.bin",
+        .data = "a\xffb\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "a.b", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "dot.bin:1:1:a\\xFFb"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "sanitizeInvalidUtf8Lossy replaces isolated invalid bytes with question marks" {
+    const testing = std.testing;
+
+    const sanitized = try sanitizeInvalidUtf8Lossy(testing.allocator, "a\xffb");
+    defer testing.allocator.free(sanitized);
+
+    try testing.expectEqualStrings("a?b", sanitized);
 }
 
 test "runCli default mode still searches invalid UTF-8 files classified as text" {

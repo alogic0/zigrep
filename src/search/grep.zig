@@ -34,6 +34,7 @@ pub const Searcher = struct {
     allocator: std.mem.Allocator,
     engine: regex.Vm.MatchEngine,
     program: regex.Nfa.Program,
+    exact_literal: ?[]u8,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -49,10 +50,15 @@ pub const Searcher = struct {
             .allocator = allocator,
             .engine = regex.Vm.MatchEngine.init(allocator),
             .program = try regex.Nfa.compile(allocator, hir),
+            .exact_literal = switch (hir.fast_path) {
+                .exact_literal => |bytes| if (std.unicode.utf8ValidateSlice(bytes)) try allocator.dupe(u8, bytes) else null,
+                else => null,
+            },
         };
     }
 
     pub fn deinit(self: *Searcher) void {
+        if (self.exact_literal) |bytes| self.allocator.free(bytes);
         self.program.deinit(self.allocator);
     }
 
@@ -63,6 +69,15 @@ pub const Searcher = struct {
             return buildReport(path, haystack, match.span);
         }
         return null;
+    }
+
+    pub fn reportFirstByteLiteralMatch(self: *Searcher, path: []const u8, haystack: []const u8) ?MatchReport {
+        const literal = self.exact_literal orelse return null;
+        const start = std.mem.indexOf(u8, haystack, literal) orelse return null;
+        return buildReport(path, haystack, .{
+            .start = start,
+            .end = start + literal.len,
+        });
     }
 };
 
@@ -146,6 +161,33 @@ test "reportFirstMatch rejects unsupported case-insensitive search for now" {
         "ABC",
         .{ .case_insensitive = true },
     ));
+}
+
+test "Searcher can report exact literal matches on invalid UTF-8 through byte fallback" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "needle", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteLiteralMatch("sample.bin", "xx\xffneedleyy").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("sample.bin", report.path);
+    try testing.expectEqual(@as(usize, 1), report.line_number);
+    try testing.expectEqual(@as(usize, 4), report.column_number);
+    try testing.expectEqualStrings("xx\xffneedleyy", report.line);
+    try testing.expect(report.owned_line == null);
+    try testing.expectEqual(Span{ .start = 0, .end = 11 }, report.line_span);
+    try testing.expectEqual(Span{ .start = 3, .end = 9 }, report.match_span);
+}
+
+test "Searcher byte fallback is limited to exact literal patterns" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a.b", .{});
+    defer searcher.deinit();
+
+    try testing.expect(searcher.reportFirstByteLiteralMatch("sample.bin", "a\xffb") == null);
 }
 
 test "reportFirstMatch stays aligned across buffered and mmap file reads" {
