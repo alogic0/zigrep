@@ -228,6 +228,15 @@ Config note:
 - config files are line-oriented: each non-empty, non-comment line becomes one extra CLI argument
 - config arguments are prepended before command-line arguments, so later CLI flags still override config defaults
 
+Status and warning note:
+
+- exit code `0` means at least one match was found
+- exit code `1` means no matches were found
+- exit code `2` means a fatal CLI or runtime error stopped the search
+- non-fatal file and directory skips remain warnings on stderr and do not change the grep-style `0` or `1` result
+- `--stats` now includes `warnings_emitted` alongside the existing search counters
+- compressed-input and preprocessor skips use readable warning text instead of raw internal error names
+
 `--binary` note:
 
 - `--binary` searches binary files but suppresses matching line content

@@ -189,7 +189,10 @@ ecosystem features.
   environment-driven config via `ZIGREP_CONFIG_PATH`, with CLI flags applied
   afterward so they still win.
 
-- [ ] Add better exit/status and warning behavior around new modes as they land.
+- [x] Add better exit/status and warning behavior around new modes as they land.
+  `zigrep` now keeps grep-style exit codes while counting emitted warnings in
+  `--stats` and using clearer warning text for compressed-input and
+  preprocessor failures.
 
 - [ ] Expand end-to-end CLI tests to cover flag interactions, not just isolated
   features.

@@ -99,12 +99,14 @@ const SearchStats = struct {
     matched_files: usize = 0,
     searched_bytes: usize = 0,
     skipped_binary_files: usize = 0,
+    warnings_emitted: usize = 0,
 
     fn add(self: *SearchStats, other: SearchStats) void {
         self.searched_files += other.searched_files;
         self.matched_files += other.matched_files;
         self.searched_bytes += other.searched_bytes;
         self.skipped_binary_files += other.skipped_binary_files;
+        self.warnings_emitted += other.warnings_emitted;
     }
 };
 
@@ -604,11 +606,14 @@ fn searchPath(
     options: CliOptions,
     type_matcher: zigrep.search.types.Matcher,
 ) !SearchResult {
+    var traversal_warning_count: usize = 0;
     const TraversalWarningHandler = struct {
         writer: *std.Io.Writer,
+        count: *usize,
 
         pub fn warn(self: @This(), path: []const u8, err: anyerror) void {
-            self.writer.print("warning: skipping directory {s}: {s}\n", .{ path, @errorName(err) }) catch {};
+            self.writer.print("warning: skipping directory {s}: {s}\n", .{ path, warningMessage(err) }) catch {};
+            self.count.* += 1;
         }
     };
 
@@ -616,7 +621,7 @@ fn searchPath(
         .include_hidden = options.include_hidden,
         .follow_symlinks = options.follow_symlinks,
         .max_depth = options.max_depth,
-    }, TraversalWarningHandler{ .writer = stderr });
+    }, TraversalWarningHandler{ .writer = stderr, .count = &traversal_warning_count });
     defer {
         for (entries) |entry| entry.deinit(allocator);
         allocator.free(entries);
@@ -640,10 +645,12 @@ fn searchPath(
     const schedule = zigrep.search.schedule.plan(filtered_entries.len, .{
         .requested_jobs = options.parallel_jobs,
     });
-    if (schedule.parallel) {
-        return searchEntriesParallel(stdout, stderr, filtered_entries, options, schedule);
-    }
-    return searchEntriesSequential(allocator, stdout, stderr, filtered_entries, options);
+    var result = if (schedule.parallel)
+        try searchEntriesParallel(stdout, stderr, filtered_entries, options, schedule)
+    else
+        try searchEntriesSequential(allocator, stdout, stderr, filtered_entries, options);
+    result.stats.warnings_emitted += traversal_warning_count;
+    return result;
 }
 
 const LoadedIgnore = struct {
@@ -865,7 +872,10 @@ fn searchEntriesSequential(
                 .text => break :blk false,
                 .skip, .suppress => {
                     const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
-                        if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
+                        if (try warnAndSkipFileError(stderr, entry.path, err)) {
+                            result.stats.warnings_emitted += 1;
+                            continue;
+                        }
                         return err;
                     };
                     if (decision == .binary) {
@@ -883,12 +893,18 @@ fn searchEntriesSequential(
         const buffer = zigrep.search.io.readFile(file_allocator, entry.path, .{
             .strategy = options.read_strategy,
         }) catch |err| {
-            if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
+            if (try warnAndSkipFileError(stderr, entry.path, err)) {
+                result.stats.warnings_emitted += 1;
+                continue;
+            }
             return err;
         };
         defer buffer.deinit(file_allocator);
         const search_bytes = prepareSearchBytes(file_allocator, entry.path, buffer.bytes(), options) catch |err| {
-                if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
+                if (try warnAndSkipFileError(stderr, entry.path, err)) {
+                    result.stats.warnings_emitted += 1;
+                    continue;
+                }
                 return err;
             };
         const effective_binary_output = if (options.search_compressed or options.preprocessor != null)
@@ -968,6 +984,7 @@ fn searchEntriesParallel(
         next_index: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
         result_reports: []?StoredOutput,
         first_error: ?anyerror = null,
+        warning_count: usize = 0,
         error_mutex: std.Thread.Mutex = .{},
         warning_mutex: std.Thread.Mutex = .{},
 
@@ -1098,7 +1115,9 @@ fn searchEntriesParallel(
         fn warnAndSkip(self: *@This(), path: []const u8, err: anyerror) !bool {
             self.warning_mutex.lock();
             defer self.warning_mutex.unlock();
-            return warnAndSkipFileError(self.stderr, path, err);
+            const skipped = try warnAndSkipFileError(self.stderr, path, err);
+            if (skipped) self.warning_count += 1;
+            return skipped;
         }
     };
 
@@ -1135,6 +1154,7 @@ fn searchEntriesParallel(
     }
 
     var result: SearchResult = .{ .matched = false };
+    result.stats.warnings_emitted += context.warning_count;
     var wrote_heading_group = false;
     for (result_reports) |maybe_report| {
         if (maybe_report) |report| {
@@ -1258,8 +1278,8 @@ fn writePathResult(writer: *std.Io.Writer, path: []const u8, output: OutputOptio
 
 fn writeStats(writer: *std.Io.Writer, stats: SearchStats) !void {
     try writer.print(
-        "stats: searched_files={d} matched_files={d} searched_bytes={d} skipped_binary_files={d}\n",
-        .{ stats.searched_files, stats.matched_files, stats.searched_bytes, stats.skipped_binary_files },
+        "stats: searched_files={d} matched_files={d} searched_bytes={d} skipped_binary_files={d} warnings_emitted={d}\n",
+        .{ stats.searched_files, stats.matched_files, stats.searched_bytes, stats.skipped_binary_files, stats.warnings_emitted },
     );
 }
 
@@ -1316,8 +1336,23 @@ fn writeReport(
 
 fn warnAndSkipFileError(writer: *std.Io.Writer, path: []const u8, err: anyerror) !bool {
     if (!shouldWarnAndSkipFileError(err)) return false;
-    try writer.print("warning: skipping {s}: {s}\n", .{ path, @errorName(err) });
+    try writer.print("warning: skipping {s}: {s}\n", .{ path, warningMessage(err) });
     return true;
+}
+
+fn warningMessage(err: anyerror) []const u8 {
+    return switch (err) {
+        error.FileNotFound => "file not found",
+        error.AccessDenied => "access denied",
+        error.NotDir => "not a directory",
+        error.NameTooLong => "name too long",
+        error.SymLinkLoop => "symlink loop",
+        error.InvalidCompressedInput => "invalid compressed input",
+        error.PreprocessorFailed => "preprocessor exited with non-zero status",
+        error.PreprocessorSignaled => "preprocessor terminated by signal",
+        error.PreprocessorTooMuchOutput => "preprocessor output exceeded limit",
+        else => @errorName(err),
+    };
 }
 
 fn shouldWarnAndSkipFileError(err: anyerror) bool {
@@ -3907,6 +3942,7 @@ test "runCli stats mode prints search summary to stderr" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "stats: searched_files=2"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "matched_files=1"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "skipped_binary_files=1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "warnings_emitted=0"));
 }
 
 test "runCli heading mode groups matches by file" {
@@ -4079,8 +4115,9 @@ test "searchEntriesSequential warns and skips unreadable files" {
 
     try testing.expect(!result.matched);
     try testing.expectEqual(@as(usize, 0), result.stats.searched_files);
+    try testing.expectEqual(@as(usize, 1), result.stats.warnings_emitted);
     try testing.expectEqualStrings("", stdout_capture.written());
-    try testing.expect(std.mem.containsAtLeast(u8, stderr_capture.written(), 1, "warning: skipping missing-file-for-zigrep-test: FileNotFound\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, stderr_capture.written(), 1, "warning: skipping missing-file-for-zigrep-test: file not found\n"));
 }
 
 test "search scheduler keeps tiny workloads on the sequential path" {
@@ -4296,6 +4333,29 @@ test "runCli compressed search mode finds matches in gzip files" {
     try testing.expect(std.mem.containsAtLeast(u8, zip_run.stdout, 1, "sample.txt.gz:1:1:Hello world"));
 }
 
+test "runCli compressed search warns and skips invalid compressed input" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "bad.txt.gz",
+        .data = "\x1f\x8bbad",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-z", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 1), run.exit_code);
+    try testing.expectEqualStrings("", run.stdout);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "warning: skipping "));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "invalid compressed input\n"));
+}
+
 test "runCli preprocessor transforms matching files selected by pre-glob" {
     const testing = std.testing;
 
@@ -4352,6 +4412,48 @@ test "runCli preprocessor transforms matching files selected by pre-glob" {
     try testing.expectEqual(@as(u8, 0), pre_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, pre_run.stdout, 1, "sample.wrapped:1:1:needle from pre"));
     try testing.expect(!std.mem.containsAtLeast(u8, pre_run.stdout, 1, "plain.txt"));
+}
+
+test "runCli preprocessor failure warns and skips the file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "fail.sh",
+        .data = "#!/bin/sh\nexit 3\n",
+    });
+
+    var script = try tmp.dir.openFile("fail.sh", .{ .mode = .read_write });
+    defer script.close();
+    try script.chmod(0o755);
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const script_path = try std.fs.path.join(testing.allocator, &.{ root_path, "fail.sh" });
+    defer testing.allocator.free(script_path);
+    const pre_command = try std.fmt.allocPrint(testing.allocator, "/bin/sh {s}", .{script_path});
+    defer testing.allocator.free(pre_command);
+
+    const run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-j",
+        "1",
+        "--pre",
+        pre_command,
+        "needle",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 1), run.exit_code);
+    try testing.expectEqualStrings("", run.stdout);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "preprocessor exited with non-zero status\n"));
 }
 
 test "runCli skips invalid UTF-8 files instead of aborting the whole search" {
