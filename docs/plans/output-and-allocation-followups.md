@@ -21,8 +21,9 @@ Reduce avoidable runtime overhead in output-heavy and allocation-heavy paths wit
   Keep the buffered path only if it produces a meaningful improvement on realistic workloads.
   The buffered path improved the added high-match benchmark rows in both sequential and parallel modes.
 
-- [ ] Audit temporary string and buffer allocations in the reporting path.
+- [x] Audit temporary string and buffer allocations in the reporting path.
   Identify where `formatReport`, captured parallel output, decoded text buffers, or line ownership still allocate more than necessary.
+  The current audit is recorded in `docs/tmp/output-allocation-audit.md`, and `formatReport` no longer duplicates its formatted buffer.
 
 - [ ] Separate required allocations from convenience allocations in the current search/output path.
   Document which allocations are structurally required for correctness or lifetime reasons and which ones are candidates for removal.

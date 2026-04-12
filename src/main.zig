@@ -614,7 +614,8 @@ fn formatReport(
     var buffer: std.Io.Writer.Allocating = .init(allocator);
     defer buffer.deinit();
     try writeReport(&buffer.writer, report, output);
-    return try allocator.dupe(u8, buffer.written());
+    var array_list = buffer.toArrayList();
+    return try array_list.toOwnedSlice(allocator);
 }
 
 fn writeDisplayLine(writer: *std.Io.Writer, bytes: []const u8) !void {
