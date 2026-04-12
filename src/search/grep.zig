@@ -132,6 +132,32 @@ pub const Searcher = struct {
         return null;
     }
 
+    pub fn forEachLineReport(
+        self: *Searcher,
+        path: []const u8,
+        haystack: []const u8,
+        context: anytype,
+        comptime emit: fn (@TypeOf(context), MatchReport) anyerror!void,
+    ) anyerror!bool {
+        var offset: usize = 0;
+        var matched = false;
+
+        while (offset <= haystack.len) {
+            const result = (try self.firstMatchFrom(haystack, offset)) orelse break;
+            defer result.match.deinit(self.allocator);
+
+            const report = buildReport(path, haystack, result.match.span);
+            try emit(context, report);
+            matched = true;
+
+            const next_offset = nextLineSearchOffset(haystack, report.line_span.end);
+            if (next_offset <= offset) break;
+            offset = next_offset;
+        }
+
+        return matched;
+    }
+
     pub fn firstByteMatch(self: *Searcher, haystack: []const u8) regex.Vm.MatchError!?regex.Vm.Match {
         if (self.byte_plan == .none or bytePlanNeedsGeneralVm(self.byte_plan)) {
             return self.engine.firstMatchBytes(self.program, haystack);
@@ -187,6 +213,25 @@ pub const Searcher = struct {
             .none => false,
             .single, .alternation => true,
         };
+    }
+
+    const FirstMatchResult = struct {
+        match: regex.Vm.Match,
+    };
+
+    fn firstMatchFrom(self: *Searcher, haystack: []const u8, offset: usize) SearchError!?FirstMatchResult {
+        if (offset > haystack.len) return null;
+
+        const slice = haystack[offset..];
+        const found = self.engine.firstMatch(self.program, slice) catch |err| switch (err) {
+            error.InvalidUtf8 => try self.firstByteMatch(slice),
+            else => return err,
+        } orelse return null;
+
+        var adjusted = found;
+        addOffsetToCapture(&adjusted.span, offset);
+        for (adjusted.groups) |*group| addOffsetToCapture(group, offset);
+        return .{ .match = adjusted };
     }
 };
 
@@ -253,6 +298,16 @@ fn expectInvalidUtf8MatchSpan(pattern: []const u8, haystack: []const u8, expecte
         .start = found.span.start.?,
         .end = found.span.end.?,
     });
+}
+
+fn addOffsetToCapture(capture: *regex.Vm.Capture, offset: usize) void {
+    if (capture.start) |start| capture.start = start + offset;
+    if (capture.end) |end| capture.end = end + offset;
+}
+
+fn nextLineSearchOffset(haystack: []const u8, line_end: usize) usize {
+    if (line_end < haystack.len and haystack[line_end] == '\n') return line_end + 1;
+    return line_end;
 }
 
 fn bytePlanNeedsGeneralVm(plan: ByteSearchPlan) bool {
@@ -1317,6 +1372,38 @@ test "reportFirstMatch returns line-oriented match data" {
     try testing.expect(report.owned_line == null);
     try testing.expectEqual(Span{ .start = 11, .end = 19 }, report.line_span);
     try testing.expectEqual(Span{ .start = 14, .end = 17 }, report.match_span);
+}
+
+test "Searcher forEachLineReport emits every matching line once" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "needle", .{});
+    defer searcher.deinit();
+
+    var lines: std.ArrayList([]const u8) = .empty;
+    defer lines.deinit(testing.allocator);
+
+    const Collector = struct {
+        lines: *std.ArrayList([]const u8),
+
+        fn emit(self: *@This(), report: MatchReport) !void {
+            try self.lines.append(testing.allocator, report.line);
+        }
+    };
+
+    var collector = Collector{ .lines = &lines };
+    const matched = try searcher.forEachLineReport(
+        "sample.txt",
+        "needle one\nskip\nneedle two\nneedle needle\n",
+        &collector,
+        Collector.emit,
+    );
+
+    try testing.expect(matched);
+    try testing.expectEqual(@as(usize, 3), lines.items.len);
+    try testing.expectEqualStrings("needle one", lines.items[0]);
+    try testing.expectEqualStrings("needle two", lines.items[1]);
+    try testing.expectEqualStrings("needle needle", lines.items[2]);
 }
 
 test "reportFirstMatch handles matches on the first line" {

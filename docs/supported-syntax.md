@@ -88,7 +88,7 @@ Current `--text` note:
 - literal-only UTF-8 classes like `[ж]`, negated literal-only UTF-8 classes like `[^ж]`, small positive UTF-8 ranges like `[а-я]`, negated small UTF-8 ranges like `[^а-я]`, larger Unicode ranges like `[Ā-ӿ]`, `[^Ā-ӿ]`, or `[Ā-ӿ]+`, bare anchors like `^` or `$`, grouped alternation branches that use those anchored forms, and anchored grouped patterns like `(^ab)+c` are covered by that planner too while keeping normal anchor semantics; the remaining misses are broader regex shapes that still fall outside the planner
 - when a reported line contains invalid bytes or unsafe control bytes, the CLI prints those bytes as `\xNN` escapes instead of sending them raw to the terminal
 - this is still not full ripgrep-compatible encoding behavior
-- the exact current rules are documented in [docs/invalid-utf8-semantics.md](/home/oleg/prog/zigrep/docs/invalid-utf8-semantics.md)
+- the exact current rules are documented in [docs/invalid-utf8-semantics.md](invalid-utf8-semantics.md)
 
 Output is line-oriented. When enabled, prefixes are emitted in this order:
 

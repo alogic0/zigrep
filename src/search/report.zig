@@ -16,9 +16,8 @@ pub fn deriveLineInfo(haystack: []const u8, offset: usize) LineInfo {
     const line_start = findLineStart(haystack, clamped);
     const line_end = findLineEnd(haystack, clamped);
 
-    // The current CLI reports only the first match per file, so a full line
-    // index is not worth the extra complexity yet. Revisit this if the search
-    // path starts emitting many matches from the same haystack.
+    // The CLI reports matching lines by rescanning from each emitted line, so a
+    // full line index is still not worth the extra complexity yet.
     return .{
         .line_number = countLines(haystack[0..line_start]) + 1,
         .column_number = (clamped - line_start) + 1,

@@ -6,7 +6,7 @@ matcher path.
 
 ## Goal
 
-- [x] Remove `sanitizeInvalidUtf8Lossy(...)` from [src/main.zig](/home/oleg/prog/zigrep/src/main.zig)
+- [x] Remove `sanitizeInvalidUtf8Lossy(...)` from [src/main.zig](../src/main.zig)
 - [x] Stop using the lossy shadow haystack for any regex shape
 - [x] Keep reported output based on the original file bytes
 - [x] Preserve current line/column and capture reporting behavior
@@ -21,7 +21,7 @@ matcher path.
 ### Initial Inventory Status
 
 The initial `hasBytePlan() == false` inventory is pinned down by tests in
-[src/search/grep.zig](/home/oleg/prog/zigrep/src/search/grep.zig), and the
+[src/search/grep.zig](../src/search/grep.zig), and the
 first recorded unsupported shapes have now been closed:
 
 - interior anchors inside concatenations such as `a^b` and `a$b`

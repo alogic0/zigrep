@@ -47,7 +47,7 @@ encoding behavior without rewriting the whole architecture around generic
 
 ## Priority 5: Encoding And Byte-Oriented Search Work
 
-- [x] Keep [docs/rg-binary-encoding-plan.md](/home/oleg/prog/zigrep/docs/rg-binary-encoding-plan.md) as the main long-term roadmap
+- [x] Keep [docs/rg-binary-encoding-plan.md](rg-binary-encoding-plan.md) as the main long-term roadmap
 - [x] Add more regression tests around invalid UTF-8 under default mode and `--text`
 - [x] Add more regression tests around binary-file heuristics
 - [x] Design a true byte-oriented search path

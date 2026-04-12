@@ -313,9 +313,7 @@ fn searchEntriesSequential(
         };
         defer buffer.deinit(file_allocator);
 
-            if (try reportFileMatch(file_allocator, &searcher, entry.path, buffer.bytes(), options.encoding)) |report| {
-            defer report.deinit(file_allocator);
-            try printReport(stdout, report, options.output);
+        if (try writeFileReports(file_allocator, stdout, &searcher, entry.path, buffer.bytes(), options.encoding, options.output)) {
             matched = true;
         }
     }
@@ -337,25 +335,11 @@ fn searchEntriesParallel(
         return searchEntriesSequential(worker_allocator, stdout, stderr, entries, options);
     }
 
-    const StoredReport = struct {
-        path: []const u8,
-        line_number: usize,
-        column_number: usize,
-        line: []u8,
+    const StoredOutput = struct {
+        bytes: []u8,
 
         fn deinit(self: @This()) void {
-            std.heap.smp_allocator.free(self.line);
-        }
-
-        fn asMatchReport(self: @This()) zigrep.search.grep.MatchReport {
-            return .{
-                .path = self.path,
-                .line_number = self.line_number,
-                .column_number = self.column_number,
-                .line = self.line,
-                .line_span = .{ .start = 0, .end = self.line.len },
-                .match_span = .{ .start = 0, .end = 0 },
-            };
+            std.heap.smp_allocator.free(self.bytes);
         }
     };
 
@@ -365,7 +349,7 @@ fn searchEntriesParallel(
         options: CliOptions,
         schedule: zigrep.search.schedule.Plan,
         next_index: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
-        result_reports: []?StoredReport,
+        result_reports: []?StoredOutput,
         first_error: ?anyerror = null,
         error_mutex: std.Thread.Mutex = .{},
         warning_mutex: std.Thread.Mutex = .{},
@@ -426,13 +410,20 @@ fn searchEntriesParallel(
             };
             defer buffer.deinit(file_allocator);
 
-            if (try reportFileMatch(file_allocator, searcher, entry.path, buffer.bytes(), self.options.encoding)) |report| {
-                defer report.deinit(file_allocator);
+            var capture: std.Io.Writer.Allocating = .init(std.heap.smp_allocator);
+            defer capture.deinit();
+
+            if (try writeFileReports(
+                file_allocator,
+                &capture.writer,
+                searcher,
+                entry.path,
+                buffer.bytes(),
+                self.options.encoding,
+                self.options.output,
+            )) {
                 self.result_reports[index] = .{
-                    .path = entry.path,
-                    .line_number = report.line_number,
-                    .column_number = report.column_number,
-                    .line = try std.heap.smp_allocator.dupe(u8, report.line),
+                    .bytes = try std.heap.smp_allocator.dupe(u8, capture.written()),
                 };
             }
         }
@@ -444,7 +435,7 @@ fn searchEntriesParallel(
         }
     };
 
-    const result_reports = try worker_allocator.alloc(?StoredReport, entries.len);
+    const result_reports = try worker_allocator.alloc(?StoredOutput, entries.len);
     defer worker_allocator.free(result_reports);
     @memset(result_reports, null);
 
@@ -480,7 +471,7 @@ fn searchEntriesParallel(
     for (result_reports) |maybe_report| {
         if (maybe_report) |report| {
             defer report.deinit();
-            try writeReport(stdout, report.asMatchReport(), options.output);
+            try stdout.writeAll(report.bytes);
             matched = true;
         }
     }
@@ -544,6 +535,43 @@ fn shouldWarnAndSkipFileError(err: anyerror) bool {
     };
 }
 
+fn writeFileReports(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+    output: OutputOptions,
+) !bool {
+    const WriterContext = struct {
+        allocator: std.mem.Allocator,
+        writer: *std.Io.Writer,
+        output: OutputOptions,
+
+        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
+            if (report.owned_line) |line| {
+                defer self.allocator.free(line);
+            }
+            try writeReport(self.writer, report, self.output);
+        }
+    };
+
+    var context = WriterContext{
+        .allocator = allocator,
+        .writer = writer,
+        .output = .{},
+    };
+    context.output = output;
+
+    if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
+        defer allocator.free(decoded);
+        return searcher.forEachLineReport(path, decoded, &context, WriterContext.emit);
+    }
+
+    return searcher.forEachLineReport(path, bytes, &context, WriterContext.emit);
+}
+
 fn reportFileMatch(
     allocator: std.mem.Allocator,
     searcher: *zigrep.search.grep.Searcher,
@@ -563,12 +591,7 @@ fn reportFileMatch(
         return null;
     }
 
-    return searcher.reportFirstMatch(path, bytes) catch |err| switch (err) {
-        error.InvalidUtf8 => blk: {
-            break :blk try searcher.reportFirstByteMatch(path, bytes);
-        },
-        else => err,
-    };
+    return searcher.reportFirstMatch(path, bytes);
 }
 
 fn formatReport(
@@ -955,6 +978,69 @@ test "runSearch reports matches across files on the parallel path" {
 
     try testing.expectEqual(@as(u8, 0), exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt:1:1:needle two"));
+    try testing.expectEqualStrings("", stderr_capture.written());
+}
+
+test "runCli prints every matching line from one file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data =
+            "needle one\n" ++
+            "skip\n" ++
+            "needle two\n" ++
+            "needle needle\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:3:1:needle two"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:4:1:needle needle"));
+}
+
+test "runSearch parallel path prints every matching line from one file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\nneedle again\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "two.txt",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stdout_capture.deinit();
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    const exit_code = try runSearch(testing.allocator, &stdout_capture.writer, &stderr_capture.writer, .{
+        .pattern = "needle",
+        .paths = &.{root_path},
+        .parallel_jobs = 2,
+    });
+
+    try testing.expectEqual(@as(u8, 0), exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:2:1:needle again"));
     try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt:1:1:needle two"));
     try testing.expectEqualStrings("", stderr_capture.written());
 }
