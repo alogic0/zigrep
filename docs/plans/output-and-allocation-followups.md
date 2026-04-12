@@ -29,20 +29,24 @@ Reduce avoidable runtime overhead in output-heavy and allocation-heavy paths wit
   Document which allocations are structurally required for correctness or lifetime reasons and which ones are candidates for removal.
   The tracked split now lives in [output-allocation-notes.md](../output-allocation-notes.md).
 
-- [ ] Reduce avoidable heap duplication in the parallel output path.
+- [x] Reduce avoidable heap duplication in the parallel output path.
   Check whether the current stored-per-file output chunk can be kept correct while reducing copies or intermediate allocation churn.
+  The worker path now transfers ownership of its captured output buffer directly into the stored result slot instead of duplicating it.
 
-- [ ] Audit exceptional `owned_line` cases again after the multi-match change.
+- [x] Audit exceptional `owned_line` cases again after the multi-match change.
   Confirm that `owned_line` is still only used where a report must outlive a transformed or temporary haystack.
+  The current rule is now restated in [output-allocation-notes.md](../output-allocation-notes.md) and covered by decoded-input reporting tests.
 
-- [ ] Re-run allocator-boundary and output-equivalence tests after any allocation changes.
+- [x] Re-run allocator-boundary and output-equivalence tests after any allocation changes.
   Preserve identical visible output across:
   sequential vs parallel
   buffered vs mmap
   invalid UTF-8 vs normal UTF-8 inputs
+  Mixed-input end-to-end output-equivalence coverage now compares those modes directly.
 
-- [ ] Update docs if buffering or allocation behavior changes in a user-visible way.
+- [x] Update docs if buffering or allocation behavior changes in a user-visible way.
   Keep README and supported-syntax notes aligned with the actual output path behavior.
+  No user-facing CLI semantics changed in this pass; the new buffering is internal and output-equivalence tests keep visible results unchanged.
 
 ## Non-Goals
 

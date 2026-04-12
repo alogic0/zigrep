@@ -15,6 +15,7 @@ This note separates the current search and output allocations into two groups:
 
 - `owned_line` for transformed haystacks
   This is still required when a returned `MatchReport` must outlive a temporary decoded buffer.
+  In the normal multi-match write path, decoded reports are written while the transformed haystack is still alive, so they do not require `owned_line`.
 
 - Search-engine capture and slot allocations
   These occur inside the matcher, not the report formatter, and are part of the current engine design.
@@ -23,9 +24,6 @@ This note separates the current search and output allocations into two groups:
   The current parallel path preserves final output order by storing completed per-file output blobs until flush time. That duplication is intentional today even though it may be reducible.
 
 ## Convenience Costs And Current Reduction Candidates
-
-- Parallel worker `Writer.Allocating` capture plus final `dupe`
-  The current worker path formats into `std.Io.Writer.Allocating` and then duplicates the bytes into `StoredOutput`. This is the strongest remaining output-side duplication candidate.
 
 - `runCliCaptured(...)` test helper duplication
   The helper duplicates captured stdout and stderr so those buffers outlive the temporary writers. This is fine for tests, but it is not production-path zero-copy.
@@ -38,12 +36,15 @@ This note separates the current search and output allocations into two groups:
 - `formatReport(...)` no longer duplicates its formatted buffer after writing into `std.Io.Writer.Allocating`.
   It now transfers ownership of the existing allocation instead of copying it again.
 
+- The parallel worker output path no longer duplicates formatted bytes after capture.
+  It now transfers ownership of the worker-local `Writer.Allocating` buffer directly into the stored output slot.
+
 ## Practical Conclusion
 
 The current search/output path is tighter than earlier revisions:
 
 - sequential search writes reports directly
-- the CLI can use buffered output
+- the CLI search path can use internal buffered output without changing visible results
 - `formatReport(...)` no longer pays an extra copy
 
-The next worthwhile allocation target is the parallel stored-output path rather than the normal sequential formatter.
+The next worthwhile allocation targets are the helper/test duplication paths rather than the main sequential or parallel formatter paths.
