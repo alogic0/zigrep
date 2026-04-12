@@ -35,6 +35,8 @@ const ByteAtom = union(enum) {
     any_byte,
     class: regex.hir.CharacterClass,
     utf8_class: regex.hir.CharacterClass,
+    anchor_start,
+    anchor_end,
     alternation: []BytePattern,
     save_start: u32,
     save_end: u32,
@@ -47,7 +49,7 @@ const ByteAtom = union(enum) {
                 for (patterns) |pattern| pattern.deinit(allocator);
                 allocator.free(patterns);
             },
-            .any_byte, .save_start, .save_end => {},
+            .any_byte, .anchor_start, .anchor_end, .save_start, .save_end => {},
         }
     }
 };
@@ -390,6 +392,12 @@ fn appendNodeToByteTerms(
             try terms.append(allocator, .{ .atom = .{ .save_start = group.index } });
             if (try extractAlternationByteTerm(allocator, nodes, group.child)) |term| {
                 try terms.append(allocator, term);
+            } else if (try extractBytePattern(allocator, nodes, group.child)) |pattern| {
+                if (pattern.mode != .contains) {
+                    pattern.deinit(allocator);
+                    return false;
+                }
+                try appendOwnedPatternTerms(allocator, terms, pattern);
             } else if (!(try appendNodeToByteTerms(allocator, nodes, group.child, terms, literal_bytes))) {
                 return false;
             }
@@ -404,6 +412,16 @@ fn appendNodeToByteTerms(
         .dot => {
             try flushLiteralTerm(allocator, terms, literal_bytes);
             try terms.append(allocator, .{ .atom = .any_byte });
+            return true;
+        },
+        .anchor_start => {
+            try flushLiteralTerm(allocator, terms, literal_bytes);
+            try terms.append(allocator, .{ .atom = .anchor_start });
+            return true;
+        },
+        .anchor_end => {
+            try flushLiteralTerm(allocator, terms, literal_bytes);
+            try terms.append(allocator, .{ .atom = .anchor_end });
             return true;
         },
         .char_class => |class| {
@@ -494,6 +512,8 @@ fn extractRepeatableByteTerm(
             const dup_atom = switch (term.atom) {
                 .literal => |bytes| ByteAtom{ .literal = try allocator.dupe(u8, bytes) },
                 .any_byte => ByteAtom.any_byte,
+                .anchor_start => ByteAtom.anchor_start,
+                .anchor_end => ByteAtom.anchor_end,
                 .class => |class| blk2: {
                     const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
                     @memcpy(duped_items, class.items);
@@ -509,6 +529,8 @@ fn extractRepeatableByteTerm(
             _ = children;
             break :blk dup_atom;
         },
+        .anchor_start => ByteAtom.anchor_start,
+        .anchor_end => ByteAtom.anchor_end,
         .dot => ByteAtom.any_byte,
         .char_class => |class| blk: {
             if (isAsciiClass(class)) {
@@ -659,6 +681,15 @@ fn wrapPatternWithCapture(
         .mode = pattern.mode,
         .terms = wrapped,
     };
+}
+
+fn appendOwnedPatternTerms(
+    allocator: std.mem.Allocator,
+    terms: *std.ArrayList(ByteTerm),
+    pattern: BytePattern,
+) BytePlanError!void {
+    try terms.appendSlice(allocator, pattern.terms);
+    allocator.free(pattern.terms);
 }
 
 fn flushLiteralTerm(
@@ -1049,6 +1080,8 @@ fn matchByteAtomAt(atom: ByteAtom, haystack: []const u8, pos: usize) ?usize {
         else
             null,
         .utf8_class => |class| matchUtf8ClassAt(class, haystack, pos),
+        .anchor_start => if (pos == 0) pos else null,
+        .anchor_end => if (pos == haystack.len) pos else null,
         .alternation => unreachable,
         .save_start, .save_end => pos,
     };
@@ -1062,7 +1095,7 @@ fn matchByteAtomAtWithSlots(
     slots: []?usize,
 ) regex.Vm.MatchError!?usize {
     return switch (atom) {
-        .literal, .any_byte, .class, .utf8_class => matchByteAtomAt(atom, haystack, pos),
+        .literal, .any_byte, .class, .utf8_class, .anchor_start, .anchor_end => matchByteAtomAt(atom, haystack, pos),
         .alternation => |patterns| blk: {
             for (patterns) |pattern| {
                 const snapshot = try cloneSlots(allocator, slots);
@@ -1088,6 +1121,7 @@ fn byteAtomLen(atom: ByteAtom) usize {
     return switch (atom) {
         .literal => |bytes| bytes.len,
         .any_byte, .class, .utf8_class => 1,
+        .anchor_start, .anchor_end => 0,
         .alternation => unreachable,
         .save_start, .save_end => 0,
     };
@@ -1097,6 +1131,7 @@ fn byteAtomMinLen(atom: ByteAtom) usize {
     return switch (atom) {
         .literal => |bytes| bytes.len,
         .any_byte, .class, .utf8_class => 1,
+        .anchor_start, .anchor_end => 0,
         .alternation => |patterns| blk: {
             var min_len: ?usize = null;
             for (patterns) |pattern| {
@@ -1443,12 +1478,12 @@ test "Searcher byte fallback is limited to exact literal patterns" {
 }
 
 test "Searcher byte plan inventory records current unsupported structural shapes" {
-    try expectBytePlan("a^b", false);
-    try expectBytePlan("a$b", false);
-    try expectBytePlan("^+", false);
-    try expectBytePlan("x(ab)y", false);
-    try expectBytePlan("x(a.[0-9]b)y", false);
-    try expectBytePlan("x(^ab)y", false);
+    try expectBytePlan("a^b", true);
+    try expectBytePlan("a$b", true);
+    try expectBytePlan("^+", true);
+    try expectBytePlan("x(ab)y", true);
+    try expectBytePlan("x(a.[0-9]b)y", true);
+    try expectBytePlan("x(^ab)y", true);
 }
 
 test "Searcher byte fallback supports anchored literal start and end patterns" {
@@ -1468,6 +1503,35 @@ test "Searcher byte fallback supports anchored literal start and end patterns" {
     defer full_searcher.deinit();
     try testing.expect(full_searcher.reportFirstByteMatch("full.bin", "needle") != null);
     try testing.expect(full_searcher.reportFirstByteMatch("full.bin", "needle\xff") == null);
+}
+
+test "Searcher byte fallback supports quantified bare start anchors" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "^+", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstByteMatch("anchor.bin", "\xffabc")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 0 }, report.match_span);
+}
+
+test "Searcher byte fallback preserves impossible interior anchor semantics" {
+    const testing = std.testing;
+
+    var start_searcher = try Searcher.init(testing.allocator, "a^b", .{});
+    defer start_searcher.deinit();
+    try testing.expect((try start_searcher.reportFirstByteMatch("anchor.bin", "a\xffb")) == null);
+
+    var end_searcher = try Searcher.init(testing.allocator, "a$b", .{});
+    defer end_searcher.deinit();
+    try testing.expect((try end_searcher.reportFirstByteMatch("anchor.bin", "a\xffb")) == null);
+
+    var grouped_searcher = try Searcher.init(testing.allocator, "x(^ab)y", .{});
+    defer grouped_searcher.deinit();
+    try testing.expect((try grouped_searcher.reportFirstByteMatch("anchor.bin", "xaby")) == null);
 }
 
 test "Searcher byte fallback supports ASCII literal alternation" {
@@ -1632,6 +1696,32 @@ test "Searcher byte fallback treats simple groups transparently" {
 
     try testing.expectEqual(@as(usize, 3), report.column_number);
     try testing.expectEqual(Span{ .start = 2, .end = 6 }, report.match_span);
+}
+
+test "Searcher byte fallback supports grouped literal concatenation inside a larger sequence" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "x(ab)y", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("group-seq.bin", "zzx\xffabyy").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 7 }, report.match_span);
+}
+
+test "Searcher byte fallback supports grouped multi-term concatenation inside a larger sequence" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "x(a.[0-9]b)y", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("group-seq.bin", "zzxa\xff7byy").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 8 }, report.match_span);
 }
 
 test "Searcher firstByteMatch reports planner-friendly capture groups" {

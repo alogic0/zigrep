@@ -18,26 +18,21 @@ matcher path.
 - [x] Document the unsupported shapes in this file
 - [x] Identify which unsupported shapes are structural planner limits versus true matcher-semantic gaps
 
-### Current Unsupported Planner Shapes
+### Initial Inventory Status
 
-The current `hasBytePlan() == false` boundary is now pinned down by tests in
-[src/search/grep.zig](/home/oleg/prog/zigrep/src/search/grep.zig).
+The initial `hasBytePlan() == false` inventory is pinned down by tests in
+[src/search/grep.zig](/home/oleg/prog/zigrep/src/search/grep.zig), and the
+first recorded unsupported shapes have now been closed:
 
-Current unsupported shapes:
+- interior anchors inside concatenations such as `a^b` and `a$b`
+- quantified bare anchors such as `^+`
+- grouped concatenations inside larger sequences such as `x(ab)y`
+- grouped multi-term sequences inside larger sequences such as `x(a.[0-9]b)y`
+- grouped anchored concatenations inside larger sequences such as `x(^ab)y`
 
-- Interior anchor nodes inside a concatenation, such as `a^b` or `a$b`
-- Quantified bare anchors, such as `^+`
-- Plain grouped concatenations embedded inside a larger sequence, such as `x(ab)y`
-- Plain grouped multi-term sequences embedded inside a larger sequence, such as `x(a.[0-9]b)y`
-- Grouped anchored concatenations embedded inside a larger sequence, such as `x(^ab)y`
-
-Current classification:
-
-- Structural planner limits:
-  - interior anchors inside term streams
-  - plain grouped subpatterns inside a larger sequence when the group child is a concat-shaped byte pattern rather than an alternation term or a directly appendable node
-- Matcher-semantic gaps:
-  - quantified bare anchors, because the planner does not currently define repetition semantics for zero-width anchor atoms
+This means Phase 1 is complete for the initial inventory pass. Any remaining
+lossy-fallback cases now need to be discovered by expanding the inventory
+matrix again rather than by relying on the original boundary list.
 
 ## Phase 2: Define Engine-Level Raw-Byte Semantics
 

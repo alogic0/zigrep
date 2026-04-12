@@ -1297,6 +1297,50 @@ test "runCli default mode uses the raw-byte path for empty capture groups on inv
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli default mode uses the raw-byte path for grouped concatenation inside a larger sequence" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "textish.bin",
+        .data = "zzxa\xff7byy",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "x(a.[0-9]b)y", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:1:3:zzxa\\xFF7byy"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli default mode uses the raw-byte path for quantified bare anchors on invalid UTF-8 files" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "textish.bin",
+        .data = "\xffabc",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "^+", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:1:1:\\xFFabc"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli default mode still returns no match for invalid UTF-8 patterns outside the byte planner" {
     const testing = std.testing;
 
