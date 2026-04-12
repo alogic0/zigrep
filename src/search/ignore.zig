@@ -25,13 +25,19 @@ pub const IgnoreMatcher = struct {
     }
 
     pub fn matches(self: IgnoreMatcher, input: MatchInput) bool {
+        return self.matchResult(input) orelse false;
+    }
+
+    pub fn matchResult(self: IgnoreMatcher, input: MatchInput) ?bool {
         var ignored = false;
+        var matched_any = false;
         for (self.rules) |rule| {
             if (rule.directory_only and !input.is_directory) continue;
             if (!matchesRule(rule, input.path)) continue;
+            matched_any = true;
             ignored = !rule.negated;
         }
-        return ignored;
+        return if (matched_any) ignored else null;
     }
 };
 

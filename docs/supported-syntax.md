@@ -59,6 +59,7 @@ The current CLI supports:
 - `zigrep [FLAGS] PATTERN [PATH...]`
 - Recursive search from each path, defaulting to `.`
 - Hidden-file inclusion with `--hidden`
+- Ignore controls with `--ignore-file`, `--no-ignore`, `--no-ignore-vcs`, and `--no-ignore-parent`
 - Symlink following with `--follow`
 - Case-sensitive path glob filtering with repeated `-g` / `--glob`
 - Binary-file search opt-in with `--text`
@@ -110,6 +111,15 @@ Practical guidance:
 - if any positive globs are present, `zigrep` treats them as an allow-list
 - matching is currently case-sensitive only; `--iglob` is not implemented yet
 
+Ignore-control note:
+
+- by default, `zigrep` applies the current small internal `.gitignore`-subset matcher
+- it loads `.gitignore` from the searched root and, unless disabled, parent directories too
+- `--ignore-file PATH` adds extra ignore rules from `PATH`
+- `--no-ignore` disables all ignore filtering
+- `--no-ignore-vcs` disables `.gitignore` loading but still allows explicit `--ignore-file` rules
+- `--no-ignore-parent` keeps the searched root's own `.gitignore` but skips parent `.gitignore` files
+
 Current `--text` note:
 
 - `--text` disables binary-file skipping and tries to search the file anyway
@@ -136,7 +146,6 @@ The current search tool does not yet implement:
 - stdin search
 - replacement/substitution
 - multiline output formatting
-- context lines before or after matches
 - inverted-match mode
 - full ripgrep flag compatibility
 

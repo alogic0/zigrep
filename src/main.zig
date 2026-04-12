@@ -27,8 +27,12 @@ pub const CliOptions = struct {
     pattern: []const u8,
     paths: []const []const u8,
     globs: []const []const u8 = &.{},
+    ignore_files: []const []const u8 = &.{},
     include_hidden: bool = false,
     follow_symlinks: bool = false,
+    no_ignore: bool = false,
+    no_ignore_vcs: bool = false,
+    no_ignore_parent: bool = false,
     skip_binary: bool = true,
     read_strategy: zigrep.search.io.ReadStrategy = .mmap,
     encoding: zigrep.search.io.InputEncoding = .auto,
@@ -107,6 +111,7 @@ fn runCli(
         .run => |opts| {
             allocator.free(opts.paths);
             allocator.free(opts.globs);
+            allocator.free(opts.ignore_files);
         },
         .help, .version => {},
     };
@@ -131,6 +136,9 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
 
     var include_hidden = false;
     var follow_symlinks = false;
+    var no_ignore = false;
+    var no_ignore_vcs = false;
+    var no_ignore_parent = false;
     var skip_binary = true;
     var read_strategy: zigrep.search.io.ReadStrategy = .mmap;
     var encoding: zigrep.search.io.InputEncoding = .auto;
@@ -144,8 +152,10 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var pattern: ?[]const u8 = null;
     var paths = std.ArrayList([]const u8).empty;
     var globs = std.ArrayList([]const u8).empty;
+    var ignore_files = std.ArrayList([]const u8).empty;
     defer paths.deinit(allocator);
     defer globs.deinit(allocator);
+    defer ignore_files.deinit(allocator);
     var stop_parsing_flags = false;
 
     var index: usize = 1;
@@ -165,6 +175,24 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "--hidden")) {
                 include_hidden = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--ignore-file")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                try ignore_files.append(allocator, argv[index]);
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--no-ignore")) {
+                no_ignore = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--no-ignore-vcs")) {
+                no_ignore_vcs = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--no-ignore-parent")) {
+                no_ignore_parent = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--follow")) {
@@ -293,13 +321,19 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     errdefer allocator.free(owned_paths);
     const owned_globs = try globs.toOwnedSlice(allocator);
     errdefer allocator.free(owned_globs);
+    const owned_ignore_files = try ignore_files.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_ignore_files);
 
     return .{ .run = .{
         .pattern = pattern.?,
         .paths = owned_paths,
         .globs = owned_globs,
+        .ignore_files = owned_ignore_files,
         .include_hidden = include_hidden,
         .follow_symlinks = follow_symlinks,
+        .no_ignore = no_ignore,
+        .no_ignore_vcs = no_ignore_vcs,
+        .no_ignore_parent = no_ignore_parent,
         .skip_binary = skip_binary,
         .read_strategy = read_strategy,
         .encoding = encoding,
@@ -364,11 +398,17 @@ fn searchPath(
         allocator.free(entries);
     }
 
-    const filtered_entries = if (options.globs.len == 0)
-        entries
-    else
-        try filterEntriesByGlob(allocator, root_path, entries, options.globs);
-    defer if (filtered_entries.ptr != entries.ptr) allocator.free(filtered_entries);
+    const loaded_ignores = try loadIgnoreMatchers(allocator, root_path, options);
+    defer deinitLoadedIgnores(allocator, loaded_ignores);
+
+    const filtered_entries = try filterEntries(
+        allocator,
+        root_path,
+        entries,
+        options.globs,
+        loaded_ignores,
+    );
+    defer allocator.free(filtered_entries);
 
     const schedule = zigrep.search.schedule.plan(filtered_entries.len, .{
         .requested_jobs = options.parallel_jobs,
@@ -379,11 +419,22 @@ fn searchPath(
     return searchEntriesSequential(allocator, stdout, stderr, filtered_entries, options);
 }
 
-fn filterEntriesByGlob(
+const LoadedIgnore = struct {
+    base_dir: []u8,
+    matcher: zigrep.search.ignore.IgnoreMatcher,
+
+    fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+        allocator.free(self.base_dir);
+        self.matcher.deinit(allocator);
+    }
+};
+
+fn filterEntries(
     allocator: std.mem.Allocator,
     root_path: []const u8,
     entries: []const zigrep.search.walk.Entry,
     globs: []const []const u8,
+    loaded_ignores: []const LoadedIgnore,
 ) ![]const zigrep.search.walk.Entry {
     var filtered: std.ArrayList(zigrep.search.walk.Entry) = .empty;
     defer filtered.deinit(allocator);
@@ -391,10 +442,151 @@ fn filterEntriesByGlob(
     for (entries) |entry| {
         const relative = relativeGlobPath(root_path, entry.path);
         if (!zigrep.search.glob.allowsPath(globs, relative)) continue;
+        if (try pathIsIgnored(allocator, entry.path, loaded_ignores)) continue;
         try filtered.append(allocator, entry);
     }
 
     return filtered.toOwnedSlice(allocator);
+}
+
+fn pathIsIgnored(
+    allocator: std.mem.Allocator,
+    entry_path: []const u8,
+    loaded_ignores: []const LoadedIgnore,
+) !bool {
+    var ignored = false;
+
+    for (loaded_ignores) |loaded| {
+        const relative = try std.fs.path.relative(allocator, loaded.base_dir, entry_path);
+        defer allocator.free(relative);
+        if (std.mem.startsWith(u8, relative, "..")) continue;
+        if (loaded.matcher.matchResult(.{ .path = relative })) |matched_ignore| {
+            ignored = matched_ignore;
+        }
+    }
+
+    return ignored;
+}
+
+fn loadIgnoreMatchers(
+    allocator: std.mem.Allocator,
+    root_path: []const u8,
+    options: CliOptions,
+) ![]LoadedIgnore {
+    var loaded: std.ArrayList(LoadedIgnore) = .empty;
+    errdefer {
+        for (loaded.items) |item| item.deinit(allocator);
+        loaded.deinit(allocator);
+    }
+
+    if (!options.no_ignore) {
+        if (!options.no_ignore_vcs) {
+            try loadVcsIgnoreChain(allocator, &loaded, root_path, options.no_ignore_parent);
+        }
+        for (options.ignore_files) |ignore_path| {
+            try loadExplicitIgnoreFile(allocator, &loaded, ignore_path);
+        }
+    }
+
+    return loaded.toOwnedSlice(allocator);
+}
+
+fn deinitLoadedIgnores(allocator: std.mem.Allocator, loaded: []LoadedIgnore) void {
+    for (loaded) |item| item.deinit(allocator);
+    allocator.free(loaded);
+}
+
+fn loadVcsIgnoreChain(
+    allocator: std.mem.Allocator,
+    loaded: *std.ArrayList(LoadedIgnore),
+    root_path: []const u8,
+    no_ignore_parent: bool,
+) !void {
+    const search_dir = try resolveSearchDir(allocator, root_path);
+    defer allocator.free(search_dir);
+
+    var dirs: std.ArrayList([]u8) = .empty;
+    defer {
+        for (dirs.items) |dir| allocator.free(dir);
+        dirs.deinit(allocator);
+    }
+
+    var current = try allocator.dupe(u8, search_dir);
+    while (true) {
+        try dirs.append(allocator, current);
+        if (no_ignore_parent) break;
+
+        const parent_opt = std.fs.path.dirname(current);
+        if (parent_opt == null) break;
+        const parent = parent_opt.?;
+        if (parent.len == 0 or std.mem.eql(u8, parent, current)) break;
+        current = try allocator.dupe(u8, parent);
+    }
+
+    var index = dirs.items.len;
+    while (index > 0) {
+        index -= 1;
+        try loadImplicitIgnoreFileAtDir(allocator, loaded, dirs.items[index]);
+    }
+}
+
+fn resolveSearchDir(allocator: std.mem.Allocator, root_path: []const u8) ![]u8 {
+    const resolved = try std.fs.cwd().realpathAlloc(allocator, root_path);
+    errdefer allocator.free(resolved);
+
+    if (std.fs.cwd().openDir(root_path, .{})) |dir_opened| {
+        var dir = dir_opened;
+        dir.close();
+        return resolved;
+    } else |err| switch (err) {
+        error.NotDir => {
+            const dirname = std.fs.path.dirname(resolved) orelse ".";
+            const duped = try allocator.dupe(u8, dirname);
+            allocator.free(resolved);
+            return duped;
+        },
+        else => return err,
+    }
+}
+
+fn loadImplicitIgnoreFileAtDir(
+    allocator: std.mem.Allocator,
+    loaded: *std.ArrayList(LoadedIgnore),
+    dir_path: []const u8,
+) !void {
+    const ignore_path = try std.fs.path.join(allocator, &.{ dir_path, ".gitignore" });
+    defer allocator.free(ignore_path);
+
+    const buffer = zigrep.search.io.readFileOwned(allocator, ignore_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => return err,
+    };
+    defer buffer.deinit(allocator);
+
+    const matcher = try zigrep.search.ignore.compile(allocator, buffer.bytes);
+    try loaded.append(allocator, .{
+        .base_dir = try allocator.dupe(u8, dir_path),
+        .matcher = matcher,
+    });
+}
+
+fn loadExplicitIgnoreFile(
+    allocator: std.mem.Allocator,
+    loaded: *std.ArrayList(LoadedIgnore),
+    ignore_path: []const u8,
+) !void {
+    const resolved = try std.fs.cwd().realpathAlloc(allocator, ignore_path);
+    defer allocator.free(resolved);
+
+    const buffer = try zigrep.search.io.readFileOwned(allocator, ignore_path, .{});
+    defer buffer.deinit(allocator);
+
+    const matcher = try zigrep.search.ignore.compile(allocator, buffer.bytes);
+    const base_dir = std.fs.path.dirname(resolved) orelse ".";
+    try loaded.append(allocator, .{
+        .base_dir = try allocator.dupe(u8, base_dir),
+        .matcher = matcher,
+    });
 }
 
 fn relativeGlobPath(root_path: []const u8, entry_path: []const u8) []const u8 {
@@ -1148,6 +1340,10 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -h, --help            show this help
         \\  -V, --version         show program version
         \\  --hidden              include hidden files
+        \\  --ignore-file PATH    load ignore rules from PATH
+        \\  --no-ignore           disable ignore filtering
+        \\  --no-ignore-vcs       ignore VCS ignore files like .gitignore
+        \\  --no-ignore-parent    ignore parent VCS ignore files
         \\  --follow              follow symlinks
         \\  --text                search binary files too
         \\  -g, --glob GLOB       include or exclude paths by glob
@@ -1218,6 +1414,7 @@ test "parseArgs defaults to current directory search" {
         .run => |opts| {
             testing.allocator.free(opts.paths);
             testing.allocator.free(opts.globs);
+            testing.allocator.free(opts.ignore_files);
         },
         .help, .version => {},
     };
@@ -1227,8 +1424,13 @@ test "parseArgs defaults to current directory search" {
             try testing.expectEqualStrings("needle", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings(".", opts.paths[0]);
+            try testing.expectEqual(@as(usize, 0), opts.globs.len);
+            try testing.expectEqual(@as(usize, 0), opts.ignore_files.len);
             try testing.expect(!opts.include_hidden);
             try testing.expect(!opts.follow_symlinks);
+            try testing.expect(!opts.no_ignore);
+            try testing.expect(!opts.no_ignore_vcs);
+            try testing.expect(!opts.no_ignore_parent);
             try testing.expect(opts.skip_binary);
             try testing.expectEqual(zigrep.search.io.ReadStrategy.mmap, opts.read_strategy);
             try testing.expectEqual(zigrep.search.io.InputEncoding.auto, opts.encoding);
@@ -1286,6 +1488,7 @@ test "parseArgs treats version-like args as positional after the pattern starts"
         .run => |opts| {
             testing.allocator.free(opts.paths);
             testing.allocator.free(opts.globs);
+            testing.allocator.free(opts.ignore_files);
         },
         .help, .version => {},
     };
@@ -1308,6 +1511,7 @@ test "parseArgs treats help-like args as positional after terminator" {
         .run => |opts| {
             testing.allocator.free(opts.paths);
             testing.allocator.free(opts.globs);
+            testing.allocator.free(opts.ignore_files);
         },
         .help, .version => {},
     };
@@ -1347,6 +1551,7 @@ test "parseArgs accepts numeric and formatting flags" {
         .run => |opts| {
             testing.allocator.free(opts.paths);
             testing.allocator.free(opts.globs);
+            testing.allocator.free(opts.ignore_files);
         },
         .help, .version => {},
     };
@@ -1378,6 +1583,7 @@ test "parseArgs accepts files-without-match mode" {
         .run => |opts| {
             testing.allocator.free(opts.paths);
             testing.allocator.free(opts.globs);
+            testing.allocator.free(opts.ignore_files);
         },
         .help, .version => {},
     };
@@ -1401,6 +1607,7 @@ test "parseArgs accepts max-count mode" {
         .run => |opts| {
             testing.allocator.free(opts.paths);
             testing.allocator.free(opts.globs);
+            testing.allocator.free(opts.ignore_files);
         },
         .help, .version => {},
     };
@@ -1424,6 +1631,7 @@ test "parseArgs accepts before and after context flags" {
         .run => |opts| {
             testing.allocator.free(opts.paths);
             testing.allocator.free(opts.globs);
+            testing.allocator.free(opts.ignore_files);
         },
         .help, .version => {},
     };
@@ -1445,6 +1653,7 @@ test "parseArgs accepts repeated glob flags" {
         .run => |opts| {
             testing.allocator.free(opts.paths);
             testing.allocator.free(opts.globs);
+            testing.allocator.free(opts.ignore_files);
         },
         .help, .version => {},
     };
@@ -1455,6 +1664,39 @@ test "parseArgs accepts repeated glob flags" {
             try testing.expectEqualStrings("*.zig", opts.globs[0]);
             try testing.expectEqualStrings("!main.zig", opts.globs[1]);
             try testing.expectEqualStrings("needle", opts.pattern);
+        },
+        .help, .version => unreachable,
+    }
+}
+
+test "parseArgs accepts ignore control flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--ignore-file",
+        "custom.ignore",
+        "--no-ignore-vcs",
+        "--no-ignore-parent",
+        "needle",
+        "src",
+    });
+    defer switch (parsed) {
+        .run => |opts| {
+            testing.allocator.free(opts.paths);
+            testing.allocator.free(opts.globs);
+            testing.allocator.free(opts.ignore_files);
+        },
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(@as(usize, 1), opts.ignore_files.len);
+            try testing.expectEqualStrings("custom.ignore", opts.ignore_files[0]);
+            try testing.expect(!opts.no_ignore);
+            try testing.expect(opts.no_ignore_vcs);
+            try testing.expect(opts.no_ignore_parent);
         },
         .help, .version => unreachable,
     }
@@ -1520,6 +1762,158 @@ test "runCli reports matches and skips binary files by default" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "match.txt:2:1:needle here"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "binary.bin"));
     try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli honors root gitignore by default" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = ".gitignore",
+        .data = "ignored.txt\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "ignored.txt",
+        .data = "needle hidden\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "shown.txt",
+        .data = "needle shown\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "ignored.txt"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "shown.txt:1:1:needle shown"));
+}
+
+test "runCli no-ignore-vcs bypasses root gitignore" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = ".gitignore",
+        .data = "ignored.txt\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "ignored.txt",
+        .data = "needle hidden\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--no-ignore-vcs", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ignored.txt:1:1:needle hidden"));
+}
+
+test "runCli no-ignore-parent bypasses parent gitignore" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("sub");
+    try tmp.dir.writeFile(.{
+        .sub_path = ".gitignore",
+        .data = "sub/ignored.txt\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "sub/ignored.txt",
+        .data = "needle hidden\n",
+    });
+
+    const sub_path = try tmp.dir.realpathAlloc(testing.allocator, "sub");
+    defer testing.allocator.free(sub_path);
+
+    const default_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "needle", sub_path });
+    defer default_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), default_run.exit_code);
+
+    const bypass_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--no-ignore-parent", "needle", sub_path });
+    defer bypass_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), bypass_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, bypass_run.stdout, 1, "ignored.txt:1:1:needle hidden"));
+}
+
+test "runCli ignore-file applies explicit ignore rules" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "custom.ignore",
+        .data = "blocked.txt\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "blocked.txt",
+        .data = "needle hidden\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "shown.txt",
+        .data = "needle shown\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const ignore_path = try tmp.dir.realpathAlloc(testing.allocator, "custom.ignore");
+    defer testing.allocator.free(ignore_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-file", ignore_path, "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "blocked.txt"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "shown.txt:1:1:needle shown"));
+}
+
+test "runCli no-ignore bypasses all ignore filtering" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = ".gitignore",
+        .data = "ignored.txt\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "custom.ignore",
+        .data = "blocked.txt\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "ignored.txt",
+        .data = "needle ignored\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "blocked.txt",
+        .data = "needle blocked\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const ignore_path = try tmp.dir.realpathAlloc(testing.allocator, "custom.ignore");
+    defer testing.allocator.free(ignore_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--no-ignore", "--ignore-file", ignore_path, "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ignored.txt:1:1:needle ignored"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "blocked.txt:1:1:needle blocked"));
 }
 
 test "runCli returns 1 when nothing matches" {

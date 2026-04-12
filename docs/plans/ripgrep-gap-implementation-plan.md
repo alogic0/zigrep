@@ -58,9 +58,10 @@ ecosystem features.
   `zigrep` now supports repeated case-sensitive include/exclude globs with
   `-g/--glob`, including `!pattern` exclusions. `--iglob` is still open.
 
-- [ ] Add richer ignore controls:
-  `--ignore-file`, `--no-ignore`, `--no-ignore-vcs`, `--no-ignore-parent`,
-  and related toggles.
+- [x] Add richer ignore controls:
+  `zigrep` now supports `--ignore-file`, `--no-ignore`,
+  `--no-ignore-vcs`, and `--no-ignore-parent`, layered on top of the
+  current small internal `.gitignore`-subset matcher.
 
 - [ ] Add smart case and ignore-case modes.
   `zigrep` currently rejects case-insensitive search. That is a major practical
