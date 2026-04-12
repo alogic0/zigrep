@@ -34,11 +34,16 @@ const ByteAtom = union(enum) {
     literal: []u8,
     any_byte,
     class: regex.hir.CharacterClass,
+    alternation: []BytePattern,
 
     fn deinit(self: ByteAtom, allocator: std.mem.Allocator) void {
         switch (self) {
             .literal => |bytes| allocator.free(bytes),
             .class => |class| allocator.free(class.items),
+            .alternation => |patterns| {
+                for (patterns) |pattern| pattern.deinit(allocator);
+                allocator.free(patterns);
+            },
             .any_byte => {},
         }
     }
@@ -173,7 +178,9 @@ const AnchoredLiteralMode = enum {
     full,
 };
 
-fn extractByteSearchPlan(allocator: std.mem.Allocator, hir: regex.Hir) !ByteSearchPlan {
+const BytePlanError = std.mem.Allocator.Error;
+
+fn extractByteSearchPlan(allocator: std.mem.Allocator, hir: regex.Hir) BytePlanError!ByteSearchPlan {
     return switch (hir.nodes[@intFromEnum(hir.root)]) {
         .alternation => |branches| blk: {
             var patterns: std.ArrayList(BytePattern) = .empty;
@@ -200,8 +207,9 @@ fn extractBytePattern(
     allocator: std.mem.Allocator,
     nodes: []const regex.hir.Node,
     root: regex.hir.NodeId,
-) !?BytePattern {
+) BytePlanError!?BytePattern {
     return switch (nodes[@intFromEnum(root)]) {
+        .group => |group| try extractBytePattern(allocator, nodes, group.child),
         .literal, .dot, .char_class, .repetition => blk: {
             var terms: std.ArrayList(ByteTerm) = .empty;
             defer terms.deinit(allocator);
@@ -269,8 +277,16 @@ fn appendNodeToByteTerms(
     node_id: regex.hir.NodeId,
     terms: *std.ArrayList(ByteTerm),
     literal_bytes: *std.ArrayList(u8),
-) !bool {
+) BytePlanError!bool {
     switch (nodes[@intFromEnum(node_id)]) {
+        .group => |group| {
+            if (try extractAlternationByteTerm(allocator, nodes, group.child)) |term| {
+                try flushLiteralTerm(allocator, terms, literal_bytes);
+                try terms.append(allocator, term);
+                return true;
+            }
+            return appendNodeToByteTerms(allocator, nodes, group.child, terms, literal_bytes);
+        },
         .literal => |cp| {
             if (cp > 0x7f) return false;
             try literal_bytes.append(allocator, @as(u8, @intCast(cp)));
@@ -321,12 +337,43 @@ fn extractRepeatableByteTerm(
     nodes: []const regex.hir.Node,
     node_id: regex.hir.NodeId,
     quantifier: regex.hir.Quantifier,
-) !?ByteTerm {
+) BytePlanError!?ByteTerm {
+    switch (nodes[@intFromEnum(node_id)]) {
+        .group => |group| return extractRepeatableByteTerm(allocator, nodes, group.child, quantifier),
+        else => {},
+    }
+
     const atom = switch (nodes[@intFromEnum(node_id)]) {
         .literal => |cp| if (cp <= 0x7f)
             ByteAtom{ .literal = try allocator.dupe(u8, &[_]u8{@as(u8, @intCast(cp))}) }
         else
             return null,
+        .concat => |children| blk: {
+            var pattern = try extractBytePattern(allocator, nodes, node_id) orelse return null;
+            defer pattern.deinit(allocator);
+            if (pattern.mode != .contains) return null;
+            if (pattern.terms.len != 1) return null;
+            if (pattern.terms[0].min != 1 or pattern.terms[0].max == null or pattern.terms[0].max.? != 1) return null;
+
+            const term = pattern.terms[0];
+            const dup_atom = switch (term.atom) {
+                .literal => |bytes| ByteAtom{ .literal = try allocator.dupe(u8, bytes) },
+                .any_byte => ByteAtom.any_byte,
+                .class => |class| blk2: {
+                    const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
+                    @memcpy(duped_items, class.items);
+                    break :blk2 ByteAtom{
+                        .class = .{
+                            .negated = class.negated,
+                            .items = duped_items,
+                        },
+                    };
+                },
+                .alternation => return null,
+            };
+            _ = children;
+            break :blk dup_atom;
+        },
         .dot => ByteAtom.any_byte,
         .char_class => |class| blk: {
             if (!isAsciiClass(class)) return null;
@@ -349,11 +396,43 @@ fn extractRepeatableByteTerm(
     };
 }
 
+fn extractAlternationByteTerm(
+    allocator: std.mem.Allocator,
+    nodes: []const regex.hir.Node,
+    node_id: regex.hir.NodeId,
+) BytePlanError!?ByteTerm {
+    const branches = switch (nodes[@intFromEnum(node_id)]) {
+        .alternation => |branches| branches,
+        else => return null,
+    };
+
+    var patterns: std.ArrayList(BytePattern) = .empty;
+    defer patterns.deinit(allocator);
+    errdefer for (patterns.items) |pattern| pattern.deinit(allocator);
+
+    for (branches) |branch| {
+        var pattern = try extractBytePattern(allocator, nodes, branch) orelse return null;
+        if (pattern.mode != .contains) {
+            pattern.deinit(allocator);
+            return null;
+        }
+        try patterns.append(allocator, pattern);
+    }
+
+    if (patterns.items.len == 0) return null;
+
+    return .{
+        .atom = .{ .alternation = try patterns.toOwnedSlice(allocator) },
+        .min = 1,
+        .max = 1,
+    };
+}
+
 fn flushLiteralTerm(
     allocator: std.mem.Allocator,
     terms: *std.ArrayList(ByteTerm),
     literal_bytes: *std.ArrayList(u8),
-) !void {
+) BytePlanError!void {
     if (literal_bytes.items.len == 0) return;
     try terms.append(allocator, .{ .atom = .{ .literal = try literal_bytes.toOwnedSlice(allocator) } });
 }
@@ -422,6 +501,19 @@ fn matchByteTermsAt(terms: []const ByteTerm, haystack: []const u8, term_index: u
     if (term_index >= terms.len) return pos;
 
     const term = terms[term_index];
+    if (term.min == 1 and term.max != null and term.max.? == 1) {
+        switch (term.atom) {
+            .alternation => |patterns| {
+                for (patterns) |pattern| {
+                    const end = matchContainedBytePatternAt(pattern, haystack, pos) orelse continue;
+                    if (matchByteTermsAt(terms, haystack, term_index + 1, end)) |result| return result;
+                }
+                return null;
+            },
+            else => {},
+        }
+    }
+
     const step = byteAtomLen(term.atom);
 
     var min_pos = pos;
@@ -449,6 +541,11 @@ fn matchByteTermsAt(terms: []const ByteTerm, haystack: []const u8, term_index: u
     return null;
 }
 
+fn matchContainedBytePatternAt(pattern: BytePattern, haystack: []const u8, pos: usize) ?usize {
+    if (pattern.mode != .contains) return null;
+    return matchByteTermsAt(pattern.terms, haystack, 0, pos);
+}
+
 fn matchByteAtomAt(atom: ByteAtom, haystack: []const u8, pos: usize) ?usize {
     return switch (atom) {
         .literal => |bytes| if (pos + bytes.len <= haystack.len and std.mem.eql(u8, haystack[pos .. pos + bytes.len], bytes))
@@ -463,6 +560,7 @@ fn matchByteAtomAt(atom: ByteAtom, haystack: []const u8, pos: usize) ?usize {
             pos + 1
         else
             null,
+        .alternation => unreachable,
     };
 }
 
@@ -470,6 +568,7 @@ fn byteAtomLen(atom: ByteAtom) usize {
     return switch (atom) {
         .literal => |bytes| bytes.len,
         .any_byte, .class => 1,
+        .alternation => unreachable,
     };
 }
 
@@ -745,6 +844,71 @@ test "Searcher byte fallback supports optional repetition" {
 
     try testing.expect(searcher.reportFirstByteMatch("optional.bin", "ac") != null);
     try testing.expect(searcher.reportFirstByteMatch("optional.bin", "abc") != null);
+}
+
+test "Searcher byte fallback treats simple groups transparently" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(a.[0-9]b)", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("group.bin", "xxa\xff7byy").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 6 }, report.match_span);
+}
+
+test "Searcher byte fallback supports repetition over grouped literal subpatterns" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(ab)+c", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("group-repeat.bin", "xxababc").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 7 }, report.match_span);
+}
+
+test "Searcher byte fallback supports counted repetition over grouped simple byte patterns" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(a[0-9]){2}", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("group-repeat.bin", "xa4a2z").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), report.column_number);
+    try testing.expectEqual(Span{ .start = 1, .end = 5 }, report.match_span);
+}
+
+test "Searcher byte fallback supports grouped alternation inside a byte sequence" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a(ab|cd)e", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("group-alt.bin", "xxacdeyy").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 6 }, report.match_span);
+}
+
+test "Searcher byte fallback supports grouped alternation with mixed simple branches" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a((b.)|([0-9]x))c", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("group-alt.bin", "xa7xcz").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), report.column_number);
+    try testing.expectEqual(Span{ .start = 1, .end = 5 }, report.match_span);
 }
 
 test "reportFirstMatch stays aligned across buffered and mmap file reads" {
