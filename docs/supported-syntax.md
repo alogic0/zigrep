@@ -65,7 +65,7 @@ The current CLI supports:
 - Case-insensitive search with `-i` / `--ignore-case` and `-S` / `--smart-case`
 - Case-sensitive path glob filtering with repeated `-g` / `--glob`
 - File type filters with `-t`, `-T`, `--type-add`, and `--type-list`
-- Binary-file search opt-in with `--text`
+- Binary-file search controls with `--text` and `--binary`
 - Buffered or mmap-backed reads with `--buffered` and `--mmap`
 - Worker-count control with `-j` or `--threads`
 - Walk depth limiting with `--max-depth`
@@ -197,6 +197,13 @@ Current `--text` note:
 - when a reported line contains invalid bytes or unsafe control bytes, the CLI prints those bytes as `\xNN` escapes instead of sending them raw to the terminal
 - this is still not full ripgrep-compatible encoding behavior
 - the exact current rules are documented in [docs/invalid-utf8-semantics.md](invalid-utf8-semantics.md)
+
+`--binary` note:
+
+- `--binary` searches binary files but suppresses matching line content
+- in normal text output, a matching binary file prints `path: binary file matches`
+- with `--files-with-matches` and `--files-without-match`, it uses file-selection semantics over binary files
+- `--binary` is currently rejected with `--count`, `--only-matching`, `--heading`, and `--json`
 
 Output is line-oriented. When enabled, prefixes are emitted in this order:
 

@@ -136,8 +136,10 @@ ecosystem features.
 
 ## Priority 5: Binary, Encoding, And Input Parity
 
-- [ ] Add a distinct `--binary` mode similar to ripgrep’s
+- [x] Add a distinct `--binary` mode similar to ripgrep’s
   “search and suppress binary output” behavior.
+  `zigrep` now supports `--binary` for text output and file-path modes,
+  searching binary files while suppressing matching line content.
 
 - [ ] Decide whether to add `-E none` style raw-byte mode explicitly.
   ripgrep exposes a sharper encoding boundary here than `zigrep` does today.

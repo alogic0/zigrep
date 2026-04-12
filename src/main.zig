@@ -25,6 +25,12 @@ const OutputFormat = enum {
     json,
 };
 
+const BinaryMode = enum {
+    skip,
+    text,
+    suppress,
+};
+
 const ReportMode = enum {
     lines,
     count,
@@ -46,7 +52,7 @@ pub const CliOptions = struct {
     no_ignore: bool = false,
     no_ignore_vcs: bool = false,
     no_ignore_parent: bool = false,
-    skip_binary: bool = true,
+    binary_mode: BinaryMode = .skip,
     case_mode: zigrep.search.grep.CaseMode = .sensitive,
     read_strategy: zigrep.search.io.ReadStrategy = .mmap,
     encoding: zigrep.search.io.InputEncoding = .auto,
@@ -196,7 +202,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var no_ignore = false;
     var no_ignore_vcs = false;
     var no_ignore_parent = false;
-    var skip_binary = true;
+    var binary_mode: BinaryMode = .skip;
     var unrestricted_level: u8 = 0;
     var case_mode: zigrep.search.grep.CaseMode = .sensitive;
     var read_strategy: zigrep.search.io.ReadStrategy = .mmap;
@@ -326,7 +332,11 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
                 continue;
             }
             if (std.mem.eql(u8, arg, "--text")) {
-                skip_binary = false;
+                binary_mode = .text;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "--binary")) {
+                binary_mode = .suppress;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-g") or std.mem.eql(u8, arg, "--glob")) {
@@ -447,7 +457,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     if (pattern == null) return error.MissingPattern;
     if (unrestricted_level >= 1) no_ignore = true;
     if (unrestricted_level >= 2) include_hidden = true;
-    if (unrestricted_level >= 3) skip_binary = false;
+    if (unrestricted_level >= 3) binary_mode = .text;
     if (paths.items.len == 0) try paths.append(allocator, ".");
     if ((context_before != 0 or context_after != 0) and (report_mode != .lines or output.only_matching or invert_match)) {
         return error.InvalidFlagCombination;
@@ -462,6 +472,11 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         return error.InvalidFlagCombination;
     }
     if (output.heading and (output_format != .text or report_mode != .lines)) {
+        return error.InvalidFlagCombination;
+    }
+    if (binary_mode == .suppress and (output_format != .text or output.only_matching or
+        report_mode == .count or output.heading))
+    {
         return error.InvalidFlagCombination;
     }
     if (output.heading) {
@@ -493,7 +508,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .no_ignore = no_ignore,
         .no_ignore_vcs = no_ignore_vcs,
         .no_ignore_parent = no_ignore_parent,
-        .skip_binary = skip_binary,
+        .binary_mode = binary_mode,
         .case_mode = case_mode,
         .read_strategy = read_strategy,
         .encoding = encoding,
@@ -809,16 +824,26 @@ fn searchEntriesSequential(
         defer file_arena_state.deinit();
         const file_allocator = file_arena_state.allocator();
 
-        if (options.skip_binary and options.encoding == .auto) {
-            const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
-                if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
-                return err;
-            };
-            if (decision == .binary) {
-                result.stats.skipped_binary_files += 1;
-                continue;
+        const suppress_binary_output = blk: {
+            if (options.encoding != .auto) break :blk false;
+            switch (options.binary_mode) {
+                .text => break :blk false,
+                .skip, .suppress => {
+                    const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
+                        if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
+                        return err;
+                    };
+                    if (decision == .binary) {
+                        if (options.binary_mode == .skip) {
+                            result.stats.skipped_binary_files += 1;
+                            continue;
+                        }
+                        break :blk true;
+                    }
+                    break :blk false;
+                },
             }
-        }
+        };
 
         const buffer = zigrep.search.io.readFile(file_allocator, entry.path, .{
             .strategy = options.read_strategy,
@@ -841,6 +866,7 @@ fn searchEntriesSequential(
             entry.path,
             buffer.bytes(),
             options.encoding,
+            suppress_binary_output,
             options.invert_match,
             options.output,
             options.output_format,
@@ -941,22 +967,32 @@ fn searchEntriesParallel(
             defer file_arena_state.deinit();
             const file_allocator = file_arena_state.allocator();
 
-            if (self.options.skip_binary and self.options.encoding == .auto) {
-                const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
-                    if (try self.warnAndSkip(entry.path, err)) return;
-                    return err;
-                };
-                if (decision == .binary) {
-                    self.result_reports[index] = .{
-                        .bytes = .empty,
-                        .searched_bytes = 0,
-                        .matched = false,
-                        .skipped_binary = true,
-                        .path = null,
-                    };
-                    return;
+            const suppress_binary_output = blk: {
+                if (self.options.encoding != .auto) break :blk false;
+                switch (self.options.binary_mode) {
+                    .text => break :blk false,
+                    .skip, .suppress => {
+                        const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
+                            if (try self.warnAndSkip(entry.path, err)) return;
+                            return err;
+                        };
+                        if (decision == .binary) {
+                            if (self.options.binary_mode == .skip) {
+                                self.result_reports[index] = .{
+                                    .bytes = .empty,
+                                    .searched_bytes = 0,
+                                    .matched = false,
+                                    .skipped_binary = true,
+                                    .path = null,
+                                };
+                                return;
+                            }
+                            break :blk true;
+                        }
+                        break :blk false;
+                    },
                 }
-            }
+            };
 
             const buffer = zigrep.search.io.readFile(file_allocator, entry.path, .{
                 .strategy = self.options.read_strategy,
@@ -976,6 +1012,7 @@ fn searchEntriesParallel(
                 entry.path,
                 buffer.bytes(),
                 self.options.encoding,
+                suppress_binary_output,
                 self.options.invert_match,
                 self.options.output,
                 self.options.output_format,
@@ -1171,6 +1208,10 @@ fn writeHeadingBlock(
     try writer.print("{s}\n", .{path});
     try writer.writeAll(bytes);
     wrote_previous_group.* = true;
+}
+
+fn writeBinaryMatchNotice(writer: *std.Io.Writer, path: []const u8) !void {
+    try writer.print("{s}: binary file matches\n", .{path});
 }
 
 fn writeReport(
@@ -1436,6 +1477,7 @@ fn writeFileOutput(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
+    suppress_binary_output: bool,
     invert_match: bool,
     output: OutputOptions,
     output_format: OutputFormat,
@@ -1444,6 +1486,14 @@ fn writeFileOutput(
     context_before: usize,
     context_after: usize,
 ) !bool {
+    if (suppress_binary_output) {
+        return switch (report_mode) {
+            .lines => writeBinaryFileMatchNotice(allocator, writer, searcher, path, bytes, encoding, invert_match),
+            .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding, invert_match, output, output_format),
+            .files_without_match => writeFilePathWithoutMatch(allocator, writer, searcher, path, bytes, encoding, invert_match, output, output_format),
+            .count => unreachable,
+        };
+    }
     return switch (report_mode) {
         .lines => writeFileLines(
             allocator,
@@ -1463,6 +1513,24 @@ fn writeFileOutput(
         .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding, invert_match, output, output_format),
         .files_without_match => writeFilePathWithoutMatch(allocator, writer, searcher, path, bytes, encoding, invert_match, output, output_format),
     };
+}
+
+fn writeBinaryFileMatchNotice(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+    invert_match: bool,
+) !bool {
+    const has_match = if (invert_match)
+        try countInvertedLines(allocator, searcher, path, bytes, encoding, null) != 0
+    else
+        (try reportFileMatch(allocator, searcher, path, bytes, encoding)) != null;
+    if (!has_match) return false;
+    try writeBinaryMatchNotice(writer, path);
+    return true;
 }
 
 fn writeFileLines(
@@ -1823,7 +1891,8 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --follow              follow symlinks
         \\  -i, --ignore-case     search case-insensitively
         \\  -S, --smart-case      use ignore-case unless the pattern has uppercase letters
-        \\  --text                search binary files too
+        \\  --text                search binary files and print normal match output
+        \\  --binary              search binary files but suppress matching line content
         \\  -g, --glob GLOB       include or exclude paths by glob
         \\  --buffered            use the simpler file-reading method
         \\  --mmap                use the faster file-reading method when possible
@@ -1910,7 +1979,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(!opts.no_ignore);
             try testing.expect(!opts.no_ignore_vcs);
             try testing.expect(!opts.no_ignore_parent);
-            try testing.expect(opts.skip_binary);
+            try testing.expectEqual(BinaryMode.skip, opts.binary_mode);
             try testing.expectEqual(zigrep.search.grep.CaseMode.sensitive, opts.case_mode);
             try testing.expectEqual(zigrep.search.io.ReadStrategy.mmap, opts.read_strategy);
             try testing.expectEqual(zigrep.search.io.InputEncoding.auto, opts.encoding);
@@ -2184,7 +2253,7 @@ test "parseArgs accepts unrestricted flags" {
         .run => |opts| {
             try testing.expect(opts.no_ignore);
             try testing.expect(opts.include_hidden);
-            try testing.expect(!opts.skip_binary);
+            try testing.expectEqual(BinaryMode.text, opts.binary_mode);
         },
         .help, .version, .type_list => unreachable,
     }
@@ -2276,6 +2345,22 @@ test "parseArgs accepts invert-match flag" {
 
     switch (parsed) {
         .run => |opts| try testing.expect(opts.invert_match),
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts binary mode flag" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--binary", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| try testing.expectEqual(BinaryMode.suppress, opts.binary_mode),
         .help, .version, .type_list => unreachable,
     }
 }
@@ -2431,6 +2516,18 @@ test "parseArgs rejects invalid numeric flags" {
         "-v",
         "-C",
         "1",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--binary",
+        "--count",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--binary",
+        "--json",
         "needle",
     }));
 }
@@ -3839,6 +3936,51 @@ test "runCli can search binary files when text mode is enabled" {
     defer searched.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), searched.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, searched.stdout, 1, "payload.bin:1:4:aa"));
+}
+
+test "runCli binary mode reports binary matches without line content" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "payload.bin",
+        .data = "aa\x00needle\x00bb",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--binary", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "payload.bin: binary file matches\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\\x00bb"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli binary mode supports files-with-matches" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "payload.bin",
+        .data = "aa\x00needle\x00bb",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--binary", "--files-with-matches", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "payload.bin\n"));
+    try testing.expectEqualStrings("", run.stderr);
 }
 
 test "runCli skips invalid UTF-8 files instead of aborting the whole search" {
