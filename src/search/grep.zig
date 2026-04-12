@@ -121,7 +121,10 @@ pub const Searcher = struct {
     }
 
     pub fn reportFirstMatch(self: *Searcher, path: []const u8, haystack: []const u8) SearchError!?MatchReport {
-        const found = try self.engine.firstMatch(self.program, haystack);
+        const found = self.engine.firstMatch(self.program, haystack) catch |err| switch (err) {
+            error.InvalidUtf8 => try self.firstByteMatch(haystack),
+            else => return err,
+        };
         if (found) |match| {
             defer match.deinit(self.allocator);
             return buildReport(path, haystack, match.span);
@@ -130,7 +133,7 @@ pub const Searcher = struct {
     }
 
     pub fn firstByteMatch(self: *Searcher, haystack: []const u8) regex.Vm.MatchError!?regex.Vm.Match {
-        if (self.byte_plan == .none) {
+        if (self.byte_plan == .none or bytePlanNeedsGeneralVm(self.byte_plan)) {
             return self.engine.firstMatchBytes(self.program, haystack);
         }
 
@@ -250,6 +253,50 @@ fn expectInvalidUtf8MatchSpan(pattern: []const u8, haystack: []const u8, expecte
         .start = found.span.start.?,
         .end = found.span.end.?,
     });
+}
+
+fn bytePlanNeedsGeneralVm(plan: ByteSearchPlan) bool {
+    return switch (plan) {
+        .none => true,
+        .single => |pattern| patternNeedsGeneralVm(pattern),
+        .alternation => |patterns| blk: {
+            for (patterns) |pattern| {
+                if (patternNeedsGeneralVm(pattern)) break :blk true;
+            }
+            break :blk false;
+        },
+    };
+}
+
+fn patternNeedsGeneralVm(pattern: BytePattern) bool {
+    for (pattern.terms) |term| {
+        if (termNeedsGeneralVm(term)) return true;
+    }
+    return false;
+}
+
+fn termNeedsGeneralVm(term: ByteTerm) bool {
+    return atomNeedsGeneralVm(term.atom);
+}
+
+fn atomNeedsGeneralVm(atom: ByteAtom) bool {
+    return switch (atom) {
+        .any_byte => true,
+        .alternation => |patterns| blk: {
+            for (patterns) |pattern| {
+                if (patternNeedsGeneralVm(pattern)) break :blk true;
+            }
+            break :blk false;
+        },
+        .literal,
+        .class,
+        .utf8_class,
+        .anchor_start,
+        .anchor_end,
+        .save_start,
+        .save_end,
+        => false,
+    };
 }
 
 fn buildReport(path: []const u8, haystack: []const u8, span: regex.Vm.Capture) MatchReport {
@@ -1608,6 +1655,32 @@ test "Searcher planner and raw-byte VM agree on invalid UTF-8 spans" {
 test "Searcher planner and raw-byte VM agree on invalid UTF-8 capture spans" {
     try expectPlannerAndVmEquivalent("(a.)([0-9]b)", "xxa\xff7byy");
     try expectPlannerAndVmEquivalent("(ж)(ар)", "xx\xffжарyy");
+}
+
+test "Searcher dot patterns defer to the general raw-byte VM for multibyte text units" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, ".x", .{});
+    defer searcher.deinit();
+
+    try testing.expect(searcher.hasBytePlan());
+    const found = (try searcher.firstByteMatch("\xff©x")).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(regex.Vm.Capture{ .start = 1, .end = 4 }, found.span);
+}
+
+test "Searcher reportFirstMatch uses raw-byte semantics on invalid UTF-8 input" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(^ab)y", .{});
+    defer searcher.deinit();
+
+    const report = (try searcher.reportFirstMatch("sample.bin", "aby\xff")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
 }
 
 test "Searcher covers every HIR node kind on invalid UTF-8 input" {
