@@ -589,14 +589,9 @@ pub fn runSearch(
     options: CliOptions,
 ) !u8 {
     if (options.multiline and
-        (options.output.only_matching or
-            options.output_format != .text or
-            options.report_mode != .lines or
-            options.invert_match or
-            options.context_before != 0 or
-            options.context_after != 0 or
+        (options.invert_match or
             options.max_count != null or
-            options.output.heading))
+            (options.output.heading and options.report_mode != .lines)))
     {
         return error.InvalidFlagCombination;
     }
@@ -1367,6 +1362,35 @@ fn writeReport(
     try writer.writeByte('\n');
 }
 
+fn writePrefixedDisplayBytes(
+    writer: *std.Io.Writer,
+    path: []const u8,
+    line_number: usize,
+    column_number: usize,
+    bytes: []const u8,
+    output: OutputOptions,
+    allow_newlines: bool,
+) !void {
+    var wrote_prefix = false;
+    if (output.with_filename) {
+        try writer.print("{s}", .{path});
+        wrote_prefix = true;
+    }
+    if (output.line_number) {
+        if (wrote_prefix) try writer.writeByte(':');
+        try writer.print("{d}", .{line_number});
+        wrote_prefix = true;
+    }
+    if (output.column_number) {
+        if (wrote_prefix) try writer.writeByte(':');
+        try writer.print("{d}", .{column_number});
+        wrote_prefix = true;
+    }
+    if (wrote_prefix) try writer.writeByte(':');
+    try writeDisplayBytes(writer, bytes, allow_newlines);
+    try writer.writeByte('\n');
+}
+
 fn warnAndSkipFileError(writer: *std.Io.Writer, path: []const u8, err: anyerror) !bool {
     if (!shouldWarnAndSkipFileError(err)) return false;
     try writer.print("warning: skipping {s}: {s}\n", .{ path, warningMessage(err) });
@@ -1642,25 +1666,15 @@ fn writeMultilineReportBlock(
     haystack: []const u8,
     output: OutputOptions,
 ) !void {
-    var wrote_prefix = false;
-    if (output.with_filename) {
-        try writer.print("{s}", .{path});
-        wrote_prefix = true;
-    }
-    if (output.line_number) {
-        if (wrote_prefix) try writer.writeByte(':');
-        try writer.print("{d}", .{info.line_number});
-        wrote_prefix = true;
-    }
-    if (output.column_number) {
-        if (wrote_prefix) try writer.writeByte(':');
-        try writer.print("{d}", .{info.column_number});
-        wrote_prefix = true;
-    }
-    if (wrote_prefix) try writer.writeByte(':');
-
-    try writeDisplayBytes(writer, haystack[info.block.block_span.start..info.block.block_span.end], true);
-    try writer.writeByte('\n');
+    try writePrefixedDisplayBytes(
+        writer,
+        path,
+        info.line_number,
+        info.column_number,
+        haystack[info.block.block_span.start..info.block.block_span.end],
+        output,
+        true,
+    );
 }
 
 fn writeFileReportsMultiline(
@@ -1671,62 +1685,247 @@ fn writeFileReportsMultiline(
     haystack: []const u8,
     output: OutputOptions,
 ) !bool {
-    const MatchBlock = struct {
-        info: zigrep.search.report.DisplayBlockInfo,
-    };
+    const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, haystack);
+    defer allocator.free(matches);
+    if (matches.len == 0) return false;
 
-    const Collector = struct {
-        allocator: std.mem.Allocator,
-        line_spans: []const zigrep.search.report.Span,
-        haystack: []const u8,
-        items: *std.ArrayList(MatchBlock),
-
-        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
-            try self.items.append(self.allocator, .{
-                .info = zigrep.search.report.deriveDisplayBlockInfo(self.haystack, self.line_spans, report.match_span),
-            });
-        }
-    };
-
-    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
-    defer allocator.free(line_spans);
-
-    var blocks: std.ArrayList(MatchBlock) = .empty;
-    defer blocks.deinit(allocator);
-
-    var collector = Collector{
-        .allocator = allocator,
-        .line_spans = line_spans,
-        .haystack = haystack,
-        .items = &blocks,
-    };
-
-    const matched = try searcher.forEachMatchReport(path, haystack, &collector, Collector.emit);
-    if (!matched) return false;
-
-    const projected = try allocator.alloc(zigrep.search.report.DisplayBlock, blocks.items.len);
-    defer allocator.free(projected);
-    for (blocks.items, 0..) |block, index| projected[index] = block.info.block;
-
-    const merged = try zigrep.search.report.mergeDisplayBlocksAlloc(allocator, projected);
+    const merged = try mergeMultilineMatchesAlloc(allocator, matches);
     defer allocator.free(merged);
 
-    var block_index: usize = 0;
-    for (merged) |block| {
-        while (block_index < blocks.items.len and blocks.items[block_index].info.block.start_line_index < block.start_line_index) {
-            block_index += 1;
-        }
-        if (block_index >= blocks.items.len) return error.InvalidFlagCombination;
-
-        const info = zigrep.search.report.DisplayBlockInfo{
-            .line_number = blocks.items[block_index].info.line_number,
-            .column_number = blocks.items[block_index].info.column_number,
-            .block = block,
-        };
+    for (merged) |info| {
         try writeMultilineReportBlock(writer, path, info, haystack, output);
     }
 
     return true;
+}
+
+fn writeFileOnlyMatchingMultiline(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    haystack: []const u8,
+    output: OutputOptions,
+) !bool {
+    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
+    defer allocator.free(line_spans);
+
+    const Context = struct {
+        writer: *std.Io.Writer,
+        haystack: []const u8,
+        line_spans: []const zigrep.search.report.Span,
+        output: OutputOptions,
+        matched: bool = false,
+
+        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
+            const info = zigrep.search.report.deriveDisplayBlockInfo(self.haystack, self.line_spans, report.match_span);
+            try writePrefixedDisplayBytes(
+                self.writer,
+                report.path,
+                info.line_number,
+                info.column_number,
+                self.haystack[report.match_span.start..report.match_span.end],
+                self.output,
+                true,
+            );
+            self.matched = true;
+        }
+    };
+
+    var context = Context{
+        .writer = writer,
+        .haystack = haystack,
+        .line_spans = line_spans,
+        .output = output,
+    };
+
+    _ = try searcher.forEachMatchReport(path, haystack, &context, Context.emit);
+    return context.matched;
+}
+
+fn writeMultilineJsonMatchEvent(
+    writer: *std.Io.Writer,
+    path: []const u8,
+    haystack: []const u8,
+    match_info: MultilineMatchInfo,
+    output: OutputOptions,
+) !void {
+    const display_slice = if (output.only_matching)
+        haystack[match_info.match_span.start..match_info.match_span.end]
+    else
+        haystack[match_info.display.block.block_span.start..match_info.display.block.block_span.end];
+    const line_span = if (output.only_matching)
+        match_info.match_span
+    else
+        match_info.display.block.block_span;
+
+    try writer.writeAll("{\"type\":\"match\",\"data\":{");
+    try writer.writeAll("\"path\":");
+    try writeJsonString(writer, path);
+    try writer.print(",\"line_number\":{d},\"column_number\":{d}", .{ match_info.display.line_number, match_info.display.column_number });
+    try writer.writeAll(",\"line\":");
+    try writeJsonString(writer, display_slice);
+    try writer.print(",\"line_span\":{{\"start\":{d},\"end\":{d}}}", .{ line_span.start, line_span.end });
+    try writer.print(",\"match_span\":{{\"start\":{d},\"end\":{d}}}", .{ match_info.match_span.start, match_info.match_span.end });
+    try writer.writeAll("}}\n");
+}
+
+fn writeFileCountMultiline(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    haystack: []const u8,
+    output_format: OutputFormat,
+) !bool {
+    const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, haystack);
+    defer allocator.free(matches);
+    if (matches.len == 0) return false;
+
+    switch (output_format) {
+        .text => try writer.print("{s}:{d}\n", .{ path, matches.len }),
+        .json => try writeJsonCountEvent(writer, path, matches.len),
+    }
+    return true;
+}
+
+fn writeFileReportsWithContextMultiline(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    haystack: []const u8,
+    output: OutputOptions,
+    context_before: usize,
+    context_after: usize,
+) !bool {
+    const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, haystack);
+    defer allocator.free(matches);
+    if (matches.len == 0) return false;
+
+    const merged = try mergeMultilineMatchesAlloc(allocator, matches);
+    defer allocator.free(merged);
+
+    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
+    defer allocator.free(line_spans);
+
+    const include = try allocator.alloc(bool, line_spans.len);
+    defer allocator.free(include);
+    @memset(include, false);
+
+    const block_starts = try allocator.alloc(?usize, line_spans.len);
+    defer allocator.free(block_starts);
+    @memset(block_starts, null);
+
+    for (merged, 0..) |info, block_index| {
+        block_starts[info.block.start_line_index] = block_index;
+        const start = info.block.start_line_index -| context_before;
+        const end = @min(info.block.end_line_index + context_after + 1, line_spans.len);
+        for (start..end) |line_index| include[line_index] = true;
+    }
+
+    var previous_included: ?usize = null;
+    var line_index: usize = 0;
+    while (line_index < line_spans.len) {
+        if (!include[line_index]) {
+            line_index += 1;
+            continue;
+        }
+        if (previous_included) |prev| {
+            if (line_index > prev + 1) try writer.writeAll("--\n");
+        }
+
+        if (block_starts[line_index]) |block_index| {
+            const info = merged[block_index];
+            try writeMultilineReportBlock(writer, path, info, haystack, output);
+            previous_included = info.block.end_line_index;
+            line_index = info.block.end_line_index + 1;
+            continue;
+        }
+
+        previous_included = line_index;
+        const line_span = line_spans[line_index];
+        try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output);
+        line_index += 1;
+    }
+
+    return true;
+}
+
+const MultilineMatchInfo = struct {
+    display: zigrep.search.report.DisplayBlockInfo,
+    match_span: zigrep.search.report.Span,
+};
+
+fn collectMultilineMatchesAlloc(
+    allocator: std.mem.Allocator,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    haystack: []const u8,
+) ![]MultilineMatchInfo {
+    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
+    defer allocator.free(line_spans);
+
+    const Context = struct {
+        allocator: std.mem.Allocator,
+        haystack: []const u8,
+        line_spans: []const zigrep.search.report.Span,
+        items: *std.ArrayList(MultilineMatchInfo),
+
+        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
+            try self.items.append(self.allocator, .{
+                .display = zigrep.search.report.deriveDisplayBlockInfo(self.haystack, self.line_spans, report.match_span),
+                .match_span = report.match_span,
+            });
+        }
+    };
+
+    var items: std.ArrayList(MultilineMatchInfo) = .empty;
+    errdefer items.deinit(allocator);
+
+    var context = Context{
+        .allocator = allocator,
+        .haystack = haystack,
+        .line_spans = line_spans,
+        .items = &items,
+    };
+
+    const matched = try searcher.forEachMatchReport(path, haystack, &context, Context.emit);
+    if (!matched) return allocator.alloc(MultilineMatchInfo, 0);
+    return items.toOwnedSlice(allocator);
+}
+
+fn mergeMultilineMatchesAlloc(
+    allocator: std.mem.Allocator,
+    matches: []const MultilineMatchInfo,
+) ![]zigrep.search.report.DisplayBlockInfo {
+    if (matches.len == 0) return allocator.alloc(zigrep.search.report.DisplayBlockInfo, 0);
+
+    const projected = try allocator.alloc(zigrep.search.report.DisplayBlock, matches.len);
+    defer allocator.free(projected);
+    for (matches, 0..) |match_info, index| projected[index] = match_info.display.block;
+
+    const merged_blocks = try zigrep.search.report.mergeDisplayBlocksAlloc(allocator, projected);
+    defer allocator.free(merged_blocks);
+
+    var merged_infos: std.ArrayList(zigrep.search.report.DisplayBlockInfo) = .empty;
+    defer merged_infos.deinit(allocator);
+
+    var match_index: usize = 0;
+    for (merged_blocks) |block| {
+        while (match_index < matches.len and matches[match_index].display.block.start_line_index < block.start_line_index) {
+            match_index += 1;
+        }
+        if (match_index >= matches.len) return error.InvalidFlagCombination;
+
+        try merged_infos.append(allocator, .{
+            .line_number = matches[match_index].display.line_number,
+            .column_number = matches[match_index].display.column_number,
+            .block = block,
+        });
+    }
+
+    return merged_infos.toOwnedSlice(allocator);
 }
 
 fn writeFileOutput(
@@ -1809,8 +2008,34 @@ fn writeFileLines(
     if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
         defer allocator.free(decoded);
         if (searcher.program.can_match_newline) {
-            if (invert_match or context_before != 0 or context_after != 0 or output.only_matching or output_format != .text or max_count != null or output.heading) {
+            if (invert_match or max_count != null) {
                 return error.InvalidFlagCombination;
+            }
+            if (output.only_matching) {
+                if (context_before != 0 or context_after != 0 or output_format == .json) {
+                    return error.InvalidFlagCombination;
+                }
+                return writeFileOnlyMatchingMultiline(allocator, writer, searcher, path, decoded, output);
+            }
+            if (context_before != 0 or context_after != 0) {
+                if (output_format != .text) return error.InvalidFlagCombination;
+                return writeFileReportsWithContextMultiline(
+                    allocator,
+                    writer,
+                    searcher,
+                    path,
+                    decoded,
+                    output,
+                    context_before,
+                    context_after,
+                );
+            }
+            if (output_format == .json) {
+                const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, decoded);
+                defer allocator.free(matches);
+                if (matches.len == 0) return false;
+                for (matches) |match_info| try writeMultilineJsonMatchEvent(writer, path, decoded, match_info, output);
+                return true;
             }
             return writeFileReportsMultiline(allocator, writer, searcher, path, decoded, output);
         }
@@ -1834,8 +2059,34 @@ fn writeFileLines(
     }
 
     if (searcher.program.can_match_newline) {
-        if (invert_match or context_before != 0 or context_after != 0 or output.only_matching or output_format != .text or max_count != null or output.heading) {
+        if (invert_match or max_count != null) {
             return error.InvalidFlagCombination;
+        }
+        if (output.only_matching) {
+            if (context_before != 0 or context_after != 0 or output_format == .json) {
+                return error.InvalidFlagCombination;
+            }
+            return writeFileOnlyMatchingMultiline(allocator, writer, searcher, path, bytes, output);
+        }
+        if (context_before != 0 or context_after != 0) {
+            if (output_format != .text) return error.InvalidFlagCombination;
+            return writeFileReportsWithContextMultiline(
+                allocator,
+                writer,
+                searcher,
+                path,
+                bytes,
+                output,
+                context_before,
+                context_after,
+            );
+        }
+        if (output_format == .json) {
+            const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, bytes);
+            defer allocator.free(matches);
+            if (matches.len == 0) return false;
+            for (matches) |match_info| try writeMultilineJsonMatchEvent(writer, path, bytes, match_info, output);
+            return true;
         }
         return writeFileReportsMultiline(allocator, writer, searcher, path, bytes, output);
     }
@@ -1910,6 +2161,8 @@ fn writeFileCount(
     output_format: OutputFormat,
     max_count: ?usize,
 ) !bool {
+    if (max_count != null and searcher.program.can_match_newline) return error.InvalidFlagCombination;
+
     const IterationStop = error{MaxCountReached};
 
     const Counter = struct {
@@ -1943,11 +2196,17 @@ fn writeFileCount(
 
     if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
         defer allocator.free(decoded);
+        if (searcher.program.can_match_newline) {
+            return writeFileCountMultiline(allocator, writer, searcher, path, decoded, output_format);
+        }
         _ = searcher.forEachLineReport(path, decoded, &counter, Counter.emit) catch |err| switch (err) {
             IterationStop.MaxCountReached => true,
             else => return err,
         };
     } else {
+        if (searcher.program.can_match_newline) {
+            return writeFileCountMultiline(allocator, writer, searcher, path, bytes, output_format);
+        }
         _ = searcher.forEachLineReport(path, bytes, &counter, Counter.emit) catch |err| switch (err) {
             IterationStop.MaxCountReached => true,
             else => return err,
@@ -2640,7 +2899,7 @@ test "runCli rejects unsupported multiline output combinations for now" {
         testing.allocator,
         &stdout_capture.writer,
         &stderr_capture.writer,
-        &.{ "zigrep", "-U", "--only-matching", "needle", "." },
+        &.{ "zigrep", "-U", "--max-count", "1", "needle", "." },
     ));
 }
 
@@ -3604,6 +3863,151 @@ test "runCli multiline mode prints merged multiline blocks in normal text output
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.endsWith(u8, run.stdout, "multi.txt:2:1:abc\ndefxxxabc\ndefxxx\n"));
     try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli multiline only-matching mode prints each exact multiline match" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "multi.txt",
+        .data =
+            "zero\n" ++
+            "abc\n" ++
+            "def\n" ++
+            "abc\n" ++
+            "def\n" ++
+            "tail\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "--only-matching", "abc\\ndef", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt:2:1:abc\ndef\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt:4:1:abc\ndef\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli multiline count mode counts multiline matches" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "multi.txt",
+        .data =
+            "abc\n" ++
+            "def\n" ++
+            "gap\n" ++
+            "abc\n" ++
+            "def\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "--count", "abc\\ndef", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.endsWith(u8, run.stdout, "multi.txt:2\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli multiline context mode expands around merged blocks" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "multi.txt",
+        .data =
+            "before\n" ++
+            "abc\n" ++
+            "def\n" ++
+            "after\n" ++
+            "gap1\n" ++
+            "gap2\n" ++
+            "abc\n" ++
+            "def\n" ++
+            "tail\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "-C", "1", "abc\\ndef", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-1-before\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt:2:1:abc\ndef\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-4-after\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "--\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-6-gap2\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt:7:1:abc\ndef\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-9-tail\n"));
+}
+
+test "runCli multiline json mode emits per-match events with raw spans" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "multi.txt",
+        .data =
+            "abc\n" ++
+            "def\n" ++
+            "abc\n" ++
+            "def\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "--json", "abc\\ndef", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"match\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_number\":1,\"column_number\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line\":\"abc\\ndef\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_span\":{\"start\":0,\"end\":7}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"match_span\":{\"start\":0,\"end\":7}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_number\":3,\"column_number\":1"));
+}
+
+test "runCli multiline heading mode groups blocks by file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "multi.txt",
+        .data =
+            "abc\n" ++
+            "def\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "--heading", "abc\\ndef", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt\n1:1:abc\ndef\n"));
 }
 
 test "runCli count mode prints per-file matching line counts" {

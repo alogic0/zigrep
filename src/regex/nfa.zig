@@ -52,6 +52,7 @@ pub const Program = struct {
     prefilter: ?literal_mod.Prefilter,
     ascii_only: bool,
     dot_matches_new_line: bool,
+    can_match_newline: bool,
 
     pub fn deinit(self: Program, allocator: std.mem.Allocator) void {
         for (self.instructions) |inst| {
@@ -85,6 +86,7 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options:
     if (!options.multiline and hirCanMatchNewline(compiled_hir, compiled_hir.root, options.multiline_dotall)) {
         return error.MultilineRequired;
     }
+    const can_match_newline = hirCanMatchNewline(compiled_hir, compiled_hir.root, options.multiline_dotall);
 
     var compiler = Compiler{
         .allocator = allocator,
@@ -114,6 +116,7 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options:
         .prefilter = try literal_mod.duplicatePrefilter(allocator, compiled_hir.literals),
         .ascii_only = isAsciiOnly(compiler.instructions.items),
         .dot_matches_new_line = options.multiline_dotall,
+        .can_match_newline = can_match_newline,
     };
 }
 

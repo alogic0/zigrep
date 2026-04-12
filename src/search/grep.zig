@@ -2012,6 +2012,68 @@ test "Searcher multiline and dotall flags change newline matching semantics" {
     try testing.expect((try dotall.reportFirstMatch("sample.txt", "a\nb")) != null);
 }
 
+test "Searcher forEachMatchReport advances across repeated multiline matches" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a\\nb", .{
+        .multiline = true,
+    });
+    defer searcher.deinit();
+
+    const Context = struct {
+        allocator: std.mem.Allocator,
+        spans: std.ArrayList(Span),
+
+        fn emit(self: *@This(), report: MatchReport) !void {
+            try self.spans.append(self.allocator, report.match_span);
+        }
+    };
+
+    var context = Context{
+        .allocator = testing.allocator,
+        .spans = .empty,
+    };
+    defer context.spans.deinit(testing.allocator);
+
+    const matched = try searcher.forEachMatchReport("sample.txt", "a\nba\nb", &context, Context.emit);
+    try testing.expect(matched);
+    try testing.expectEqual(@as(usize, 2), context.spans.items.len);
+    try testing.expectEqual(Span{ .start = 0, .end = 3 }, context.spans.items[0]);
+    try testing.expectEqual(Span{ .start = 3, .end = 6 }, context.spans.items[1]);
+}
+
+test "Searcher forEachMatchReport advances through zero-width multiline matches" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "", .{
+        .multiline = true,
+    });
+    defer searcher.deinit();
+
+    const Context = struct {
+        allocator: std.mem.Allocator,
+        spans: std.ArrayList(Span),
+
+        fn emit(self: *@This(), report: MatchReport) !void {
+            try self.spans.append(self.allocator, report.match_span);
+        }
+    };
+
+    var context = Context{
+        .allocator = testing.allocator,
+        .spans = .empty,
+    };
+    defer context.spans.deinit(testing.allocator);
+
+    const matched = try searcher.forEachMatchReport("sample.txt", "a\nb", &context, Context.emit);
+    try testing.expect(matched);
+    try testing.expectEqual(@as(usize, 4), context.spans.items.len);
+    try testing.expectEqual(Span{ .start = 0, .end = 0 }, context.spans.items[0]);
+    try testing.expectEqual(Span{ .start = 1, .end = 1 }, context.spans.items[1]);
+    try testing.expectEqual(Span{ .start = 2, .end = 2 }, context.spans.items[2]);
+    try testing.expectEqual(Span{ .start = 3, .end = 3 }, context.spans.items[3]);
+}
+
 test "Searcher covers every HIR node kind on invalid UTF-8 input" {
     // empty
     try expectInvalidUtf8MatchSpan("", "\xff", .{ .start = 0, .end = 0 });

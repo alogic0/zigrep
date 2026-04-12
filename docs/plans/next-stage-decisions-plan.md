@@ -82,21 +82,26 @@ maintenance cost.
 - [x] Wire normal text output:
   - print the merged covered line block for each multiline match group
 
-- [ ] Wire `--only-matching`:
+- [x] Wire `--only-matching`:
   - print the exact matched substring, even across lines
 
-- [ ] Wire `--count`:
+- [x] Wire `--count`:
   - count multiline matches, not lines
 
-- [ ] Wire context mode:
+- [x] Wire context mode:
   - expand around merged display blocks, not around individual internal lines
 
-- [ ] Define and implement JSON semantics:
+- [x] Define and implement JSON semantics:
   - whether match text is the exact match or projected line block
   - whether byte spans remain raw match spans or displayed block spans
 
-- [ ] Explicitly review `--heading`, `--stats`, `--max-count`, `-v`,
+- [x] Explicitly review `--heading`, `--stats`, `--max-count`, `-v`,
   `--files-with-matches`, and `--files-without-match` under multiline mode.
+  Current boundary:
+  - supported: normal text output, `--only-matching`, `--count`, context mode,
+    JSON output, `--heading`, `--stats`, `--files-with-matches`, and
+    `--files-without-match`
+  - still rejected: `-m` / `--max-count` and `-v` / `--invert-match`
 
 ### Phase 5: End-To-End Validation
 

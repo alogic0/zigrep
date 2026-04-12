@@ -139,15 +139,25 @@ Context mode note:
 
 Multiline status note:
 
-- `-U` / `--multiline` and `--multiline-dotall` are reserved in the CLI surface now
-- the current build supports multiline in normal text line output
+- `-U` / `--multiline` enables searches that can span line terminators
+- `--multiline-dotall` makes `.` match `\n` in multiline mode
 - the pinned target semantics for implementation are:
   - multiline mode permits matches to span line terminators
   - `.` still does not match `\n` by default
   - `--multiline-dotall` makes `.` match `\n`
   - multiline reporting will stay line-oriented by projecting full match spans back to covered display lines
 - the current text output prints one merged display block per multiline match group, with line and column prefixes anchored to the first matched line
-- unsupported multiline combinations are still rejected for now, including `--only-matching`, context mode, `--count`, JSON output, invert-match, heading mode, and `--max-count`
+- `--only-matching` in multiline mode prints the exact matched substring, even across lines, with prefixes anchored to the first matched line
+- `--count` in multiline mode counts multiline matches, not lines
+- context mode in multiline mode expands around merged display blocks instead of individual internal match lines
+- `--json` in multiline mode emits one `match` event per raw multiline match
+  - `line_number` and `column_number` stay anchored to the first matched line
+  - `match_span` stays the raw exact match span
+  - `line_span` is the projected display-block span in normal multiline line mode and the raw exact match span in multiline `--only-matching`
+- `--heading`, `--stats`, `--files-with-matches`, and `--files-without-match` are supported in multiline mode
+- unsupported multiline combinations are still rejected for now:
+  - `-v` / `--invert-match`
+  - `-m` / `--max-count`
 
 For non-technical users:
 
@@ -269,7 +279,6 @@ The current search tool does not yet implement:
 - `.gitignore` compatibility beyond the small internal ignore-rule subset
 - stdin search
 - replacement/substitution
-- full multiline output-mode support beyond the current normal text line mode
 - full ripgrep flag compatibility
 
 ## Performance Model
