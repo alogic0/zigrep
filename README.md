@@ -94,9 +94,22 @@ Then run:
 Regex and CLI scope are documented in:
 
 - [docs/supported-syntax.md](docs/supported-syntax.md)
+- [docs/invalid-utf8-semantics.md](docs/invalid-utf8-semantics.md)
 
 That document also explains the `--buffered` and `--mmap` options in
 non-technical terms.
+
+## Invalid UTF-8 Behavior
+
+`zigrep` can search files that contain invalid UTF-8 bytes.
+
+- By default, binary-looking files may still be skipped by heuristic.
+- `--text` disables that binary-file skipping and forces the file through the matcher.
+- Once a file is searched, invalid UTF-8 is matched against the original file bytes through the raw-byte matcher path.
+- Invalid bytes and unsafe control bytes are printed as `\xNN` escapes instead of being written raw to the terminal.
+
+The exact matching rules are documented in
+[docs/invalid-utf8-semantics.md](docs/invalid-utf8-semantics.md).
 
 ## Project Notes
 
