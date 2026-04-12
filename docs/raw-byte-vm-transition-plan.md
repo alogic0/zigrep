@@ -6,8 +6,8 @@ matcher path.
 
 ## Goal
 
-- [ ] Remove `sanitizeInvalidUtf8Lossy(...)` from [src/main.zig](/home/oleg/prog/zigrep/src/main.zig)
-- [ ] Stop using the lossy shadow haystack for any regex shape
+- [x] Remove `sanitizeInvalidUtf8Lossy(...)` from [src/main.zig](/home/oleg/prog/zigrep/src/main.zig)
+- [x] Stop using the lossy shadow haystack for any regex shape
 - [ ] Keep reported output based on the original file bytes
 - [ ] Preserve current line/column and capture reporting behavior
 
@@ -94,17 +94,17 @@ when no planner path exists.
 
 ## Phase 4: Replace Planner-Only Invalid-UTF-8 Matching
 
-- [ ] Route invalid-UTF-8 matching through the general raw-byte engine instead of the current planner/fallback split
-- [ ] Keep the current planner only if it remains useful as an optimization, not as a correctness boundary
-- [ ] Make default mode and `--text` differ only by file-selection policy, not by core invalid-UTF-8 matching capability
-- [ ] Remove the remaining cases where invalid UTF-8 silently degrades to lossy shadow matching
+- [x] Route invalid-UTF-8 matching through the general raw-byte engine instead of the current planner/fallback split
+- [x] Keep the current planner only if it remains useful as an optimization, not as a correctness boundary
+- [x] Make default mode and `--text` differ only by file-selection policy, not by core invalid-UTF-8 matching capability
+- [x] Remove the remaining cases where invalid UTF-8 silently degrades to lossy shadow matching
 
 ## Phase 5: Remove The Lossy Fallback
 
-- [ ] Delete `sanitizeInvalidUtf8Lossy(...)`
-- [ ] Remove the `allow_lossy_invalid_utf8` control flow from [src/main.zig](/home/oleg/prog/zigrep/src/main.zig)
-- [ ] Remove lossy-fallback-only tests and replace them with raw-byte engine expectations
-- [ ] Update docs to remove temporary lossy-fallback wording
+- [x] Delete `sanitizeInvalidUtf8Lossy(...)`
+- [x] Remove the `allow_lossy_invalid_utf8` control flow from [src/main.zig](/home/oleg/prog/zigrep/src/main.zig)
+- [x] Remove lossy-fallback-only tests and replace them with raw-byte engine expectations
+- [x] Update docs to remove temporary lossy-fallback wording
 
 ## Testing
 

@@ -56,7 +56,7 @@ encoding behavior without rewriting the whole architecture around generic
 - [x] Add UTF-16LE and UTF-16BE decoding support
 - [x] Add explicit encoding configuration
 - [x] Normalize output behavior for non-UTF-8 matches
-- [ ] Remove the current lossy `?` fallback once byte-oriented handling replaces it
+- [x] Remove the current lossy `?` fallback once byte-oriented handling replaces it
 
 ## Cross-Cutting Deliverables
 
@@ -168,3 +168,7 @@ encoding behavior without rewriting the whole architecture around generic
   planner-friendly patterns now ride that raw-byte path too, so cases like
   `a()b` no longer need the lossy retry just because the file contains
   unrelated invalid bytes.
+- Invalid UTF-8 matching now routes through the raw-byte matcher path only:
+  the planner remains as a fast path, the general raw-byte VM covers
+  non-planner shapes, and the old lossy `?` retry has been removed from
+  `src/main.zig`.

@@ -290,7 +290,8 @@ fn searchEntriesSequential(
 
     var matched = false;
     for (entries) |entry| {
-        // File-lifetime allocator: buffered reads, lossy text-mode sanitizing,
+        // File-lifetime allocator: buffered reads and temporary per-file
+        // matching/reporting allocations,
         // and temporary formatted output for one file are reclaimed together.
         var file_arena_state = std.heap.ArenaAllocator.init(allocator);
         defer file_arena_state.deinit();
@@ -312,7 +313,7 @@ fn searchEntriesSequential(
         };
         defer buffer.deinit(file_allocator);
 
-        if (try reportFileMatch(file_allocator, &searcher, entry.path, buffer.bytes(), options.encoding, !options.skip_binary)) |report| {
+            if (try reportFileMatch(file_allocator, &searcher, entry.path, buffer.bytes(), options.encoding)) |report| {
             defer report.deinit(file_allocator);
             try printReport(stdout, report, options.output);
             matched = true;
@@ -425,7 +426,7 @@ fn searchEntriesParallel(
             };
             defer buffer.deinit(file_allocator);
 
-            if (try reportFileMatch(file_allocator, searcher, entry.path, buffer.bytes(), self.options.encoding, !self.options.skip_binary)) |report| {
+            if (try reportFileMatch(file_allocator, searcher, entry.path, buffer.bytes(), self.options.encoding)) |report| {
                 defer report.deinit(file_allocator);
                 self.result_reports[index] = .{
                     .path = entry.path,
@@ -549,7 +550,6 @@ fn reportFileMatch(
     path: []const u8,
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
-    allow_lossy_invalid_utf8: bool,
 ) !?zigrep.search.grep.MatchReport {
     if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
         defer allocator.free(decoded);
@@ -565,64 +565,10 @@ fn reportFileMatch(
 
     return searcher.reportFirstMatch(path, bytes) catch |err| switch (err) {
         error.InvalidUtf8 => blk: {
-            if (try searcher.reportFirstByteMatch(path, bytes)) |report| {
-                break :blk report;
-            }
-            if (!allow_lossy_invalid_utf8) break :blk null;
-            if (searcher.hasBytePlan()) return null;
-
-            const sanitized = try sanitizeInvalidUtf8Lossy(allocator, bytes);
-            defer allocator.free(sanitized);
-            if (try searcher.reportFirstMatch(path, sanitized)) |report| {
-                var stable = report;
-                stable.line = bytes[report.line_span.start..report.line_span.end];
-                stable.owned_line = null;
-                break :blk stable;
-            }
-            break :blk null;
+            break :blk try searcher.reportFirstByteMatch(path, bytes);
         },
         else => err,
     };
-}
-
-fn sanitizeInvalidUtf8Lossy(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
-    // Temporary invalid-UTF-8 semantics:
-    // for non-literal patterns, replace each decoding-breaking byte with '?'
-    // so the current UTF-8 regex engine can retry the match. Exact ASCII
-    // literals use a byte-oriented fallback before this lossy path. Printed
-    // reports still come from the original file bytes.
-    var sanitized = try allocator.alloc(u8, bytes.len);
-    var read_index: usize = 0;
-    var write_index: usize = 0;
-
-    while (read_index < bytes.len) {
-        const sequence_len = std.unicode.utf8ByteSequenceLength(bytes[read_index]) catch {
-            sanitized[write_index] = '?';
-            read_index += 1;
-            write_index += 1;
-            continue;
-        };
-        if (read_index + sequence_len > bytes.len) {
-            sanitized[write_index] = '?';
-            read_index += 1;
-            write_index += 1;
-            continue;
-        }
-
-        const sequence = bytes[read_index .. read_index + sequence_len];
-        _ = std.unicode.utf8Decode(sequence) catch {
-            sanitized[write_index] = '?';
-            read_index += 1;
-            write_index += 1;
-            continue;
-        };
-
-        @memcpy(sanitized[write_index .. write_index + sequence_len], sequence);
-        read_index += sequence_len;
-        write_index += sequence_len;
-    }
-
-    return sanitized;
 }
 
 fn formatReport(
@@ -1178,7 +1124,7 @@ test "runCli skips invalid UTF-8 files instead of aborting the whole search" {
     try testing.expect(!std.mem.containsAtLeast(u8, run.stderr, 1, "InvalidUtf8"));
 }
 
-test "runCli text mode retries invalid UTF-8 files through lossy sanitizing" {
+test "runCli text mode searches invalid UTF-8 files through the raw-byte matcher" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -1200,7 +1146,7 @@ test "runCli text mode retries invalid UTF-8 files through lossy sanitizing" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
-test "runCli text mode lets dot match a temporary invalid-byte placeholder" {
+test "runCli text mode lets dot match an invalid byte through the raw-byte matcher" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -1242,15 +1188,6 @@ test "runCli text mode matches UTF-8 literals through the byte path on invalid U
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8.bin:1:4:xx\\xFFжарyy"));
     try testing.expectEqualStrings("", run.stderr);
-}
-
-test "sanitizeInvalidUtf8Lossy replaces isolated invalid bytes with question marks" {
-    const testing = std.testing;
-
-    const sanitized = try sanitizeInvalidUtf8Lossy(testing.allocator, "a\xffb");
-    defer testing.allocator.free(sanitized);
-
-    try testing.expectEqualStrings("a?b", sanitized);
 }
 
 test "runCli default mode uses the raw-byte path for planner-covered invalid UTF-8 files" {
@@ -1759,48 +1696,43 @@ test "reportFileMatch only owns line bytes for transformed haystacks" {
     var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{});
     defer searcher.deinit();
 
-    const normal = (try reportFileMatch(testing.allocator, &searcher, "normal.txt", "xxneedleyy", .auto, false)).?;
+    const normal = (try reportFileMatch(testing.allocator, &searcher, "normal.txt", "xxneedleyy", .auto)).?;
     defer normal.deinit(testing.allocator);
     try testing.expect(normal.owned_line == null);
 
-    const decoded = (try reportFileMatch(testing.allocator, &searcher, "utf16.txt", "\xff\xfen\x00e\x00e\x00d\x00l\x00e\x00", .auto, false)).?;
+    const decoded = (try reportFileMatch(testing.allocator, &searcher, "utf16.txt", "\xff\xfen\x00e\x00e\x00d\x00l\x00e\x00", .auto)).?;
     defer decoded.deinit(testing.allocator);
     try testing.expect(decoded.owned_line != null);
     try testing.expectEqualStrings("needle", decoded.line);
 
-    const lossy = (try reportFileMatch(testing.allocator, &searcher, "lossy.bin", "xx\xffneedleyy", .auto, true)).?;
-    defer lossy.deinit(testing.allocator);
-    try testing.expect(lossy.owned_line == null);
-    try testing.expectEqualStrings("xx\xffneedleyy", lossy.line);
+    const invalid = (try reportFileMatch(testing.allocator, &searcher, "invalid.bin", "xx\xffneedleyy", .auto)).?;
+    defer invalid.deinit(testing.allocator);
+    try testing.expect(invalid.owned_line == null);
+    try testing.expectEqualStrings("xx\xffneedleyy", invalid.line);
 }
 
-test "reportFileMatch uses byte matching for planner-covered invalid UTF-8 even without lossy mode" {
+test "reportFileMatch uses byte matching for planner-covered invalid UTF-8 input" {
     const testing = std.testing;
 
     var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{});
     defer searcher.deinit();
 
-    const report = (try reportFileMatch(testing.allocator, &searcher, "plain.bin", "xx\xffneedleyy", .auto, false)).?;
+    const report = (try reportFileMatch(testing.allocator, &searcher, "plain.bin", "xx\xffneedleyy", .auto)).?;
     defer report.deinit(testing.allocator);
     try testing.expect(report.owned_line == null);
     try testing.expectEqualStrings("xx\xffneedleyy", report.line);
 }
 
-test "reportFileMatch skips lossy retry when the byte planner already covers the pattern" {
+test "reportFileMatch uses the raw-byte matcher when the planner does not cover the pattern" {
     const testing = std.testing;
 
-    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "жар", .{});
+    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "(^ab)y", .{});
     defer searcher.deinit();
 
-    const report = (try reportFileMatch(testing.allocator, &searcher, "utf8.bin", "xx\xffжарyy", .auto, true)).?;
+    const report = (try reportFileMatch(testing.allocator, &searcher, "raw-vm.bin", "aby\xff", .auto)).?;
     defer report.deinit(testing.allocator);
     try testing.expect(report.owned_line == null);
-    try testing.expectEqualStrings("xx\xffжарyy", report.line);
-
-    var miss_searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "a.b", .{});
-    defer miss_searcher.deinit();
-
-    try testing.expect((try reportFileMatch(testing.allocator, &miss_searcher, "dot.bin", "a\xff\xffb", .auto, true)) == null);
+    try testing.expectEqualStrings("aby\xff", report.line);
 }
 
 test "runCli output toggles apply across the end-to-end path" {

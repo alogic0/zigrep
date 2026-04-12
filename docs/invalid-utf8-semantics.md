@@ -3,26 +3,16 @@
 This note defines the current `zigrep` behavior for files that are treated as
 searchable text but still contain invalid UTF-8 bytes.
 
-It is a temporary contract until the repo grows a true byte-oriented search
-path. The long-term replacement plan remains in
-[docs/rg-binary-encoding-plan.md](/home/oleg/prog/zigrep/docs/rg-binary-encoding-plan.md).
-
 ## Current Rules
 
 - Default mode does not abort the whole search on invalid UTF-8.
 - If a file is classified as binary, default mode still skips it before matching.
 - If a file is classified as text and the pattern is covered by the current
   raw-byte matcher, default mode uses that raw-byte path too.
-- If a file is classified as text but the pattern still falls outside the
-  raw-byte matcher, the file currently behaves like "no match" in default
-  mode.
-- `--text` first uses the raw-byte matcher and only falls back to a temporary
-  lossy shadow haystack after that matcher path.
-- Before that lossy retry, exact, anchored, and simple alternated literal
-  patterns get a true raw-byte search path against the original file bytes.
-- The current implementation now also has a general raw-byte VM fallback for
-  patterns that do not have a planner path, while still reusing the planner as
-  a fast path when it exists.
+- If a file is classified as text, both default mode and `--text` use the same
+  raw-byte matcher semantics on invalid UTF-8 input.
+- The current implementation has a planner fast path plus a general raw-byte VM
+  fallback, both operating against the original file bytes.
 - Those literal-byte paths now cover UTF-8 literals from the pattern too, not
   just ASCII-only literals.
 - The current raw-byte path also covers simple concat sequences built from
@@ -54,14 +44,6 @@ path. The long-term replacement plan remains in
 - Planner-friendly captures on that same subset now preserve group spans on
   the raw-byte path too, including simple repeated-group cases such as
   `(ab)+c`.
-- The lossy shadow haystack replaces each invalid byte that breaks UTF-8
-  decoding with the single ASCII byte `?`.
-- Matching uses that lossy shadow haystack only as an internal aid. Printed
-  output still comes from the original file bytes.
-- The lossy shadow haystack is now only used after the raw-byte matcher path
-  fails, and is still a temporary compatibility fallback rather than the
-  intended final design.
-
 ## Regex Meaning In The Current Invalid-UTF-8 Path
 
 Under the current invalid-UTF-8 behavior:
@@ -82,25 +64,18 @@ Under the current invalid-UTF-8 behavior:
   planner for structural reasons, not because the class itself is larger.
 - Planner-friendly capture groups on that raw-byte subset keep capture spans
   instead of degrading to whole-match-only reporting.
-- Under `--text`, patterns outside that subset still retry through the lossy
-  shadow haystack, so `.` can match a replaced invalid byte because the matcher
-  sees `?`.
+- Patterns outside the planner subset still use the same raw-byte matcher
+  semantics through the general byte-oriented VM path.
 - Anchors and newline behavior still follow the current regex engine rules.
 - Column numbers and line spans stay byte-oriented against the original file
   bytes.
 
 ## Output Behavior
 
-- Reported lines come from the original file bytes, not the lossy shadow
-  haystack.
+- Reported lines come from the original file bytes.
 - Invalid bytes and unsafe control bytes are escaped as `\xNN` when printed.
 - This avoids writing raw binary noise to the terminal while still showing the
   real underlying bytes that contributed to the match.
-
-## Scope
-
-This note only describes the current temporary behavior. It is not the intended
-final design for raw-byte matching.
 
 ## Target Engine-Level Semantics
 
