@@ -99,8 +99,7 @@ fn runCli(
             return 0;
         },
         .run => |opts| {
-            _ = stderr;
-            return runSearch(allocator, stdout, opts);
+            return runSearch(allocator, stdout, stderr, opts);
         },
     }
 }
@@ -220,11 +219,12 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
 fn runSearch(
     allocator: std.mem.Allocator,
     stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
     options: CliOptions,
 ) !u8 {
     var matched = false;
     for (options.paths) |path| {
-        if (try searchPath(allocator, stdout, path, options)) {
+        if (try searchPath(allocator, stdout, stderr, path, options)) {
             matched = true;
         }
     }
@@ -234,6 +234,7 @@ fn runSearch(
 fn searchPath(
     allocator: std.mem.Allocator,
     stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
     root_path: []const u8,
     options: CliOptions,
 ) !bool {
@@ -251,14 +252,15 @@ fn searchPath(
         .requested_jobs = options.parallel_jobs,
     });
     if (schedule.parallel) {
-        return searchEntriesParallel(stdout, entries, options, schedule);
+        return searchEntriesParallel(stdout, stderr, entries, options, schedule);
     }
-    return searchEntriesSequential(allocator, stdout, entries, options);
+    return searchEntriesSequential(allocator, stdout, stderr, entries, options);
 }
 
 fn searchEntriesSequential(
     allocator: std.mem.Allocator,
     stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
     entries: []const zigrep.search.walk.Entry,
     options: CliOptions,
 ) !bool {
@@ -268,12 +270,19 @@ fn searchEntriesSequential(
     var matched = false;
     for (entries) |entry| {
         if (options.skip_binary) {
-            if (try zigrep.search.io.detectBinaryFile(entry.path, .{}) == .binary) continue;
+            const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
+                if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
+                return err;
+            };
+            if (decision == .binary) continue;
         }
 
-        const buffer = try zigrep.search.io.readFile(allocator, entry.path, .{
+        const buffer = zigrep.search.io.readFile(allocator, entry.path, .{
             .strategy = options.read_strategy,
-        });
+        }) catch |err| {
+            if (try warnAndSkipFileError(stderr, entry.path, err)) continue;
+            return err;
+        };
         defer buffer.deinit(allocator);
 
         if (try reportFileMatch(allocator, &searcher, entry.path, buffer.bytes(), !options.skip_binary)) |report| {
@@ -288,16 +297,18 @@ fn searchEntriesSequential(
 
 fn searchEntriesParallel(
     stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
     entries: []const zigrep.search.walk.Entry,
     options: CliOptions,
     schedule: zigrep.search.schedule.Plan,
 ) !bool {
     const worker_allocator = std.heap.smp_allocator;
     if (schedule.worker_count <= 1) {
-        return searchEntriesSequential(worker_allocator, stdout, entries, options);
+        return searchEntriesSequential(worker_allocator, stdout, stderr, entries, options);
     }
 
     const Context = struct {
+        stderr: *std.Io.Writer,
         entries: []const zigrep.search.walk.Entry,
         options: CliOptions,
         schedule: zigrep.search.schedule.Plan,
@@ -305,6 +316,7 @@ fn searchEntriesParallel(
         result_lines: []?[]u8,
         first_error: ?anyerror = null,
         error_mutex: std.Thread.Mutex = .{},
+        warning_mutex: std.Thread.Mutex = .{},
 
         fn setError(self: *@This(), err: anyerror) void {
             self.error_mutex.lock();
@@ -343,18 +355,31 @@ fn searchEntriesParallel(
             entry: zigrep.search.walk.Entry,
         ) !void {
             if (self.options.skip_binary) {
-                if (try zigrep.search.io.detectBinaryFile(entry.path, .{}) == .binary) return;
+                const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
+                    if (try self.warnAndSkip(entry.path, err)) return;
+                    return err;
+                };
+                if (decision == .binary) return;
             }
 
-            const buffer = try zigrep.search.io.readFile(std.heap.smp_allocator, entry.path, .{
+            const buffer = zigrep.search.io.readFile(std.heap.smp_allocator, entry.path, .{
                 .strategy = self.options.read_strategy,
-            });
+            }) catch |err| {
+                if (try self.warnAndSkip(entry.path, err)) return;
+                return err;
+            };
             defer buffer.deinit(std.heap.smp_allocator);
 
             if (try reportFileMatch(std.heap.smp_allocator, searcher, entry.path, buffer.bytes(), !self.options.skip_binary)) |report| {
                 defer report.deinit(std.heap.smp_allocator);
                 self.result_lines[index] = try formatReport(std.heap.smp_allocator, report, self.options.output);
             }
+        }
+
+        fn warnAndSkip(self: *@This(), path: []const u8, err: anyerror) !bool {
+            self.warning_mutex.lock();
+            defer self.warning_mutex.unlock();
+            return warnAndSkipFileError(self.stderr, path, err);
         }
     };
 
@@ -371,6 +396,7 @@ fn searchEntriesParallel(
 
     var wait_group: std.Thread.WaitGroup = .{};
     var context = Context{
+        .stderr = stderr,
         .entries = entries,
         .options = options,
         .schedule = schedule,
@@ -404,6 +430,24 @@ fn printReport(stdout: *std.Io.Writer, report: zigrep.search.grep.MatchReport, o
     const line = try formatReport(std.heap.smp_allocator, report, output);
     defer std.heap.smp_allocator.free(line);
     try stdout.writeAll(line);
+}
+
+fn warnAndSkipFileError(writer: *std.Io.Writer, path: []const u8, err: anyerror) !bool {
+    if (!shouldWarnAndSkipFileError(err)) return false;
+    try writer.print("warning: skipping {s}: {s}\n", .{ path, @errorName(err) });
+    return true;
+}
+
+fn shouldWarnAndSkipFileError(err: anyerror) bool {
+    return switch (err) {
+        error.FileNotFound,
+        error.AccessDenied,
+        error.NotDir,
+        error.NameTooLong,
+        error.SymLinkLoop,
+        => true,
+        else => false,
+    };
 }
 
 fn reportFileMatch(
@@ -798,8 +842,10 @@ test "runSearch reports matches across files on the parallel path" {
 
     var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
     defer stdout_capture.deinit();
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
 
-    const exit_code = try runSearch(testing.allocator, &stdout_capture.writer, .{
+    const exit_code = try runSearch(testing.allocator, &stdout_capture.writer, &stderr_capture.writer, .{
         .pattern = "needle",
         .paths = &.{root_path},
         .parallel_jobs = 2,
@@ -808,6 +854,32 @@ test "runSearch reports matches across files on the parallel path" {
     try testing.expectEqual(@as(u8, 0), exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:1:1:needle one"));
     try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt:1:1:needle two"));
+    try testing.expectEqualStrings("", stderr_capture.written());
+}
+
+test "searchEntriesSequential warns and skips unreadable files" {
+    const testing = std.testing;
+
+    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stdout_capture.deinit();
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    const missing_path = try testing.allocator.dupe(u8, "missing-file-for-zigrep-test");
+    defer testing.allocator.free(missing_path);
+
+    const entries = [_]zigrep.search.walk.Entry{
+        .{ .path = missing_path, .kind = .file, .depth = 0 },
+    };
+
+    const matched = try searchEntriesSequential(testing.allocator, &stdout_capture.writer, &stderr_capture.writer, &entries, .{
+        .pattern = "needle",
+        .paths = &.{"."},
+    });
+
+    try testing.expect(!matched);
+    try testing.expectEqualStrings("", stdout_capture.written());
+    try testing.expect(std.mem.containsAtLeast(u8, stderr_capture.written(), 1, "warning: skipping missing-file-for-zigrep-test: FileNotFound\n"));
 }
 
 test "search scheduler keeps tiny workloads on the sequential path" {
