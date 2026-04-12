@@ -3150,6 +3150,42 @@ test "runCli command-line flags override config defaults" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli no-config disables config file defaults" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "zigrep.conf",
+        .data = "--count\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const config_path = try std.fs.path.join(testing.allocator, &.{ root_path, "zigrep.conf" });
+    defer testing.allocator.free(config_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--config-path",
+        config_path,
+        "--no-config",
+        "needle",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:needle one"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runSearch reports matches across files on the parallel path" {
     const testing = std.testing;
 
@@ -3945,6 +3981,36 @@ test "runCli stats mode prints search summary to stderr" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "warnings_emitted=0"));
 }
 
+test "runCli json count mode can emit stats on stderr" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one\nneedle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--json",
+        "--count",
+        "--stats",
+        "needle",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"count\":2"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "stats: searched_files=1"));
+}
+
 test "runCli heading mode groups matches by file" {
     const testing = std.testing;
 
@@ -4331,6 +4397,61 @@ test "runCli compressed search mode finds matches in gzip files" {
     defer zip_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), zip_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, zip_run.stdout, 1, "sample.txt.gz:1:1:Hello world"));
+}
+
+test "runCli preprocessor takes precedence over compressed search" {
+    const testing = std.testing;
+
+    const gzip_hello = [_]u8{
+        0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x03,
+        0xf3, 0x48, 0xcd, 0xc9, 0xc9, 0x57, 0x28, 0xcf,
+        0x2f, 0xca, 0x49, 0xe1, 0x02, 0x00,
+        0xd5, 0xe0, 0x39, 0xb7, 0x0c, 0x00, 0x00, 0x00,
+    };
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt.gz",
+        .data = &gzip_hello,
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "pre.sh",
+        .data =
+            "#!/bin/sh\n" ++
+            "printf 'needle from pre\\n'\n",
+    });
+
+    var script = try tmp.dir.openFile("pre.sh", .{ .mode = .read_write });
+    defer script.close();
+    try script.chmod(0o755);
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+    const script_path = try std.fs.path.join(testing.allocator, &.{ root_path, "pre.sh" });
+    defer testing.allocator.free(script_path);
+    const pre_command = try std.fmt.allocPrint(testing.allocator, "/bin/sh {s}", .{script_path});
+    defer testing.allocator.free(pre_command);
+
+    const run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-j",
+        "1",
+        "-z",
+        "--pre",
+        pre_command,
+        "--pre-glob",
+        "*.gz",
+        "needle",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt.gz:1:1:needle from pre"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "Hello world"));
+    try testing.expectEqualStrings("", run.stderr);
 }
 
 test "runCli compressed search warns and skips invalid compressed input" {
@@ -5343,4 +5464,64 @@ test "runCli binary detection stays consistent across buffered and mmap reads" {
     try testing.expectEqual(@as(u8, 0), mmap_binary.exit_code);
     try testing.expectEqualStrings(buffered_binary.stdout, mmap_binary.stdout);
     try testing.expectEqualStrings(buffered_binary.stderr, mmap_binary.stderr);
+}
+
+test "runCli type, glob, and ignore controls compose on the end-to-end path" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = ".gitignore",
+        .data = "ignored.zig\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "shown.zig",
+        .data = "needle shown\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "ignored.zig",
+        .data = "needle hidden\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "other.txt",
+        .data = "needle text\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const default_run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-t",
+        "zig",
+        "-g",
+        "*.zig",
+        "needle",
+        root_path,
+    });
+    defer default_run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), default_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, default_run.stdout, 1, "shown.zig:1:1:needle shown"));
+    try testing.expect(!std.mem.containsAtLeast(u8, default_run.stdout, 1, "ignored.zig"));
+    try testing.expect(!std.mem.containsAtLeast(u8, default_run.stdout, 1, "other.txt"));
+
+    const unrestricted_run = try runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-u",
+        "-t",
+        "zig",
+        "-g",
+        "*.zig",
+        "needle",
+        root_path,
+    });
+    defer unrestricted_run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), unrestricted_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, unrestricted_run.stdout, 1, "shown.zig:1:1:needle shown"));
+    try testing.expect(std.mem.containsAtLeast(u8, unrestricted_run.stdout, 1, "ignored.zig:1:1:needle hidden"));
+    try testing.expect(!std.mem.containsAtLeast(u8, unrestricted_run.stdout, 1, "other.txt"));
 }

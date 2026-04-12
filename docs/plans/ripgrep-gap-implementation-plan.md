@@ -194,8 +194,11 @@ ecosystem features.
   `--stats` and using clearer warning text for compressed-input and
   preprocessor failures.
 
-- [ ] Expand end-to-end CLI tests to cover flag interactions, not just isolated
+- [x] Expand end-to-end CLI tests to cover flag interactions, not just isolated
   features.
+  `zigrep` now has end-to-end interaction coverage for config suppression,
+  preprocessor-vs-compressed precedence, combined JSON count plus stats output,
+  and composed type/glob/ignore filtering.
 
 ### Zig-specific guidance
 
