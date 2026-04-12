@@ -521,7 +521,8 @@ fn writeReport(
     if (wrote_prefix) {
         try writer.writeByte(':');
     }
-    try writer.print("{s}\n", .{report.line});
+    try writeDisplayLine(writer, report.line);
+    try writer.writeByte('\n');
 }
 
 fn warnAndSkipFileError(writer: *std.Io.Writer, path: []const u8, err: anyerror) !bool {
@@ -567,10 +568,9 @@ fn reportFileMatch(
             const sanitized = try sanitizeInvalidUtf8Lossy(allocator, bytes);
             defer allocator.free(sanitized);
             if (try searcher.reportFirstMatch(path, sanitized)) |report| {
-                const owned_line = try allocator.dupe(u8, report.line);
                 var stable = report;
-                stable.line = owned_line;
-                stable.owned_line = owned_line;
+                stable.line = bytes[report.line_span.start..report.line_span.end];
+                stable.owned_line = null;
                 return stable;
             }
             return null;
@@ -623,6 +623,50 @@ fn formatReport(
     defer buffer.deinit();
     try writeReport(&buffer.writer, report, output);
     return try allocator.dupe(u8, buffer.written());
+}
+
+fn writeDisplayLine(writer: *std.Io.Writer, bytes: []const u8) !void {
+    var index: usize = 0;
+    while (index < bytes.len) {
+        const byte = bytes[index];
+        if (byte < 0x80) {
+            if (isDisplaySafeAscii(byte)) {
+                try writer.writeByte(byte);
+            } else {
+                try writer.print("\\x{X:0>2}", .{byte});
+            }
+            index += 1;
+            continue;
+        }
+
+        const sequence_len = std.unicode.utf8ByteSequenceLength(byte) catch {
+            try writer.print("\\x{X:0>2}", .{byte});
+            index += 1;
+            continue;
+        };
+        if (index + sequence_len > bytes.len) {
+            try writer.print("\\x{X:0>2}", .{byte});
+            index += 1;
+            continue;
+        }
+
+        const sequence = bytes[index .. index + sequence_len];
+        _ = std.unicode.utf8Decode(sequence) catch {
+            try writer.print("\\x{X:0>2}", .{byte});
+            index += 1;
+            continue;
+        };
+
+        try writer.writeAll(sequence);
+        index += sequence_len;
+    }
+}
+
+fn isDisplaySafeAscii(byte: u8) bool {
+    return switch (byte) {
+        '\t', ' '...'~' => true,
+        else => false,
+    };
 }
 
 fn parseEncoding(arg: []const u8) CliError!zigrep.search.io.InputEncoding {
@@ -1017,6 +1061,24 @@ test "formatReport obeys output toggles" {
     try testing.expectEqualStrings("3:matched line\n", line);
 }
 
+test "formatReport escapes unsafe bytes in displayed lines" {
+    const testing = std.testing;
+
+    const report: zigrep.search.grep.MatchReport = .{
+        .path = "sample.bin",
+        .line_number = 1,
+        .column_number = 4,
+        .line = "aa\x00\xffneedle\x1b",
+        .line_span = .{ .start = 0, .end = 11 },
+        .match_span = .{ .start = 4, .end = 10 },
+    };
+
+    const line = try formatReport(testing.allocator, report, .{});
+    defer testing.allocator.free(line);
+
+    try testing.expectEqualStrings("sample.bin:1:4:aa\\x00\\xFFneedle\\x1B\n", line);
+}
+
 test "runCli honors max depth in recursive search" {
     const testing = std.testing;
 
@@ -1123,7 +1185,7 @@ test "runCli text mode retries invalid UTF-8 files through lossy sanitizing" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "bad.bin:1:4:xx?needleyy"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "bad.bin:1:4:xx\\xFFneedleyy"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -1172,7 +1234,7 @@ test "runCli skips control-heavy binary payloads by default but searches them wi
     const text_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "needle", root_path });
     defer text_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), text_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, text_run.stdout, 1, "control-heavy.bin:1:9:"));
+    try testing.expect(std.mem.containsAtLeast(u8, text_run.stdout, 1, "control-heavy.bin:1:9:\\x01\\x02\\x03\\x04\\x05\\x06\\x07\\x08needle"));
 }
 
 test "runCli can search UTF-16LE BOM files in default mode" {
@@ -1275,7 +1337,7 @@ test "runCli can force UTF-16BE decoding without a BOM" {
     try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "utf16be-no-bom.txt:1:1:needle"));
 }
 
-test "reportFileMatch only owns line bytes for lossy text-mode fallback" {
+test "reportFileMatch only owns line bytes for transformed haystacks" {
     const testing = std.testing;
 
     var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{});
@@ -1285,10 +1347,15 @@ test "reportFileMatch only owns line bytes for lossy text-mode fallback" {
     defer normal.deinit(testing.allocator);
     try testing.expect(normal.owned_line == null);
 
+    const decoded = (try reportFileMatch(testing.allocator, &searcher, "utf16.txt", "\xff\xfen\x00e\x00e\x00d\x00l\x00e\x00", .auto, false)).?;
+    defer decoded.deinit(testing.allocator);
+    try testing.expect(decoded.owned_line != null);
+    try testing.expectEqualStrings("needle", decoded.line);
+
     const lossy = (try reportFileMatch(testing.allocator, &searcher, "lossy.bin", "xx\xffneedleyy", .auto, true)).?;
     defer lossy.deinit(testing.allocator);
-    try testing.expect(lossy.owned_line != null);
-    try testing.expectEqualStrings("xx?needleyy", lossy.line);
+    try testing.expect(lossy.owned_line == null);
+    try testing.expectEqualStrings("xx\xffneedleyy", lossy.line);
 }
 
 test "runCli output toggles apply across the end-to-end path" {

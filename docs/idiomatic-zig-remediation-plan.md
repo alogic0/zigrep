@@ -55,7 +55,7 @@ encoding behavior without rewriting the whole architecture around generic
 - [x] Add BOM detection
 - [x] Add UTF-16LE and UTF-16BE decoding support
 - [x] Add explicit encoding configuration
-- [ ] Normalize output behavior for non-UTF-8 matches
+- [x] Normalize output behavior for non-UTF-8 matches
 - [ ] Remove the current lossy `?` fallback once byte-oriented handling replaces it
 
 ## Cross-Cutting Deliverables
@@ -111,3 +111,6 @@ encoding behavior without rewriting the whole architecture around generic
 - The CLI now supports `-E/--encoding auto|utf8|utf16le|utf16be`, and forced
   UTF-16 modes bypass the binary-file heuristic so unmarked UTF-16 input can
   still be searched through the current decode-to-UTF-8 path.
+- The CLI now escapes invalid bytes and unsafe control bytes in displayed match
+  lines, so `--text` output stays readable even when the underlying file bytes
+  are not safe to print directly.

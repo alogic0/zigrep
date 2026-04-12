@@ -81,7 +81,8 @@ Practical guidance:
 Current `--text` note:
 
 - `--text` disables binary-file skipping and tries to search the file anyway
-- if a file contains invalid UTF-8 bytes, the current implementation replaces those bad bytes with `?` during matching so the search can continue
+- if a file contains invalid UTF-8 bytes, the current implementation still uses a lossy internal retry so matching can continue
+- when a reported line contains invalid bytes or unsafe control bytes, the CLI prints those bytes as `\xNN` escapes instead of sending them raw to the terminal
 - this is a practical fallback, not full ripgrep-compatible encoding behavior
 
 Output is line-oriented. When enabled, prefixes are emitted in this order:
