@@ -30,20 +30,41 @@ pub const MatchReport = struct {
     }
 };
 
+const ByteLiteralCase = struct {
+    mode: AnchoredLiteralMode,
+    literal: []u8,
+
+    fn deinit(self: ByteLiteralCase, allocator: std.mem.Allocator) void {
+        allocator.free(self.literal);
+    }
+};
+
+const ByteWildcardCase = struct {
+    mode: AnchoredLiteralMode,
+    prefix: []u8,
+    suffix: []u8,
+
+    fn deinit(self: ByteWildcardCase, allocator: std.mem.Allocator) void {
+        allocator.free(self.prefix);
+        allocator.free(self.suffix);
+    }
+};
+
 pub const ByteSearchPlan = union(enum) {
     none,
-    literal_contains: []u8,
-    literal_start: []u8,
-    literal_end: []u8,
-    literal_full: []u8,
+    single: ByteLiteralCase,
+    wildcard: ByteWildcardCase,
+    alternation: []ByteLiteralCase,
 
     pub fn deinit(self: ByteSearchPlan, allocator: std.mem.Allocator) void {
         switch (self) {
             .none => {},
-            .literal_contains => |bytes| allocator.free(bytes),
-            .literal_start => |bytes| allocator.free(bytes),
-            .literal_end => |bytes| allocator.free(bytes),
-            .literal_full => |bytes| allocator.free(bytes),
+            .single => |literal_case| literal_case.deinit(allocator),
+            .wildcard => |wildcard_case| wildcard_case.deinit(allocator),
+            .alternation => |cases| {
+                for (cases) |literal_case| literal_case.deinit(allocator);
+                allocator.free(cases);
+            },
         }
     }
 };
@@ -89,22 +110,9 @@ pub const Searcher = struct {
     pub fn reportFirstByteMatch(self: *Searcher, path: []const u8, haystack: []const u8) ?MatchReport {
         const span = switch (self.byte_plan) {
             .none => null,
-            .literal_contains => |literal| if (std.mem.indexOf(u8, haystack, literal)) |start| Span{
-                .start = start,
-                .end = start + literal.len,
-            } else null,
-            .literal_start => |literal| if (std.mem.startsWith(u8, haystack, literal)) Span{
-                .start = 0,
-                .end = literal.len,
-            } else null,
-            .literal_end => |literal| if (std.mem.endsWith(u8, haystack, literal)) Span{
-                .start = haystack.len - literal.len,
-                .end = haystack.len,
-            } else null,
-            .literal_full => |literal| if (std.mem.eql(u8, haystack, literal)) Span{
-                .start = 0,
-                .end = haystack.len,
-            } else null,
+            .single => |literal_case| findByteLiteralSpan(literal_case, haystack),
+            .wildcard => |wildcard_case| findByteWildcardSpan(wildcard_case, haystack),
+            .alternation => |cases| findByteAlternationSpan(cases, haystack),
         } orelse return null;
 
         return buildReport(path, haystack, .{
@@ -156,57 +164,262 @@ const AnchoredLiteralMode = enum {
 
 fn extractByteSearchPlan(allocator: std.mem.Allocator, hir: regex.Hir) !ByteSearchPlan {
     return switch (hir.nodes[@intFromEnum(hir.root)]) {
-        .literal => |cp| if (cp <= 0x7f)
-            .{ .literal_contains = try allocator.dupe(u8, &[_]u8{@as(u8, @intCast(cp))}) }
+        .alternation => |branches| blk: {
+            var cases: std.ArrayList(ByteLiteralCase) = .empty;
+            defer cases.deinit(allocator);
+            errdefer for (cases.items) |literal_case| literal_case.deinit(allocator);
+
+            for (branches) |branch| {
+                const literal_case = (try extractByteLiteralCase(allocator, hir.nodes, branch)) orelse break :blk .none;
+                try cases.append(allocator, literal_case);
+            }
+
+            if (cases.items.len == 0) break :blk .none;
+            if (cases.items.len == 1) break :blk .{ .single = cases.pop().? };
+            break :blk .{ .alternation = try cases.toOwnedSlice(allocator) };
+        },
+        else => if (try extractByteLiteralCase(allocator, hir.nodes, hir.root)) |literal_case|
+            .{ .single = literal_case }
+        else if (try extractByteWildcardCase(allocator, hir.nodes, hir.root)) |wildcard_case|
+            .{ .wildcard = wildcard_case }
         else
             .none,
+    };
+}
+
+fn extractByteLiteralCase(
+    allocator: std.mem.Allocator,
+    nodes: []const regex.hir.Node,
+    root: regex.hir.NodeId,
+) !?ByteLiteralCase {
+    return switch (nodes[@intFromEnum(root)]) {
+        .literal => |cp| if (cp <= 0x7f)
+            .{
+                .mode = .contains,
+                .literal = try allocator.dupe(u8, &[_]u8{@as(u8, @intCast(cp))}),
+            }
+        else
+            null,
         .concat => |children| blk: {
             var prefix_anchor = false;
             var suffix_anchor = false;
             var start_index: usize = 0;
             var end_index: usize = children.len;
 
-            if (children.len > 0 and std.meta.activeTag(hir.nodes[@intFromEnum(children[0])]) == .anchor_start) {
+            if (children.len > 0 and std.meta.activeTag(nodes[@intFromEnum(children[0])]) == .anchor_start) {
                 prefix_anchor = true;
                 start_index = 1;
             }
-            if (end_index > start_index and std.meta.activeTag(hir.nodes[@intFromEnum(children[end_index - 1])]) == .anchor_end) {
+            if (end_index > start_index and std.meta.activeTag(nodes[@intFromEnum(children[end_index - 1])]) == .anchor_end) {
                 suffix_anchor = true;
                 end_index -= 1;
             }
-            if (start_index == end_index) break :blk .none;
+            if (start_index == end_index) break :blk null;
 
             var bytes = std.ArrayList(u8).empty;
             defer bytes.deinit(allocator);
 
             for (children[start_index..end_index]) |child| {
-                switch (hir.nodes[@intFromEnum(child)]) {
+                switch (nodes[@intFromEnum(child)]) {
                     .literal => |cp| {
-                        if (cp > 0x7f) break :blk .none;
+                        if (cp > 0x7f) break :blk null;
                         try bytes.append(allocator, @as(u8, @intCast(cp)));
                     },
-                    else => break :blk .none,
+                    else => break :blk null,
                 }
             }
-            if (bytes.items.len == 0) break :blk .none;
+            if (bytes.items.len == 0) break :blk null;
 
-            const duped = try bytes.toOwnedSlice(allocator);
-            break :blk switch (if (prefix_anchor and suffix_anchor)
-                AnchoredLiteralMode.full
-            else if (prefix_anchor)
-                AnchoredLiteralMode.start
-            else if (suffix_anchor)
-                AnchoredLiteralMode.end
-            else
-                AnchoredLiteralMode.contains) {
-                .contains => .{ .literal_contains = duped },
-                .start => .{ .literal_start = duped },
-                .end => .{ .literal_end = duped },
-                .full => .{ .literal_full = duped },
+            break :blk .{
+                .mode = if (prefix_anchor and suffix_anchor)
+                    .full
+                else if (prefix_anchor)
+                    .start
+                else if (suffix_anchor)
+                    .end
+                else
+                    .contains,
+                .literal = try bytes.toOwnedSlice(allocator),
             };
         },
-        else => .none,
+        else => null,
     };
+}
+
+fn extractByteWildcardCase(
+    allocator: std.mem.Allocator,
+    nodes: []const regex.hir.Node,
+    root: regex.hir.NodeId,
+) !?ByteWildcardCase {
+    return switch (nodes[@intFromEnum(root)]) {
+        .concat => |children| blk: {
+            var prefix_anchor = false;
+            var suffix_anchor = false;
+            var start_index: usize = 0;
+            var end_index: usize = children.len;
+
+            if (children.len > 0 and std.meta.activeTag(nodes[@intFromEnum(children[0])]) == .anchor_start) {
+                prefix_anchor = true;
+                start_index = 1;
+            }
+            if (end_index > start_index and std.meta.activeTag(nodes[@intFromEnum(children[end_index - 1])]) == .anchor_end) {
+                suffix_anchor = true;
+                end_index -= 1;
+            }
+            if (end_index - start_index < 2) break :blk null;
+
+            var dot_index: ?usize = null;
+            var dot_count: usize = 0;
+            for (children[start_index..end_index], start_index..) |child, absolute_index| {
+                switch (nodes[@intFromEnum(child)]) {
+                    .dot => {
+                        dot_count += 1;
+                        dot_index = absolute_index;
+                    },
+                    .literal => |cp| if (cp > 0x7f) break :blk null,
+                    else => break :blk null,
+                }
+            }
+            if (dot_count != 1) break :blk null;
+
+            const split = dot_index.?;
+            const prefix = try collectAsciiLiteralRange(allocator, nodes, children[start_index..split]);
+            errdefer allocator.free(prefix);
+            const suffix = try collectAsciiLiteralRange(allocator, nodes, children[split + 1 .. end_index]);
+            errdefer allocator.free(suffix);
+
+            if (prefix.len == 0 and suffix.len == 0) break :blk null;
+
+            break :blk .{
+                .mode = if (prefix_anchor and suffix_anchor)
+                    .full
+                else if (prefix_anchor)
+                    .start
+                else if (suffix_anchor)
+                    .end
+                else
+                    .contains,
+                .prefix = prefix,
+                .suffix = suffix,
+            };
+        },
+        else => null,
+    };
+}
+
+fn collectAsciiLiteralRange(
+    allocator: std.mem.Allocator,
+    nodes: []const regex.hir.Node,
+    children: []const regex.hir.NodeId,
+) ![]u8 {
+    var bytes = std.ArrayList(u8).empty;
+    defer bytes.deinit(allocator);
+
+    for (children) |child| {
+        try bytes.append(allocator, @as(u8, @intCast(nodes[@intFromEnum(child)].literal)));
+    }
+    return bytes.toOwnedSlice(allocator);
+}
+
+fn findByteAlternationSpan(cases: []const ByteLiteralCase, haystack: []const u8) ?Span {
+    var best: ?Span = null;
+    for (cases) |literal_case| {
+        const span = findByteLiteralSpan(literal_case, haystack) orelse continue;
+        if (best == null or span.start < best.?.start) {
+            best = span;
+        }
+    }
+    return best;
+}
+
+fn findByteLiteralSpan(literal_case: ByteLiteralCase, haystack: []const u8) ?Span {
+    return switch (literal_case.mode) {
+        .contains => if (std.mem.indexOf(u8, haystack, literal_case.literal)) |start| Span{
+            .start = start,
+            .end = start + literal_case.literal.len,
+        } else null,
+        .start => if (std.mem.startsWith(u8, haystack, literal_case.literal)) Span{
+            .start = 0,
+            .end = literal_case.literal.len,
+        } else null,
+        .end => if (std.mem.endsWith(u8, haystack, literal_case.literal)) Span{
+            .start = haystack.len - literal_case.literal.len,
+            .end = haystack.len,
+        } else null,
+        .full => if (std.mem.eql(u8, haystack, literal_case.literal)) Span{
+            .start = 0,
+            .end = haystack.len,
+        } else null,
+    };
+}
+
+fn findByteWildcardSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?Span {
+    return switch (wildcard_case.mode) {
+        .contains => findByteWildcardContainsSpan(wildcard_case, haystack),
+        .start => findByteWildcardAnchoredStartSpan(wildcard_case, haystack),
+        .end => findByteWildcardAnchoredEndSpan(wildcard_case, haystack),
+        .full => findByteWildcardAnchoredFullSpan(wildcard_case, haystack),
+    };
+}
+
+fn findByteWildcardContainsSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?Span {
+    var start_index: usize = 0;
+    while (start_index <= haystack.len) {
+        const prefix_index = if (wildcard_case.prefix.len == 0)
+            start_index
+        else
+            (std.mem.indexOfPos(u8, haystack, start_index, wildcard_case.prefix) orelse return null);
+
+        const wildcard_index = prefix_index + wildcard_case.prefix.len;
+        if (wildcard_index >= haystack.len) return null;
+        if (haystack[wildcard_index] == '\n') {
+            start_index = prefix_index + 1;
+            continue;
+        }
+
+        const suffix_start = wildcard_index + 1;
+        if (suffix_start + wildcard_case.suffix.len > haystack.len) return null;
+        if (std.mem.eql(u8, haystack[suffix_start .. suffix_start + wildcard_case.suffix.len], wildcard_case.suffix)) {
+            return .{
+                .start = prefix_index,
+                .end = suffix_start + wildcard_case.suffix.len,
+            };
+        }
+
+        start_index = prefix_index + 1;
+    }
+    return null;
+}
+
+fn findByteWildcardAnchoredStartSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?Span {
+    if (!std.mem.startsWith(u8, haystack, wildcard_case.prefix)) return null;
+    const wildcard_index = wildcard_case.prefix.len;
+    if (wildcard_index >= haystack.len or haystack[wildcard_index] == '\n') return null;
+    const suffix_start = wildcard_index + 1;
+    if (suffix_start + wildcard_case.suffix.len > haystack.len) return null;
+    if (!std.mem.eql(u8, haystack[suffix_start .. suffix_start + wildcard_case.suffix.len], wildcard_case.suffix)) return null;
+    return .{ .start = 0, .end = suffix_start + wildcard_case.suffix.len };
+}
+
+fn findByteWildcardAnchoredEndSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?Span {
+    const total_len = wildcard_case.prefix.len + 1 + wildcard_case.suffix.len;
+    if (haystack.len < total_len) return null;
+    const start = haystack.len - total_len;
+    if (!std.mem.eql(u8, haystack[start .. start + wildcard_case.prefix.len], wildcard_case.prefix)) return null;
+    const wildcard_index = start + wildcard_case.prefix.len;
+    if (haystack[wildcard_index] == '\n') return null;
+    if (!std.mem.eql(u8, haystack[wildcard_index + 1 ..], wildcard_case.suffix)) return null;
+    return .{ .start = start, .end = haystack.len };
+}
+
+fn findByteWildcardAnchoredFullSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?Span {
+    const total_len = wildcard_case.prefix.len + 1 + wildcard_case.suffix.len;
+    if (haystack.len != total_len) return null;
+    if (!std.mem.startsWith(u8, haystack, wildcard_case.prefix)) return null;
+    const wildcard_index = wildcard_case.prefix.len;
+    if (haystack[wildcard_index] == '\n') return null;
+    if (!std.mem.eql(u8, haystack[wildcard_index + 1 ..], wildcard_case.suffix)) return null;
+    return .{ .start = 0, .end = haystack.len };
 }
 
 test "reportFirstMatch returns line-oriented match data" {
@@ -302,6 +515,43 @@ test "Searcher byte fallback supports anchored literal start and end patterns" {
     defer full_searcher.deinit();
     try testing.expect(full_searcher.reportFirstByteMatch("full.bin", "needle") != null);
     try testing.expect(full_searcher.reportFirstByteMatch("full.bin", "needle\xff") == null);
+}
+
+test "Searcher byte fallback supports ASCII literal alternation" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "foo|needle|bar", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("alt.bin", "xx\xffneedleyy").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 4), report.column_number);
+    try testing.expectEqualStrings("xx\xffneedleyy", report.line);
+    try testing.expectEqual(Span{ .start = 3, .end = 9 }, report.match_span);
+}
+
+test "Searcher byte fallback supports simple dot-separated ASCII patterns" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a.b", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("dot.bin", "xxa\xffbyy").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqualStrings("xxa\xffbyy", report.line);
+    try testing.expectEqual(Span{ .start = 2, .end = 5 }, report.match_span);
+}
+
+test "Searcher byte fallback keeps dot from matching newlines" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a.b", .{});
+    defer searcher.deinit();
+
+    try testing.expect(searcher.reportFirstByteMatch("dot.bin", "a\nb") == null);
 }
 
 test "reportFirstMatch stays aligned across buffered and mmap file reads" {
