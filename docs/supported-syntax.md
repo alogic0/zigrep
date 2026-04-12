@@ -198,6 +198,13 @@ Current `--text` note:
 - this is still not full ripgrep-compatible encoding behavior
 - the exact current rules are documented in [docs/invalid-utf8-semantics.md](invalid-utf8-semantics.md)
 
+Encoding note:
+
+- `-E auto` is the default and allows BOM-based UTF-16 decoding
+- `-E utf8`, `-E utf16le`, and `-E utf16be` force those decode paths
+- `-E none` treats input as raw bytes and bypasses decode/transcode handling
+- explicit non-`auto` encodings also bypass the default binary-file skip check tied to auto-detection
+
 `--binary` note:
 
 - `--binary` searches binary files but suppresses matching line content

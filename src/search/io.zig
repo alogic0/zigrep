@@ -7,6 +7,7 @@ pub const ReadStrategy = enum {
 
 pub const InputEncoding = enum {
     auto,
+    none,
     utf8,
     utf16le,
     utf16be,
@@ -131,6 +132,7 @@ pub fn decodeToUtf8Alloc(
 ) DecodeError!?[]u8 {
     return switch (encoding) {
         .auto => try decodeBomToUtf8Alloc(allocator, bytes),
+        .none => null,
         .utf8 => null,
         .utf16le => try decodeUtf16ToUtf8Alloc(allocator, bytes, .little),
         .utf16be => try decodeUtf16ToUtf8Alloc(allocator, bytes, .big),

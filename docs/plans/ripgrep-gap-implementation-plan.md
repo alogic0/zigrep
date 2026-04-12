@@ -141,8 +141,10 @@ ecosystem features.
   `zigrep` now supports `--binary` for text output and file-path modes,
   searching binary files while suppressing matching line content.
 
-- [ ] Decide whether to add `-E none` style raw-byte mode explicitly.
-  ripgrep exposes a sharper encoding boundary here than `zigrep` does today.
+- [x] Decide whether to add `-E none` style raw-byte mode explicitly.
+  `zigrep` now supports `-E none` as an explicit raw-byte input mode that
+  bypasses decode/transcode handling and binary-file skipping tied to
+  auto-detection.
 
 - [ ] Expand encoding coverage beyond UTF-8 / UTF-16 if this project wants real
   ripgrep-like text-encoding breadth.

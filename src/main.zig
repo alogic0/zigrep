@@ -1855,6 +1855,7 @@ fn isDisplaySafeAscii(byte: u8) bool {
 
 fn parseEncoding(arg: []const u8) CliError!zigrep.search.io.InputEncoding {
     if (std.ascii.eqlIgnoreCase(arg, "auto")) return .auto;
+    if (std.ascii.eqlIgnoreCase(arg, "none")) return .none;
     if (std.ascii.eqlIgnoreCase(arg, "utf8")) return .utf8;
     if (std.ascii.eqlIgnoreCase(arg, "utf16le")) return .utf16le;
     if (std.ascii.eqlIgnoreCase(arg, "utf16be")) return .utf16be;
@@ -1896,7 +1897,7 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -g, --glob GLOB       include or exclude paths by glob
         \\  --buffered            use the simpler file-reading method
         \\  --mmap                use the faster file-reading method when possible
-        \\  -E, --encoding ENC    force input encoding: auto, utf8, utf16le, utf16be
+        \\  -E, --encoding ENC    force input encoding: auto, none, utf8, utf16le, utf16be
         \\  -j, --threads N       use up to N worker threads
         \\  --max-depth N         limit recursive walk depth
         \\  -A, --after-context N
@@ -2274,6 +2275,22 @@ test "parseArgs accepts json output flag" {
             try testing.expectEqual(OutputFormat.json, opts.output_format);
             try testing.expectEqual(ReportMode.lines, opts.report_mode);
         },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts raw-byte encoding mode" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-E", "none", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| try testing.expectEqual(zigrep.search.io.InputEncoding.none, opts.encoding),
         .help, .version, .type_list => unreachable,
     }
 }
@@ -3980,6 +3997,28 @@ test "runCli binary mode supports files-with-matches" {
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "payload.bin\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli raw-byte encoding mode searches binary payloads without text mode" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "payload.bin",
+        .data = "aa\x00needle\x00bb",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-E", "none", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "payload.bin:1:4:aa"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
