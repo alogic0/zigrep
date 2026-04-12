@@ -11,9 +11,9 @@ encoding behavior without rewriting the whole architecture around generic
 - [x] Classify failures into `fatal`, `warn-and-skip`, and `silent policy skip`
 - [x] Separate CLI usage errors from runtime search errors in `main`
 - [x] Stop printing usage text for non-usage runtime failures
-- [~] Decide how permission-denied file and directory errors should be reported
+- [x] Decide how permission-denied file and directory errors should be reported
 - [x] Make sequential and parallel search paths follow the same skip/fail rules
-- [~] Add regression tests for unreadable files and unreadable directories
+- [x] Add regression tests for unreadable files and unreadable directories
 
 ## Priority 2: Per-File Allocator Boundary Cleanup
 
@@ -61,7 +61,7 @@ encoding behavior without rewriting the whole architecture around generic
 ## Cross-Cutting Deliverables
 
 - [x] Write `docs/tmp/error-policy.md` describing the skip/fail/warn rules
-- [~] Add tests proving sequential and parallel search behave the same under error conditions
+- [x] Add tests proving sequential and parallel search behave the same under error conditions
 - [ ] Add tests proving allocator-boundary refactors do not change search output
 - [ ] Document any user-visible behavior changes in `README.md` and `docs/supported-syntax.md`
 - [ ] Benchmark reporting-path changes with `zig build bench` before and after
@@ -79,5 +79,6 @@ encoding behavior without rewriting the whole architecture around generic
 - CLI usage errors and runtime search errors now have separate top-level output behavior.
 - File-level read/open failures now use a warn-and-skip policy in both sequential
   and parallel search paths.
-- Unreadable-file regression coverage exists now; unreadable-directory traversal
-  policy is still the next open Priority 1 item.
+- Child-directory traversal failures now use a warn-and-skip policy through the
+  walker, while root traversal failures remain fatal.
+- Unreadable-file and unreadable-directory regression coverage both exist now.

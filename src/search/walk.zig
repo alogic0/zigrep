@@ -29,11 +29,23 @@ pub const WalkError = error{
 } || std.fs.Dir.OpenError || std.fs.Dir.StatFileError || std.fs.Dir.AccessError || std.fs.Dir.Iterator.Error || std.fs.Dir.RealPathError;
 
 const VisitedDirs = std.StringHashMapUnmanaged(void);
+const NoopWarningHandler = struct {
+    pub fn warn(_: @This(), _: []const u8, _: anyerror) void {}
+};
 
 pub fn collectFiles(
     allocator: std.mem.Allocator,
     root_path: []const u8,
     options: WalkOptions,
+) WalkError![]Entry {
+    return collectFilesWithWarnings(allocator, root_path, options, NoopWarningHandler{});
+}
+
+pub fn collectFilesWithWarnings(
+    allocator: std.mem.Allocator,
+    root_path: []const u8,
+    options: WalkOptions,
+    warning_handler: anytype,
 ) WalkError![]Entry {
     var files: std.ArrayList(Entry) = .empty;
     errdefer {
@@ -45,7 +57,7 @@ pub fn collectFiles(
         .allocator = allocator,
         .context = &files,
         .visitFn = collectFileEntry,
-    });
+    }, warning_handler);
 
     return files.toOwnedSlice(allocator);
 }
@@ -55,6 +67,7 @@ pub fn walk(
     root_path: []const u8,
     options: WalkOptions,
     visitor: anytype,
+    warning_handler: anytype,
 ) WalkError!void {
     var visited_dirs: VisitedDirs = .empty;
     defer deinitVisitedDirs(allocator, &visited_dirs);
@@ -69,9 +82,9 @@ pub fn walk(
                 .depth = 0,
             });
         },
-        .directory => try walkDir(allocator, root_path, options, 0, &visited_dirs, visitor),
+        .directory => try walkDir(allocator, root_path, options, 0, false, &visited_dirs, visitor, warning_handler),
         .symlink => if (options.follow_symlinks) {
-            try walkFollowedPath(allocator, root_path, options, 0, &visited_dirs, visitor);
+            try walkFollowedPath(allocator, root_path, options, 0, false, &visited_dirs, visitor, warning_handler);
         },
         .other => {},
     }
@@ -100,12 +113,20 @@ fn walkDir(
     dir_path: []const u8,
     options: WalkOptions,
     depth: usize,
+    allow_warn_skip: bool,
     visited_dirs: *VisitedDirs,
     visitor: anytype,
+    warning_handler: anytype,
 ) WalkError!void {
-    if (!try rememberVisitedDir(allocator, visited_dirs, dir_path)) return;
+    if (!try rememberVisitedDir(allocator, visited_dirs, dir_path, allow_warn_skip, warning_handler)) return;
 
-    var dir = try std.fs.cwd().openDir(dir_path, .{ .iterate = true });
+    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+        if (allow_warn_skip and shouldWarnAndSkipTraversalError(err)) {
+            warning_handler.warn(dir_path, err);
+            return;
+        }
+        return err;
+    };
     defer dir.close();
 
     var iter = dir.iterate();
@@ -131,11 +152,11 @@ fn walkDir(
                 if (options.max_depth) |max_depth| {
                     if (child_depth > max_depth) continue;
                 }
-                try walkDir(allocator, child_path, options, child_depth, visited_dirs, visitor);
+                try walkDir(allocator, child_path, options, child_depth, true, visited_dirs, visitor, warning_handler);
             },
             .symlink => {
                 if (options.follow_symlinks) {
-                    try walkFollowedPath(allocator, child_path, options, child_depth, visited_dirs, visitor);
+                    try walkFollowedPath(allocator, child_path, options, child_depth, true, visited_dirs, visitor, warning_handler);
                 }
             },
             .other => {},
@@ -148,10 +169,18 @@ fn walkFollowedPath(
     path: []const u8,
     options: WalkOptions,
     depth: usize,
+    allow_warn_skip: bool,
     visited_dirs: *VisitedDirs,
     visitor: anytype,
+    warning_handler: anytype,
 ) WalkError!void {
-    const kind = try classifyPath(path);
+    const kind = classifyPath(path) catch |err| {
+        if (allow_warn_skip and shouldWarnAndSkipTraversalError(err)) {
+            warning_handler.warn(path, err);
+            return;
+        }
+        return err;
+    };
     switch (kind) {
         .file => {
             const owned = try allocator.dupe(u8, path);
@@ -165,7 +194,7 @@ fn walkFollowedPath(
             if (options.max_depth) |max_depth| {
                 if (depth > max_depth) return;
             }
-            try walkDir(allocator, path, options, depth, visited_dirs, visitor);
+            try walkDir(allocator, path, options, depth, allow_warn_skip, visited_dirs, visitor, warning_handler);
         },
         else => {},
     }
@@ -175,8 +204,16 @@ fn rememberVisitedDir(
     allocator: std.mem.Allocator,
     visited_dirs: *VisitedDirs,
     dir_path: []const u8,
+    allow_warn_skip: bool,
+    warning_handler: anytype,
 ) WalkError!bool {
-    const canonical = try std.fs.cwd().realpathAlloc(allocator, dir_path);
+    const canonical = std.fs.cwd().realpathAlloc(allocator, dir_path) catch |err| {
+        if (allow_warn_skip and shouldWarnAndSkipTraversalError(err)) {
+            warning_handler.warn(dir_path, err);
+            return false;
+        }
+        return err;
+    };
     errdefer allocator.free(canonical);
 
     const gop = try visited_dirs.getOrPut(allocator, canonical);
@@ -186,6 +223,18 @@ fn rememberVisitedDir(
     }
     gop.value_ptr.* = {};
     return true;
+}
+
+fn shouldWarnAndSkipTraversalError(err: anyerror) bool {
+    return switch (err) {
+        error.AccessDenied,
+        error.FileNotFound,
+        error.NameTooLong,
+        error.NotDir,
+        error.SymLinkLoop,
+        => true,
+        else => false,
+    };
 }
 
 fn deinitVisitedDirs(allocator: std.mem.Allocator, visited_dirs: *VisitedDirs) void {
@@ -299,4 +348,52 @@ test "walk follow mode avoids symlink directory cycles" {
 
     try testing.expectEqual(@as(usize, 1), entries.len);
     try testing.expect(std.mem.endsWith(u8, entries[0].path, "file.txt"));
+}
+
+test "walk can warn and skip unreadable child directories" {
+    const testing = std.testing;
+    const builtin = @import("builtin");
+
+    switch (builtin.os.tag) {
+        .windows, .wasi => return,
+        else => {},
+    }
+
+    const WarningCapture = struct {
+        writer: *std.Io.Writer.Allocating,
+
+        pub fn warn(self: @This(), path: []const u8, err: anyerror) void {
+            self.writer.writer.print("warning: skipping directory {s}: {s}\n", .{ path, @errorName(err) }) catch {};
+        }
+    };
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("root/blocked");
+    try tmp.dir.writeFile(.{ .sub_path = "root/visible.txt", .data = "visible" });
+    try tmp.dir.writeFile(.{ .sub_path = "root/blocked/secret.txt", .data = "secret" });
+
+    var blocked = try tmp.dir.openDir("root/blocked", .{});
+    defer blocked.close();
+    try blocked.chmod(0);
+    defer blocked.chmod(0o755) catch {};
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, "root");
+    defer testing.allocator.free(root_path);
+
+    var warning_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer warning_capture.deinit();
+
+    const entries = try collectFilesWithWarnings(testing.allocator, root_path, .{}, WarningCapture{
+        .writer = &warning_capture,
+    });
+    defer {
+        for (entries) |entry| entry.deinit(testing.allocator);
+        testing.allocator.free(entries);
+    }
+
+    try testing.expectEqual(@as(usize, 1), entries.len);
+    try testing.expect(std.mem.endsWith(u8, entries[0].path, "visible.txt"));
+    try testing.expect(std.mem.containsAtLeast(u8, warning_capture.written(), 1, "warning: skipping directory "));
 }

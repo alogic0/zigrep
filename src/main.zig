@@ -238,11 +238,19 @@ fn searchPath(
     root_path: []const u8,
     options: CliOptions,
 ) !bool {
-    const entries = try zigrep.search.walk.collectFiles(allocator, root_path, .{
+    const TraversalWarningHandler = struct {
+        writer: *std.Io.Writer,
+
+        pub fn warn(self: @This(), path: []const u8, err: anyerror) void {
+            self.writer.print("warning: skipping directory {s}: {s}\n", .{ path, @errorName(err) }) catch {};
+        }
+    };
+
+    const entries = try zigrep.search.walk.collectFilesWithWarnings(allocator, root_path, .{
         .include_hidden = options.include_hidden,
         .follow_symlinks = options.follow_symlinks,
         .max_depth = options.max_depth,
-    });
+    }, TraversalWarningHandler{ .writer = stderr });
     defer {
         for (entries) |entry| entry.deinit(allocator);
         allocator.free(entries);
