@@ -61,6 +61,7 @@ The current CLI supports:
 - Hidden-file inclusion with `--hidden`
 - Ignore controls with `--ignore-file`, `--no-ignore`, `--no-ignore-vcs`, and `--no-ignore-parent`
 - Symlink following with `--follow`
+- Case-insensitive search with `-i` / `--ignore-case` and `-S` / `--smart-case`
 - Case-sensitive path glob filtering with repeated `-g` / `--glob`
 - Binary-file search opt-in with `--text`
 - Buffered or mmap-backed reads with `--buffered` and `--mmap`
@@ -119,6 +120,14 @@ Ignore-control note:
 - `--no-ignore` disables all ignore filtering
 - `--no-ignore-vcs` disables `.gitignore` loading but still allows explicit `--ignore-file` rules
 - `--no-ignore-parent` keeps the searched root's own `.gitignore` but skips parent `.gitignore` files
+
+Case-mode note:
+
+- `-i` or `--ignore-case` enables case-insensitive search
+- `-S` or `--smart-case` enables ignore-case unless the pattern contains uppercase letters
+- when both are present, the last one wins
+- case-insensitive matching works through a folded regex rewrite instead of a separate VM mode
+- if a case-insensitive character class range is too large to rewrite safely, `zigrep` fails explicitly instead of silently under-matching
 
 Current `--text` note:
 

@@ -4,11 +4,17 @@ const report_mod = @import("report.zig");
 const io = @import("io.zig");
 
 pub const SearchError = regex.ParseError || regex.Nfa.CompileError || regex.Vm.MatchError || error{
-    UnsupportedCaseInsensitive,
+    UnsupportedCaseInsensitivePattern,
+};
+
+pub const CaseMode = enum {
+    sensitive,
+    insensitive,
+    smart,
 };
 
 pub const SearchOptions = struct {
-    case_insensitive: bool = false,
+    case_mode: CaseMode = .sensitive,
 };
 
 pub const Span = report_mod.Span;
@@ -102,10 +108,15 @@ pub const Searcher = struct {
         pattern: []const u8,
         options: SearchOptions,
     ) SearchError!Searcher {
-        if (options.case_insensitive) return error.UnsupportedCaseInsensitive;
-
         var hir = try regex.compile(allocator, pattern, .{});
         defer hir.deinit(allocator);
+
+        if (shouldFoldCase(pattern, options.case_mode)) {
+            regex.hir.applySimpleCaseFold(allocator, &hir) catch |err| switch (err) {
+                error.UnsupportedCaseInsensitivePattern => return error.UnsupportedCaseInsensitivePattern,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+        }
 
         return .{
             .allocator = allocator,
@@ -260,6 +271,57 @@ pub const Searcher = struct {
         return .{ .match = adjusted };
     }
 };
+
+fn shouldFoldCase(pattern: []const u8, case_mode: CaseMode) bool {
+    return switch (case_mode) {
+        .sensitive => false,
+        .insensitive => true,
+        .smart => !patternHasUppercase(pattern),
+    };
+}
+
+fn patternHasUppercase(pattern: []const u8) bool {
+    var index: usize = 0;
+    while (index < pattern.len) {
+        const byte = pattern[index];
+        if (byte < 0x80) {
+            if (std.ascii.isUpper(byte)) return true;
+            index += 1;
+            continue;
+        }
+
+        const width = std.unicode.utf8ByteSequenceLength(byte) catch {
+            index += 1;
+            continue;
+        };
+        if (index + width > pattern.len) {
+            index += 1;
+            continue;
+        }
+        const cp = std.unicode.utf8Decode(pattern[index .. index + width]) catch {
+            index += 1;
+            continue;
+        };
+        if (isUppercaseCodePoint(cp)) return true;
+        index += width;
+    }
+    return false;
+}
+
+fn isUppercaseCodePoint(cp: u32) bool {
+    if (cp <= 0x7f) return std.ascii.isUpper(@as(u8, @intCast(cp)));
+    if (cp > 0xFFFF) return false;
+
+    const upper = std.os.windows.nls.upcaseW(@as(u16, @intCast(cp)));
+    if (upper != cp) return false;
+
+    var candidate: u32 = 0;
+    while (candidate <= 0xFFFF) : (candidate += 1) {
+        if (candidate == cp) continue;
+        if (std.os.windows.nls.upcaseW(@as(u16, @intCast(candidate))) == upper) return true;
+    }
+    return false;
+}
 
 pub fn reportFirstMatch(
     allocator: std.mem.Allocator,
@@ -1496,15 +1558,83 @@ test "reportFirstMatch returns null when no match exists" {
     try testing.expect((try reportFirstMatch(testing.allocator, "needle", "missing.txt", "haystack", .{})) == null);
 }
 
-test "reportFirstMatch rejects unsupported case-insensitive search for now" {
+test "reportFirstMatch supports ignore-case literals" {
     const testing = std.testing;
 
-    try testing.expectError(error.UnsupportedCaseInsensitive, reportFirstMatch(
+    const report = (try reportFirstMatch(
         testing.allocator,
         "abc",
         "sample.txt",
         "ABC",
-        .{ .case_insensitive = true },
+        .{ .case_mode = .insensitive },
+    )).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("ABC", report.line);
+    try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
+}
+
+test "reportFirstMatch supports ignore-case Unicode literals" {
+    const testing = std.testing;
+
+    const report = (try reportFirstMatch(
+        testing.allocator,
+        "жар",
+        "sample.txt",
+        "ЖАР",
+        .{ .case_mode = .insensitive },
+    )).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("ЖАР", report.line);
+}
+
+test "reportFirstMatch supports ignore-case classes" {
+    const testing = std.testing;
+
+    const report = (try reportFirstMatch(
+        testing.allocator,
+        "[a-z]+",
+        "sample.txt",
+        "ABC",
+        .{ .case_mode = .insensitive },
+    )).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
+}
+
+test "reportFirstMatch smart-case keeps uppercase patterns case-sensitive" {
+    const testing = std.testing;
+
+    try testing.expect((try reportFirstMatch(
+        testing.allocator,
+        "Abc",
+        "sample.txt",
+        "abc",
+        .{ .case_mode = .smart },
+    )) == null);
+
+    const report = (try reportFirstMatch(
+        testing.allocator,
+        "abc",
+        "sample.txt",
+        "ABC",
+        .{ .case_mode = .smart },
+    )).?;
+    defer report.deinit(testing.allocator);
+    try testing.expectEqualStrings("ABC", report.line);
+}
+
+test "reportFirstMatch rejects oversized case-insensitive ranges" {
+    const testing = std.testing;
+
+    try testing.expectError(error.UnsupportedCaseInsensitivePattern, reportFirstMatch(
+        testing.allocator,
+        "[\u{0100}-\u{2000}]",
+        "sample.txt",
+        "abc",
+        .{ .case_mode = .insensitive },
     ));
 }
 

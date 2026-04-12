@@ -69,6 +69,13 @@ pub const LowerError = error{
     OutOfMemory,
 };
 
+pub const CaseFoldError = error{
+    OutOfMemory,
+    UnsupportedCaseInsensitivePattern,
+};
+
+const max_case_folded_range_size: u32 = 2048;
+
 pub fn lower(allocator: std.mem.Allocator, ast: parser.Ast) LowerError!Hir {
     var nodes: std.ArrayList(Node) = .empty;
     errdefer {
@@ -101,6 +108,31 @@ pub fn lower(allocator: std.mem.Allocator, ast: parser.Ast) LowerError!Hir {
         else
             .{ .literal_prefix = prefix.bytes },
     };
+}
+
+pub fn applySimpleCaseFold(allocator: std.mem.Allocator, hir: *Hir) CaseFoldError!void {
+    for (hir.nodes) |*node| {
+        switch (node.*) {
+            .literal => |cp| {
+                node.* = .{ .char_class = try foldedLiteralClass(allocator, cp) };
+            },
+            .char_class => |class| {
+                const folded = try foldedCharacterClass(allocator, class);
+                allocator.free(class.items);
+                node.* = .{ .char_class = folded };
+            },
+            else => {},
+        }
+    }
+
+    allocator.free(hir.prefix.bytes);
+    hir.prefix = .{
+        .exact = false,
+        .bytes = try allocator.alloc(u8, 0),
+    };
+    allocator.free(hir.literals);
+    hir.literals = try allocator.alloc(literal_mod.LiteralSequence, 0);
+    hir.fast_path = .none;
 }
 
 fn lowerNode(
@@ -243,6 +275,112 @@ fn extractLiterals(allocator: std.mem.Allocator, prefix: []const u8) LowerError!
     var literals = try allocator.alloc(literal_mod.LiteralSequence, 1);
     literals[0] = .{ .bytes = prefix };
     return literals;
+}
+
+fn foldedLiteralClass(allocator: std.mem.Allocator, cp: u32) CaseFoldError!CharacterClass {
+    var items: std.ArrayList(ClassItem) = .empty;
+    errdefer items.deinit(allocator);
+
+    try appendFoldedCodePointItems(allocator, &items, cp);
+    return .{
+        .negated = false,
+        .items = try items.toOwnedSlice(allocator),
+    };
+}
+
+fn foldedCharacterClass(allocator: std.mem.Allocator, class: CharacterClass) CaseFoldError!CharacterClass {
+    var items: std.ArrayList(ClassItem) = .empty;
+    errdefer items.deinit(allocator);
+
+    for (class.items) |item| {
+        switch (item) {
+            .literal => |cp| try appendFoldedCodePointItems(allocator, &items, cp),
+            .range => |range| {
+                const range_len = range.end - range.start + 1;
+                if (range_len > max_case_folded_range_size) return error.UnsupportedCaseInsensitivePattern;
+
+                var cp = range.start;
+                while (cp <= range.end) : (cp += 1) {
+                    try appendFoldedCodePointItems(allocator, &items, cp);
+                }
+            },
+        }
+    }
+
+    return .{
+        .negated = class.negated,
+        .items = try items.toOwnedSlice(allocator),
+    };
+}
+
+fn appendFoldedCodePointItems(
+    allocator: std.mem.Allocator,
+    items: *std.ArrayList(ClassItem),
+    cp: u32,
+) CaseFoldError!void {
+    const equivalents = try simpleCaseFoldSetAlloc(allocator, cp);
+    defer allocator.free(equivalents);
+
+    for (equivalents) |equivalent| {
+        try appendUniqueLiteralItem(allocator, items, equivalent);
+    }
+}
+
+fn appendUniqueLiteralItem(
+    allocator: std.mem.Allocator,
+    items: *std.ArrayList(ClassItem),
+    cp: u32,
+) CaseFoldError!void {
+    for (items.items) |item| {
+        switch (item) {
+            .literal => |existing| if (existing == cp) return,
+            .range => |range| if (range.start <= cp and cp <= range.end) return,
+        }
+    }
+    try items.append(allocator, .{ .literal = cp });
+}
+
+fn simpleCaseFoldSetAlloc(allocator: std.mem.Allocator, cp: u32) CaseFoldError![]u32 {
+    var items: std.ArrayList(u32) = .empty;
+    errdefer items.deinit(allocator);
+
+    try appendUniqueCodePoint(allocator, &items, cp);
+
+    if (cp <= 0x7f) {
+        const byte = @as(u8, @intCast(cp));
+        try appendUniqueCodePoint(allocator, &items, std.ascii.toLower(byte));
+        try appendUniqueCodePoint(allocator, &items, std.ascii.toUpper(byte));
+        return items.toOwnedSlice(allocator);
+    }
+
+    if (cp > 0xFFFF) {
+        return items.toOwnedSlice(allocator);
+    }
+
+    const canonical = std.os.windows.nls.upcaseW(@as(u16, @intCast(cp)));
+    try appendUniqueCodePoint(allocator, &items, canonical);
+
+    if (canonical == cp) {
+        var candidate: u32 = 0;
+        while (candidate <= 0xFFFF) : (candidate += 1) {
+            if (std.os.windows.nls.upcaseW(@as(u16, @intCast(candidate))) == canonical) {
+                try appendUniqueCodePoint(allocator, &items, candidate);
+            }
+        }
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
+fn appendUniqueCodePoint(
+    allocator: std.mem.Allocator,
+    items: *std.ArrayList(u32),
+    cp: u32,
+) CaseFoldError!void {
+    for (items.items) |existing| {
+        if (existing == cp) return;
+    }
+    try items.append(allocator, cp);
 }
 
 test "HIR lowering preserves shape and extracts prefix analysis" {

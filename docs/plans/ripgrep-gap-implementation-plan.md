@@ -63,9 +63,10 @@ ecosystem features.
   `--no-ignore-vcs`, and `--no-ignore-parent`, layered on top of the
   current small internal `.gitignore`-subset matcher.
 
-- [ ] Add smart case and ignore-case modes.
-  `zigrep` currently rejects case-insensitive search. That is a major practical
-  feature gap.
+- [x] Add smart case and ignore-case modes.
+  `zigrep` now supports `-i/--ignore-case` and `-S/--smart-case` through a
+  case-folded HIR rewrite, with explicit rejection for overly broad folded
+  ranges instead of silent under-matching.
 
 - [ ] Add file type filters:
   `-t`, `-T`, `--type-add`, `--type-list`, and related type definitions.

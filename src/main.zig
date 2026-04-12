@@ -34,6 +34,7 @@ pub const CliOptions = struct {
     no_ignore_vcs: bool = false,
     no_ignore_parent: bool = false,
     skip_binary: bool = true,
+    case_mode: zigrep.search.grep.CaseMode = .sensitive,
     read_strategy: zigrep.search.io.ReadStrategy = .mmap,
     encoding: zigrep.search.io.InputEncoding = .auto,
     parallel_jobs: ?usize = null,
@@ -140,6 +141,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var no_ignore_vcs = false;
     var no_ignore_parent = false;
     var skip_binary = true;
+    var case_mode: zigrep.search.grep.CaseMode = .sensitive;
     var read_strategy: zigrep.search.io.ReadStrategy = .mmap;
     var encoding: zigrep.search.io.InputEncoding = .auto;
     var parallel_jobs: ?usize = null;
@@ -197,6 +199,14 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "--follow")) {
                 follow_symlinks = true;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--ignore-case")) {
+                case_mode = .insensitive;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-S") or std.mem.eql(u8, arg, "--smart-case")) {
+                case_mode = .smart;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--text")) {
@@ -335,6 +345,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .no_ignore_vcs = no_ignore_vcs,
         .no_ignore_parent = no_ignore_parent,
         .skip_binary = skip_binary,
+        .case_mode = case_mode,
         .read_strategy = read_strategy,
         .encoding = encoding,
         .parallel_jobs = parallel_jobs,
@@ -611,7 +622,9 @@ fn searchEntriesSequential(
 ) !bool {
     // Search-lifetime allocator: the compiled regex program and VM state are
     // reused across every file in this search invocation.
-    var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{});
+    var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{
+        .case_mode = options.case_mode,
+    });
     defer searcher.deinit();
 
     var matched = false;
@@ -700,7 +713,9 @@ fn searchEntriesParallel(
         }
 
         fn runWorker(self: *@This()) void {
-            var searcher = zigrep.search.grep.Searcher.init(std.heap.smp_allocator, self.options.pattern, .{}) catch |err| {
+            var searcher = zigrep.search.grep.Searcher.init(std.heap.smp_allocator, self.options.pattern, .{
+                .case_mode = self.options.case_mode,
+            }) catch |err| {
                 self.setError(err);
                 return;
             };
@@ -1345,6 +1360,8 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --no-ignore-vcs       ignore VCS ignore files like .gitignore
         \\  --no-ignore-parent    ignore parent VCS ignore files
         \\  --follow              follow symlinks
+        \\  -i, --ignore-case     search case-insensitively
+        \\  -S, --smart-case      use ignore-case unless the pattern has uppercase letters
         \\  --text                search binary files too
         \\  -g, --glob GLOB       include or exclude paths by glob
         \\  --buffered            use the simpler file-reading method
@@ -1432,6 +1449,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(!opts.no_ignore_vcs);
             try testing.expect(!opts.no_ignore_parent);
             try testing.expect(opts.skip_binary);
+            try testing.expectEqual(zigrep.search.grep.CaseMode.sensitive, opts.case_mode);
             try testing.expectEqual(zigrep.search.io.ReadStrategy.mmap, opts.read_strategy);
             try testing.expectEqual(zigrep.search.io.InputEncoding.auto, opts.encoding);
             try testing.expectEqual(@as(?usize, null), opts.parallel_jobs);
@@ -1702,6 +1720,33 @@ test "parseArgs accepts ignore control flags" {
     }
 }
 
+test "parseArgs accepts ignore-case and smart-case flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-i",
+        "--smart-case",
+        "needle",
+        "src",
+    });
+    defer switch (parsed) {
+        .run => |opts| {
+            testing.allocator.free(opts.paths);
+            testing.allocator.free(opts.globs);
+            testing.allocator.free(opts.ignore_files);
+        },
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(zigrep.search.grep.CaseMode.smart, opts.case_mode);
+        },
+        .help, .version => unreachable,
+    }
+}
+
 test "parseArgs rejects invalid numeric flags" {
     const testing = std.testing;
 
@@ -1914,6 +1959,70 @@ test "runCli no-ignore bypasses all ignore filtering" {
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ignored.txt:1:1:needle ignored"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "blocked.txt:1:1:needle blocked"));
+}
+
+test "runCli ignore-case matches differing literal case" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "Needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:Needle one"));
+}
+
+test "runCli smart-case keeps uppercase patterns case-sensitive" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "needle lower\nNeedle upper\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--smart-case", "Needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:needle lower"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:Needle upper"));
+}
+
+test "runCli smart-case uses ignore-case for lowercase patterns" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "Needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--smart-case", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:Needle one"));
 }
 
 test "runCli returns 1 when nothing matches" {
