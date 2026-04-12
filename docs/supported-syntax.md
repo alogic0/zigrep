@@ -64,10 +64,20 @@ The current CLI supports:
 - Buffered or mmap-backed reads with `--buffered` and `--mmap`
 - Worker-count control with `-j` or `--threads`
 - Walk depth limiting with `--max-depth`
+- Matching-line limit with `-m` or `--max-count`
 - Count-only output with `-c` or `--count`
 - Matching-file output with `-l` or `--files-with-matches`
+- Non-matching-file output with `-L` or `--files-without-match`
+- Match-only output with `-o` or `--only-matching`
 - Output toggles with `-H`/`--with-filename`, `--no-filename`, `-n`/`--line-number`, `--no-line-number`, `--column`, and `--no-column`
 - `--` to terminate flag parsing
+
+`--max-count` note:
+
+- `-m N` or `--max-count N` stops after `N` matching lines per file
+- in normal output, that limits printed matching lines
+- with `--count`, that limits the counted matching lines too
+- with `--only-matching`, `zigrep` still prints every match occurrence from the first `N` matching lines
 
 For non-technical users:
 
@@ -107,7 +117,7 @@ The current search tool does not yet implement:
 - replacement/substitution
 - multiline output formatting
 - context lines before or after matches
-- inverted-match mode and files-without-match mode
+- inverted-match mode
 - full ripgrep flag compatibility
 
 ## Performance Model

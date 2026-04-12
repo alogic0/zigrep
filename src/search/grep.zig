@@ -158,6 +158,32 @@ pub const Searcher = struct {
         return matched;
     }
 
+    pub fn forEachMatchReport(
+        self: *Searcher,
+        path: []const u8,
+        haystack: []const u8,
+        context: anytype,
+        comptime emit: fn (@TypeOf(context), MatchReport) anyerror!void,
+    ) anyerror!bool {
+        var offset: usize = 0;
+        var matched = false;
+
+        while (offset <= haystack.len) {
+            const result = (try self.firstMatchFrom(haystack, offset)) orelse break;
+            defer result.match.deinit(self.allocator);
+
+            const report = buildReport(path, haystack, result.match.span);
+            try emit(context, report);
+            matched = true;
+
+            const next_offset = nextMatchSearchOffset(haystack, report.match_span);
+            if (next_offset <= offset) break;
+            offset = next_offset;
+        }
+
+        return matched;
+    }
+
     pub fn firstByteMatch(self: *Searcher, haystack: []const u8) regex.Vm.MatchError!?regex.Vm.Match {
         if (self.byte_plan == .none or bytePlanNeedsGeneralVm(self.byte_plan)) {
             return self.engine.firstMatchBytes(self.program, haystack);
@@ -308,6 +334,17 @@ fn addOffsetToCapture(capture: *regex.Vm.Capture, offset: usize) void {
 fn nextLineSearchOffset(haystack: []const u8, line_end: usize) usize {
     if (line_end < haystack.len and haystack[line_end] == '\n') return line_end + 1;
     return line_end;
+}
+
+fn nextMatchSearchOffset(haystack: []const u8, match_span: Span) usize {
+    if (match_span.end > match_span.start) return match_span.end;
+    if (match_span.end >= haystack.len) return haystack.len + 1;
+
+    const byte = haystack[match_span.end];
+    const seq_len = std.unicode.utf8ByteSequenceLength(byte) catch return match_span.end + 1;
+    if (match_span.end + seq_len > haystack.len) return match_span.end + 1;
+    _ = std.unicode.utf8Decode(haystack[match_span.end .. match_span.end + seq_len]) catch return match_span.end + 1;
+    return match_span.end + seq_len;
 }
 
 fn bytePlanNeedsGeneralVm(plan: ByteSearchPlan) bool {
@@ -1404,6 +1441,38 @@ test "Searcher forEachLineReport emits every matching line once" {
     try testing.expectEqualStrings("needle one", lines.items[0]);
     try testing.expectEqualStrings("needle two", lines.items[1]);
     try testing.expectEqualStrings("needle needle", lines.items[2]);
+}
+
+test "Searcher forEachMatchReport emits every match occurrence" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "needle", .{});
+    defer searcher.deinit();
+
+    var spans: std.ArrayList(Span) = .empty;
+    defer spans.deinit(testing.allocator);
+
+    const Collector = struct {
+        spans: *std.ArrayList(Span),
+
+        fn emit(self: *@This(), report: MatchReport) !void {
+            try self.spans.append(testing.allocator, report.match_span);
+        }
+    };
+
+    var collector = Collector{ .spans = &spans };
+    const matched = try searcher.forEachMatchReport(
+        "sample.txt",
+        "needle and needle again\nneedle\n",
+        &collector,
+        Collector.emit,
+    );
+
+    try testing.expect(matched);
+    try testing.expectEqual(@as(usize, 3), spans.items.len);
+    try testing.expectEqual(Span{ .start = 0, .end = 6 }, spans.items[0]);
+    try testing.expectEqual(Span{ .start = 11, .end = 17 }, spans.items[1]);
+    try testing.expectEqual(Span{ .start = 24, .end = 30 }, spans.items[2]);
 }
 
 test "reportFirstMatch handles matches on the first line" {

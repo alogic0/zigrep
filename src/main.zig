@@ -12,12 +12,14 @@ pub const OutputOptions = struct {
     with_filename: bool = true,
     line_number: bool = true,
     column_number: bool = true,
+    only_matching: bool = false,
 };
 
 const ReportMode = enum {
     lines,
     count,
     files_with_matches,
+    files_without_match,
 };
 
 pub const CliOptions = struct {
@@ -30,6 +32,7 @@ pub const CliOptions = struct {
     encoding: zigrep.search.io.InputEncoding = .auto,
     parallel_jobs: ?usize = null,
     max_depth: ?usize = null,
+    max_count: ?usize = null,
     output: OutputOptions = .{},
     report_mode: ReportMode = .lines,
     buffer_output: bool = false,
@@ -125,6 +128,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
     var encoding: zigrep.search.io.InputEncoding = .auto;
     var parallel_jobs: ?usize = null;
     var max_depth: ?usize = null;
+    var max_count: ?usize = null;
     var output: OutputOptions = .{};
     var report_mode: ReportMode = .lines;
     var pattern: ?[]const u8 = null;
@@ -185,6 +189,12 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
                 max_depth = try parseNonNegativeUsize(argv[index]);
                 continue;
             }
+            if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--max-count")) {
+                index += 1;
+                if (index >= argv.len) return error.MissingFlagValue;
+                max_count = try parsePositiveUsize(argv[index]);
+                continue;
+            }
             if (std.mem.eql(u8, arg, "-H") or std.mem.eql(u8, arg, "--with-filename")) {
                 output.with_filename = true;
                 continue;
@@ -195,6 +205,14 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
             }
             if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--files-with-matches")) {
                 report_mode = .files_with_matches;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-L") or std.mem.eql(u8, arg, "--files-without-match")) {
+                report_mode = .files_without_match;
+                continue;
+            }
+            if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--only-matching")) {
+                output.only_matching = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--no-filename")) {
@@ -240,6 +258,7 @@ fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResul
         .encoding = encoding,
         .parallel_jobs = parallel_jobs,
         .max_depth = max_depth,
+        .max_count = max_count,
         .output = output,
         .report_mode = report_mode,
     } };
@@ -351,6 +370,7 @@ fn searchEntriesSequential(
             options.encoding,
             options.output,
             options.report_mode,
+            options.max_count,
         )) {
             matched = true;
         }
@@ -461,6 +481,7 @@ fn searchEntriesParallel(
                 self.options.encoding,
                 self.options.output,
                 self.options.report_mode,
+                self.options.max_count,
             )) {
                 self.result_reports[index] = .{
                     .bytes = capture.toArrayList(),
@@ -553,7 +574,11 @@ fn writeReport(
     if (wrote_prefix) {
         try writer.writeByte(':');
     }
-    try writeDisplayLine(writer, report.line);
+    const display_slice = if (output.only_matching)
+        report.line[report.match_span.start - report.line_span.start .. report.match_span.end - report.line_span.start]
+    else
+        report.line;
+    try writeDisplayLine(writer, display_slice);
     try writer.writeByte('\n');
 }
 
@@ -583,13 +608,33 @@ fn writeFileReports(
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
     output: OutputOptions,
+    max_count: ?usize,
 ) !bool {
+    const IterationStop = error{MaxCountReached};
+
     const WriterContext = struct {
         allocator: std.mem.Allocator,
         writer: *std.Io.Writer,
         output: OutputOptions,
+        max_count: ?usize,
+        matched_lines: usize = 0,
+        last_line_start: ?usize = null,
 
         fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
+            if (self.output.only_matching) {
+                if (self.last_line_start == null or self.last_line_start.? != report.line_span.start) {
+                    if (self.max_count) |limit| {
+                        if (self.matched_lines >= limit) return IterationStop.MaxCountReached;
+                    }
+                    self.matched_lines += 1;
+                    self.last_line_start = report.line_span.start;
+                }
+            } else {
+                if (self.max_count) |limit| {
+                    if (self.matched_lines >= limit) return IterationStop.MaxCountReached;
+                }
+                self.matched_lines += 1;
+            }
             if (report.owned_line) |line| {
                 defer self.allocator.free(line);
             }
@@ -601,15 +646,35 @@ fn writeFileReports(
         .allocator = allocator,
         .writer = writer,
         .output = .{},
+        .max_count = max_count,
     };
     context.output = output;
 
     if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
         defer allocator.free(decoded);
-        return searcher.forEachLineReport(path, decoded, &context, WriterContext.emit);
+        if (output.only_matching) {
+            return searcher.forEachMatchReport(path, decoded, &context, WriterContext.emit) catch |err| switch (err) {
+                IterationStop.MaxCountReached => context.matched_lines != 0,
+                else => return err,
+            };
+        }
+        return searcher.forEachLineReport(path, decoded, &context, WriterContext.emit) catch |err| switch (err) {
+            IterationStop.MaxCountReached => context.matched_lines != 0,
+            else => return err,
+        };
     }
 
-    return searcher.forEachLineReport(path, bytes, &context, WriterContext.emit);
+    if (output.only_matching) {
+        return searcher.forEachMatchReport(path, bytes, &context, WriterContext.emit) catch |err| switch (err) {
+            IterationStop.MaxCountReached => context.matched_lines != 0,
+            else => return err,
+        };
+    }
+
+    return searcher.forEachLineReport(path, bytes, &context, WriterContext.emit) catch |err| switch (err) {
+        IterationStop.MaxCountReached => context.matched_lines != 0,
+        else => return err,
+    };
 }
 
 fn writeFileOutput(
@@ -621,11 +686,13 @@ fn writeFileOutput(
     encoding: zigrep.search.io.InputEncoding,
     output: OutputOptions,
     report_mode: ReportMode,
+    max_count: ?usize,
 ) !bool {
     return switch (report_mode) {
-        .lines => writeFileReports(allocator, writer, searcher, path, bytes, encoding, output),
-        .count => writeFileCount(allocator, writer, searcher, path, bytes, encoding, output),
+        .lines => writeFileReports(allocator, writer, searcher, path, bytes, encoding, output, max_count),
+        .count => writeFileCount(allocator, writer, searcher, path, bytes, encoding, output, max_count),
         .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding),
+        .files_without_match => writeFilePathWithoutMatch(allocator, writer, searcher, path, bytes, encoding),
     };
 }
 
@@ -637,23 +704,36 @@ fn writeFileCount(
     bytes: []const u8,
     encoding: zigrep.search.io.InputEncoding,
     output: OutputOptions,
+    max_count: ?usize,
 ) !bool {
+    const IterationStop = error{MaxCountReached};
+
     const Counter = struct {
         count: usize = 0,
+        max_count: ?usize,
 
         fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
             _ = report;
             self.count += 1;
+            if (self.max_count) |limit| {
+                if (self.count >= limit) return IterationStop.MaxCountReached;
+            }
         }
     };
 
-    var counter = Counter{};
+    var counter = Counter{ .max_count = max_count };
 
     if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
         defer allocator.free(decoded);
-        _ = try searcher.forEachLineReport(path, decoded, &counter, Counter.emit);
+        _ = searcher.forEachLineReport(path, decoded, &counter, Counter.emit) catch |err| switch (err) {
+            IterationStop.MaxCountReached => true,
+            else => return err,
+        };
     } else {
-        _ = try searcher.forEachLineReport(path, bytes, &counter, Counter.emit);
+        _ = searcher.forEachLineReport(path, bytes, &counter, Counter.emit) catch |err| switch (err) {
+            IterationStop.MaxCountReached => true,
+            else => return err,
+        };
     }
 
     if (counter.count == 0) return false;
@@ -675,6 +755,23 @@ fn writeFilePathOnMatch(
 ) !bool {
     const report = try reportFileMatch(allocator, searcher, path, bytes, encoding) orelse return false;
     defer report.deinit(allocator);
+    try writer.print("{s}\n", .{path});
+    return true;
+}
+
+fn writeFilePathWithoutMatch(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+) !bool {
+    const report = try reportFileMatch(allocator, searcher, path, bytes, encoding);
+    if (report) |found| {
+        found.deinit(allocator);
+        return false;
+    }
     try writer.print("{s}\n", .{path});
     return true;
 }
@@ -789,9 +886,13 @@ fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -E, --encoding ENC    force input encoding: auto, utf8, utf16le, utf16be
         \\  -j, --threads N       use up to N worker threads
         \\  --max-depth N         limit recursive walk depth
+        \\  -m, --max-count N     stop after N matching lines per file
         \\  -c, --count           print matching line counts
         \\  -l, --files-with-matches
         \\                        print only matching file paths
+        \\  -L, --files-without-match
+        \\                        print only non-matching file paths
+        \\  -o, --only-matching   print only the matched text
         \\  -H, --with-filename   always print the file path
         \\  --no-filename         suppress the file path prefix
         \\  -n, --line-number     print line numbers
@@ -858,6 +959,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(opts.output.with_filename);
             try testing.expect(opts.output.line_number);
             try testing.expect(opts.output.column_number);
+            try testing.expect(!opts.output.only_matching);
             try testing.expectEqual(ReportMode.lines, opts.report_mode);
         },
         .help => unreachable,
@@ -945,7 +1047,10 @@ test "parseArgs accepts numeric and formatting flags" {
         "4",
         "--max-depth",
         "2",
+        "--max-count",
+        "3",
         "--count",
+        "--only-matching",
         "--encoding",
         "utf16le",
         "--no-filename",
@@ -964,11 +1069,53 @@ test "parseArgs accepts numeric and formatting flags" {
             try testing.expectEqualStrings("-literal", opts.pattern);
             try testing.expectEqual(@as(?usize, 4), opts.parallel_jobs);
             try testing.expectEqual(@as(?usize, 2), opts.max_depth);
+            try testing.expectEqual(@as(?usize, 3), opts.max_count);
             try testing.expectEqual(zigrep.search.io.InputEncoding.utf16le, opts.encoding);
             try testing.expect(!opts.output.with_filename);
             try testing.expect(opts.output.line_number);
             try testing.expect(!opts.output.column_number);
+            try testing.expect(opts.output.only_matching);
             try testing.expectEqual(ReportMode.count, opts.report_mode);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version => unreachable,
+    }
+}
+
+test "parseArgs accepts files-without-match mode" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--files-without-match", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| testing.allocator.free(opts.paths),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(ReportMode.files_without_match, opts.report_mode);
+            try testing.expectEqualStrings("needle", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version => unreachable,
+    }
+}
+
+test "parseArgs accepts max-count mode" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-m", "2", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| testing.allocator.free(opts.paths),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(@as(?usize, 2), opts.max_count);
+            try testing.expectEqualStrings("needle", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("src", opts.paths[0]);
         },
@@ -1281,6 +1428,60 @@ test "runCli count mode prints per-file matching line counts" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli max-count limits matching lines per file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data =
+            "needle one\n" ++
+            "skip\n" ++
+            "needle two\n" ++
+            "needle three\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--max-count", "2", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:3:1:needle two"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:4:1:needle three"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli count mode respects max-count" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data =
+            "needle one\n" ++
+            "skip\n" ++
+            "needle two\n" ++
+            "needle three\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--count", "--max-count", "2", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli files-with-matches mode prints matching file paths once" {
     const testing = std.testing;
 
@@ -1305,6 +1506,81 @@ test "runCli files-with-matches mode prints matching file paths once" {
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt\n"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "two.txt\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli files-without-match mode prints only non-matching file paths" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "one.txt",
+        .data = "needle one\nneedle two\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "two.txt",
+        .data = "skip\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--files-without-match", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "two.txt\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli only-matching mode prints each match occurrence" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one needle two\nneedle\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--only-matching", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:needle\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:12:needle\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2:1:needle\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli only-matching mode respects max-count by matching line" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one needle two\nneedle three\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--only-matching", "--max-count", "1", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:needle\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:12:needle\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2:1:needle\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -2119,6 +2395,7 @@ test "writeFileReports does not require owned line bytes for decoded multi-line 
         utf16le,
         .auto,
         .{},
+        null,
     );
 
     try testing.expect(matched);

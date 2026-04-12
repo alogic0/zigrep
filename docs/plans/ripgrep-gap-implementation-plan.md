@@ -28,21 +28,22 @@ ecosystem features.
 - [x] Add `-c/--count` style reporting.
   `zigrep` now supports count-only reporting for matching lines.
 
-- [ ] Add `-o/--only-matching`.
-  The engine already tracks match spans. Exposing match-only output is a high
-  leverage CLI feature.
+- [x] Add `-o/--only-matching`.
+  The engine already tracks match spans, and `zigrep` now exposes that as a CLI
+  output mode.
 
 - [x] Add `-l/--files-with-matches` and `-L/--files-without-match` equivalents.
-  `zigrep` now supports `-l/--files-with-matches`; `files-without-match` is
-  still open.
+  `zigrep` now supports both `-l/--files-with-matches` and
+  `-L/--files-without-match`.
 
 - [ ] Add before/after/context line support (`-A`, `-B`, `-C` style behavior).
   This is one of the biggest practical output gaps versus ripgrep and standard
   grep workflows.
 
-- [ ] Add `--max-count`.
-  This becomes especially useful once full per-file multi-match output and
-  context modes are already in place.
+- [x] Add `-m/--max-count`.
+  `zigrep` now supports a per-file matching-line cap via `-m` or
+  `--max-count`, including the existing `--count` and `--only-matching`
+  output modes.
 
 ### Zig-specific guidance
 
@@ -181,7 +182,8 @@ ecosystem features.
 ## Suggested Implementation Order
 
 - [x] 1. Add count-only and files-with-matches modes.
-- [ ] 2. Add only-matching output.
+- [x] 2. Add only-matching output.
+- [x] 3. Add `-m/--max-count`.
 - [ ] 3. Add context line support.
 - [ ] 4. Add glob filtering and richer ignore controls.
 - [ ] 5. Add case-insensitive / smart-case search.
