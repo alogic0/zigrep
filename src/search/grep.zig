@@ -30,11 +30,29 @@ pub const MatchReport = struct {
     }
 };
 
+pub const ByteSearchPlan = union(enum) {
+    none,
+    literal_contains: []u8,
+    literal_start: []u8,
+    literal_end: []u8,
+    literal_full: []u8,
+
+    pub fn deinit(self: ByteSearchPlan, allocator: std.mem.Allocator) void {
+        switch (self) {
+            .none => {},
+            .literal_contains => |bytes| allocator.free(bytes),
+            .literal_start => |bytes| allocator.free(bytes),
+            .literal_end => |bytes| allocator.free(bytes),
+            .literal_full => |bytes| allocator.free(bytes),
+        }
+    }
+};
+
 pub const Searcher = struct {
     allocator: std.mem.Allocator,
     engine: regex.Vm.MatchEngine,
     program: regex.Nfa.Program,
-    exact_literal: ?[]u8,
+    byte_plan: ByteSearchPlan,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -50,15 +68,12 @@ pub const Searcher = struct {
             .allocator = allocator,
             .engine = regex.Vm.MatchEngine.init(allocator),
             .program = try regex.Nfa.compile(allocator, hir),
-            .exact_literal = switch (hir.fast_path) {
-                .exact_literal => |bytes| if (std.unicode.utf8ValidateSlice(bytes)) try allocator.dupe(u8, bytes) else null,
-                else => null,
-            },
+            .byte_plan = try extractByteSearchPlan(allocator, hir),
         };
     }
 
     pub fn deinit(self: *Searcher) void {
-        if (self.exact_literal) |bytes| self.allocator.free(bytes);
+        self.byte_plan.deinit(self.allocator);
         self.program.deinit(self.allocator);
     }
 
@@ -71,12 +86,30 @@ pub const Searcher = struct {
         return null;
     }
 
-    pub fn reportFirstByteLiteralMatch(self: *Searcher, path: []const u8, haystack: []const u8) ?MatchReport {
-        const literal = self.exact_literal orelse return null;
-        const start = std.mem.indexOf(u8, haystack, literal) orelse return null;
+    pub fn reportFirstByteMatch(self: *Searcher, path: []const u8, haystack: []const u8) ?MatchReport {
+        const span = switch (self.byte_plan) {
+            .none => null,
+            .literal_contains => |literal| if (std.mem.indexOf(u8, haystack, literal)) |start| Span{
+                .start = start,
+                .end = start + literal.len,
+            } else null,
+            .literal_start => |literal| if (std.mem.startsWith(u8, haystack, literal)) Span{
+                .start = 0,
+                .end = literal.len,
+            } else null,
+            .literal_end => |literal| if (std.mem.endsWith(u8, haystack, literal)) Span{
+                .start = haystack.len - literal.len,
+                .end = haystack.len,
+            } else null,
+            .literal_full => |literal| if (std.mem.eql(u8, haystack, literal)) Span{
+                .start = 0,
+                .end = haystack.len,
+            } else null,
+        } orelse return null;
+
         return buildReport(path, haystack, .{
-            .start = start,
-            .end = start + literal.len,
+            .start = span.start,
+            .end = span.end,
         });
     }
 };
@@ -111,6 +144,68 @@ fn buildReport(path: []const u8, haystack: []const u8, span: regex.Vm.Capture) M
             .start = match_start,
             .end = match_end,
         },
+    };
+}
+
+const AnchoredLiteralMode = enum {
+    contains,
+    start,
+    end,
+    full,
+};
+
+fn extractByteSearchPlan(allocator: std.mem.Allocator, hir: regex.Hir) !ByteSearchPlan {
+    return switch (hir.nodes[@intFromEnum(hir.root)]) {
+        .literal => |cp| if (cp <= 0x7f)
+            .{ .literal_contains = try allocator.dupe(u8, &[_]u8{@as(u8, @intCast(cp))}) }
+        else
+            .none,
+        .concat => |children| blk: {
+            var prefix_anchor = false;
+            var suffix_anchor = false;
+            var start_index: usize = 0;
+            var end_index: usize = children.len;
+
+            if (children.len > 0 and std.meta.activeTag(hir.nodes[@intFromEnum(children[0])]) == .anchor_start) {
+                prefix_anchor = true;
+                start_index = 1;
+            }
+            if (end_index > start_index and std.meta.activeTag(hir.nodes[@intFromEnum(children[end_index - 1])]) == .anchor_end) {
+                suffix_anchor = true;
+                end_index -= 1;
+            }
+            if (start_index == end_index) break :blk .none;
+
+            var bytes = std.ArrayList(u8).empty;
+            defer bytes.deinit(allocator);
+
+            for (children[start_index..end_index]) |child| {
+                switch (hir.nodes[@intFromEnum(child)]) {
+                    .literal => |cp| {
+                        if (cp > 0x7f) break :blk .none;
+                        try bytes.append(allocator, @as(u8, @intCast(cp)));
+                    },
+                    else => break :blk .none,
+                }
+            }
+            if (bytes.items.len == 0) break :blk .none;
+
+            const duped = try bytes.toOwnedSlice(allocator);
+            break :blk switch (if (prefix_anchor and suffix_anchor)
+                AnchoredLiteralMode.full
+            else if (prefix_anchor)
+                AnchoredLiteralMode.start
+            else if (suffix_anchor)
+                AnchoredLiteralMode.end
+            else
+                AnchoredLiteralMode.contains) {
+                .contains => .{ .literal_contains = duped },
+                .start => .{ .literal_start = duped },
+                .end => .{ .literal_end = duped },
+                .full => .{ .literal_full = duped },
+            };
+        },
+        else => .none,
     };
 }
 
@@ -169,7 +264,7 @@ test "Searcher can report exact literal matches on invalid UTF-8 through byte fa
     var searcher = try Searcher.init(testing.allocator, "needle", .{});
     defer searcher.deinit();
 
-    const report = searcher.reportFirstByteLiteralMatch("sample.bin", "xx\xffneedleyy").?;
+    const report = searcher.reportFirstByteMatch("sample.bin", "xx\xffneedleyy").?;
     defer report.deinit(testing.allocator);
 
     try testing.expectEqualStrings("sample.bin", report.path);
@@ -187,7 +282,26 @@ test "Searcher byte fallback is limited to exact literal patterns" {
     var searcher = try Searcher.init(testing.allocator, "a.b", .{});
     defer searcher.deinit();
 
-    try testing.expect(searcher.reportFirstByteLiteralMatch("sample.bin", "a\xffb") == null);
+    try testing.expect(searcher.reportFirstByteMatch("sample.bin", "a\xffb") == null);
+}
+
+test "Searcher byte fallback supports anchored literal start and end patterns" {
+    const testing = std.testing;
+
+    var start_searcher = try Searcher.init(testing.allocator, "^needle", .{});
+    defer start_searcher.deinit();
+    try testing.expect(start_searcher.reportFirstByteMatch("start.bin", "needle\xfftail") != null);
+    try testing.expect(start_searcher.reportFirstByteMatch("start.bin", "xxneedle") == null);
+
+    var end_searcher = try Searcher.init(testing.allocator, "needle$", .{});
+    defer end_searcher.deinit();
+    try testing.expect(end_searcher.reportFirstByteMatch("end.bin", "xx\xffneedle") != null);
+    try testing.expect(end_searcher.reportFirstByteMatch("end.bin", "needlexx") == null);
+
+    var full_searcher = try Searcher.init(testing.allocator, "^needle$", .{});
+    defer full_searcher.deinit();
+    try testing.expect(full_searcher.reportFirstByteMatch("full.bin", "needle") != null);
+    try testing.expect(full_searcher.reportFirstByteMatch("full.bin", "needle\xff") == null);
 }
 
 test "reportFirstMatch stays aligned across buffered and mmap file reads" {

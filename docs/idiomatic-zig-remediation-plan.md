@@ -117,6 +117,6 @@ encoding behavior without rewriting the whole architecture around generic
 - The current invalid-UTF-8 fallback semantics are now documented explicitly,
   including which regex constructs observe the temporary `?` placeholder during
   `--text` matching and how output still maps back to the original bytes.
-- `--text` now has a first true byte-oriented path for exact ASCII literal
-  patterns on invalid UTF-8 input, which reduces reliance on the lossy retry
-  for the simplest and most common search case.
+- `--text` now has a first true byte-oriented path for exact and anchored ASCII
+  literal patterns on invalid UTF-8 input, which reduces reliance on the lossy
+  retry for the simplest and most common search cases.

@@ -15,8 +15,8 @@ path. The long-term replacement plan remains in
   currently behaves like "no match" in default mode.
 - `--text` retries matching through a temporary lossy shadow haystack after an
   `InvalidUtf8` failure.
-- Before that lossy retry, exact ASCII literal patterns get a true raw-byte
-  search path against the original file bytes.
+- Before that lossy retry, exact and anchored ASCII literal patterns get a true
+  raw-byte search path against the original file bytes.
 - The lossy shadow haystack replaces each invalid byte that breaks UTF-8
   decoding with the single ASCII byte `?`.
 - Matching uses that lossy shadow haystack only as an internal aid. Printed
@@ -26,7 +26,8 @@ path. The long-term replacement plan remains in
 
 Under the current `--text` fallback:
 
-- Exact ASCII literal patterns match against the original file bytes.
+- Exact and anchored ASCII literal patterns match against the original file
+  bytes.
 - `.` can match a replaced invalid byte because the matcher sees `?`.
 - Anchors and newline behavior still follow the current regex engine rules.
 - Column numbers and line spans stay byte-oriented against the original file
