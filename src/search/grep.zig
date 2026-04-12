@@ -50,10 +50,24 @@ const ByteWildcardCase = struct {
     }
 };
 
+const ByteClassCase = struct {
+    mode: AnchoredLiteralMode,
+    prefix: []u8,
+    class: regex.hir.CharacterClass,
+    suffix: []u8,
+
+    fn deinit(self: ByteClassCase, allocator: std.mem.Allocator) void {
+        allocator.free(self.prefix);
+        allocator.free(self.class.items);
+        allocator.free(self.suffix);
+    }
+};
+
 pub const ByteSearchPlan = union(enum) {
     none,
     single: ByteLiteralCase,
     wildcard: ByteWildcardCase,
+    class_case: ByteClassCase,
     alternation: []ByteLiteralCase,
 
     pub fn deinit(self: ByteSearchPlan, allocator: std.mem.Allocator) void {
@@ -61,6 +75,7 @@ pub const ByteSearchPlan = union(enum) {
             .none => {},
             .single => |literal_case| literal_case.deinit(allocator),
             .wildcard => |wildcard_case| wildcard_case.deinit(allocator),
+            .class_case => |class_case| class_case.deinit(allocator),
             .alternation => |cases| {
                 for (cases) |literal_case| literal_case.deinit(allocator);
                 allocator.free(cases);
@@ -112,6 +127,7 @@ pub const Searcher = struct {
             .none => null,
             .single => |literal_case| findByteLiteralSpan(literal_case, haystack),
             .wildcard => |wildcard_case| findByteWildcardSpan(wildcard_case, haystack),
+            .class_case => |class_case| findByteClassSpan(class_case, haystack),
             .alternation => |cases| findByteAlternationSpan(cases, haystack),
         } orelse return null;
 
@@ -182,6 +198,8 @@ fn extractByteSearchPlan(allocator: std.mem.Allocator, hir: regex.Hir) !ByteSear
             .{ .single = literal_case }
         else if (try extractByteWildcardCase(allocator, hir.nodes, hir.root)) |wildcard_case|
             .{ .wildcard = wildcard_case }
+        else if (try extractByteClassCase(allocator, hir.nodes, hir.root)) |class_case|
+            .{ .class_case = class_case }
         else
             .none,
     };
@@ -307,6 +325,77 @@ fn extractByteWildcardCase(
     };
 }
 
+fn extractByteClassCase(
+    allocator: std.mem.Allocator,
+    nodes: []const regex.hir.Node,
+    root: regex.hir.NodeId,
+) !?ByteClassCase {
+    return switch (nodes[@intFromEnum(root)]) {
+        .concat => |children| blk: {
+            var prefix_anchor = false;
+            var suffix_anchor = false;
+            var start_index: usize = 0;
+            var end_index: usize = children.len;
+
+            if (children.len > 0 and std.meta.activeTag(nodes[@intFromEnum(children[0])]) == .anchor_start) {
+                prefix_anchor = true;
+                start_index = 1;
+            }
+            if (end_index > start_index and std.meta.activeTag(nodes[@intFromEnum(children[end_index - 1])]) == .anchor_end) {
+                suffix_anchor = true;
+                end_index -= 1;
+            }
+            if (end_index - start_index < 2) break :blk null;
+
+            var class_index: ?usize = null;
+            var class_count: usize = 0;
+            for (children[start_index..end_index], start_index..) |child, absolute_index| {
+                switch (nodes[@intFromEnum(child)]) {
+                    .char_class => |class| {
+                        if (!isAsciiClass(class)) break :blk null;
+                        class_count += 1;
+                        class_index = absolute_index;
+                    },
+                    .literal => |cp| if (cp > 0x7f) break :blk null,
+                    else => break :blk null,
+                }
+            }
+            if (class_count != 1) break :blk null;
+
+            const split = class_index.?;
+            const prefix = try collectAsciiLiteralRange(allocator, nodes, children[start_index..split]);
+            errdefer allocator.free(prefix);
+            const suffix = try collectAsciiLiteralRange(allocator, nodes, children[split + 1 .. end_index]);
+            errdefer allocator.free(suffix);
+
+            if (prefix.len == 0 and suffix.len == 0) break :blk null;
+
+            const class = nodes[@intFromEnum(children[split])].char_class;
+            const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
+            errdefer allocator.free(duped_items);
+            @memcpy(duped_items, class.items);
+
+            break :blk .{
+                .mode = if (prefix_anchor and suffix_anchor)
+                    .full
+                else if (prefix_anchor)
+                    .start
+                else if (suffix_anchor)
+                    .end
+                else
+                    .contains,
+                .prefix = prefix,
+                .class = .{
+                    .negated = class.negated,
+                    .items = duped_items,
+                },
+                .suffix = suffix,
+            };
+        },
+        else => null,
+    };
+}
+
 fn collectAsciiLiteralRange(
     allocator: std.mem.Allocator,
     nodes: []const regex.hir.Node,
@@ -359,6 +448,15 @@ fn findByteWildcardSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?
         .start => findByteWildcardAnchoredStartSpan(wildcard_case, haystack),
         .end => findByteWildcardAnchoredEndSpan(wildcard_case, haystack),
         .full => findByteWildcardAnchoredFullSpan(wildcard_case, haystack),
+    };
+}
+
+fn findByteClassSpan(class_case: ByteClassCase, haystack: []const u8) ?Span {
+    return switch (class_case.mode) {
+        .contains => findByteClassContainsSpan(class_case, haystack),
+        .start => findByteClassAnchoredStartSpan(class_case, haystack),
+        .end => findByteClassAnchoredEndSpan(class_case, haystack),
+        .full => findByteClassAnchoredFullSpan(class_case, haystack),
     };
 }
 
@@ -420,6 +518,94 @@ fn findByteWildcardAnchoredFullSpan(wildcard_case: ByteWildcardCase, haystack: [
     if (haystack[wildcard_index] == '\n') return null;
     if (!std.mem.eql(u8, haystack[wildcard_index + 1 ..], wildcard_case.suffix)) return null;
     return .{ .start = 0, .end = haystack.len };
+}
+
+fn findByteClassContainsSpan(class_case: ByteClassCase, haystack: []const u8) ?Span {
+    var start_index: usize = 0;
+    while (start_index <= haystack.len) {
+        const prefix_index = if (class_case.prefix.len == 0)
+            start_index
+        else
+            (std.mem.indexOfPos(u8, haystack, start_index, class_case.prefix) orelse return null);
+
+        const class_index = prefix_index + class_case.prefix.len;
+        if (class_index >= haystack.len) return null;
+        if (!byteMatchesClass(class_case.class, haystack[class_index])) {
+            start_index = prefix_index + 1;
+            continue;
+        }
+
+        const suffix_start = class_index + 1;
+        if (suffix_start + class_case.suffix.len > haystack.len) return null;
+        if (std.mem.eql(u8, haystack[suffix_start .. suffix_start + class_case.suffix.len], class_case.suffix)) {
+            return .{
+                .start = prefix_index,
+                .end = suffix_start + class_case.suffix.len,
+            };
+        }
+        start_index = prefix_index + 1;
+    }
+    return null;
+}
+
+fn findByteClassAnchoredStartSpan(class_case: ByteClassCase, haystack: []const u8) ?Span {
+    if (!std.mem.startsWith(u8, haystack, class_case.prefix)) return null;
+    const class_index = class_case.prefix.len;
+    if (class_index >= haystack.len) return null;
+    if (!byteMatchesClass(class_case.class, haystack[class_index])) return null;
+    const suffix_start = class_index + 1;
+    if (suffix_start + class_case.suffix.len > haystack.len) return null;
+    if (!std.mem.eql(u8, haystack[suffix_start .. suffix_start + class_case.suffix.len], class_case.suffix)) return null;
+    return .{ .start = 0, .end = suffix_start + class_case.suffix.len };
+}
+
+fn findByteClassAnchoredEndSpan(class_case: ByteClassCase, haystack: []const u8) ?Span {
+    const total_len = class_case.prefix.len + 1 + class_case.suffix.len;
+    if (haystack.len < total_len) return null;
+    const start = haystack.len - total_len;
+    if (!std.mem.eql(u8, haystack[start .. start + class_case.prefix.len], class_case.prefix)) return null;
+    const class_index = start + class_case.prefix.len;
+    if (!byteMatchesClass(class_case.class, haystack[class_index])) return null;
+    if (!std.mem.eql(u8, haystack[class_index + 1 ..], class_case.suffix)) return null;
+    return .{ .start = start, .end = haystack.len };
+}
+
+fn findByteClassAnchoredFullSpan(class_case: ByteClassCase, haystack: []const u8) ?Span {
+    const total_len = class_case.prefix.len + 1 + class_case.suffix.len;
+    if (haystack.len != total_len) return null;
+    if (!std.mem.startsWith(u8, haystack, class_case.prefix)) return null;
+    const class_index = class_case.prefix.len;
+    if (!byteMatchesClass(class_case.class, haystack[class_index])) return null;
+    if (!std.mem.eql(u8, haystack[class_index + 1 ..], class_case.suffix)) return null;
+    return .{ .start = 0, .end = haystack.len };
+}
+
+fn isAsciiClass(class: regex.hir.CharacterClass) bool {
+    for (class.items) |item| {
+        switch (item) {
+            .literal => |literal| if (literal > 0x7f) return false,
+            .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
+        }
+    }
+    return true;
+}
+
+fn byteMatchesClass(class: regex.hir.CharacterClass, byte: u8) bool {
+    const cp: u32 = byte;
+    var matched = false;
+    for (class.items) |item| {
+        switch (item) {
+            .literal => |literal| if (literal == cp) {
+                matched = true;
+                break;
+            },
+            .range => |range| if (range.start <= cp and cp <= range.end) {
+                matched = true;
+                break;
+            },
+        }
+    }
+    return if (class.negated) !matched else matched;
 }
 
 test "reportFirstMatch returns line-oriented match data" {
@@ -552,6 +738,32 @@ test "Searcher byte fallback keeps dot from matching newlines" {
     defer searcher.deinit();
 
     try testing.expect(searcher.reportFirstByteMatch("dot.bin", "a\nb") == null);
+}
+
+test "Searcher byte fallback supports simple ASCII class patterns" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a[0-9]b", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("class.bin", "xxa\xffb a7b").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 7), report.column_number);
+    try testing.expectEqual(Span{ .start = 6, .end = 9 }, report.match_span);
+}
+
+test "Searcher byte fallback supports negated ASCII class patterns" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a[^x]b", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("negated.bin", "a\xffb").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), report.column_number);
+    try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
 }
 
 test "reportFirstMatch stays aligned across buffered and mmap file reads" {

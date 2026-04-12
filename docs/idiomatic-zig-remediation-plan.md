@@ -119,5 +119,6 @@ encoding behavior without rewriting the whole architecture around generic
   `--text` matching and how output still maps back to the original bytes.
 - `--text` now has a first true byte-oriented path for exact, anchored, and
   simple alternated ASCII literal patterns plus simple single-dot ASCII concat
-  patterns on invalid UTF-8 input, which reduces reliance on the lossy retry
-  for the simplest and most common search cases.
+  patterns plus simple single-class ASCII concat patterns on invalid UTF-8
+  input, which reduces reliance on the lossy retry for the simplest and most
+  common search cases.

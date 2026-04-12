@@ -18,6 +18,8 @@ path. The long-term replacement plan remains in
 - Before that lossy retry, exact, anchored, and simple alternated ASCII literal
   patterns plus simple single-dot ASCII concat patterns get a true raw-byte
   search path against the original file bytes.
+- The current raw-byte path also covers simple single-class ASCII concat
+  patterns such as `a[0-9]b` and `a[^x]b`.
 - The lossy shadow haystack replaces each invalid byte that breaks UTF-8
   decoding with the single ASCII byte `?`.
 - Matching uses that lossy shadow haystack only as an internal aid. Printed
@@ -28,7 +30,8 @@ path. The long-term replacement plan remains in
 Under the current `--text` fallback:
 
 - Exact, anchored, and simple alternated ASCII literal patterns plus simple
-  single-dot ASCII concat patterns match against the original file bytes.
+  single-dot ASCII concat patterns plus simple single-class ASCII concat
+  patterns match against the original file bytes.
 - `.` can match a replaced invalid byte because the matcher sees `?`.
 - Anchors and newline behavior still follow the current regex engine rules.
 - Column numbers and line spans stay byte-oriented against the original file
