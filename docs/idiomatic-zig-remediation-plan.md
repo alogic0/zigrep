@@ -118,7 +118,7 @@ encoding behavior without rewriting the whole architecture around generic
   including which regex constructs observe the temporary `?` placeholder during
   `--text` matching and how output still maps back to the original bytes.
 - `--text` now has a first true byte-oriented path for exact, anchored, and
-  simple alternated ASCII literal patterns plus simple single-dot ASCII concat
-  patterns plus simple single-class ASCII concat patterns on invalid UTF-8
-  input, which reduces reliance on the lossy retry for the simplest and most
-  common search cases.
+  simple alternated ASCII literal patterns plus simple ASCII concat sequences
+  built from literals, dots, and character classes on invalid UTF-8 input,
+  which reduces reliance on the lossy retry for the simplest and most common
+  search cases.

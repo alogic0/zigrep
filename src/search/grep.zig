@@ -30,55 +30,42 @@ pub const MatchReport = struct {
     }
 };
 
-const ByteLiteralCase = struct {
-    mode: AnchoredLiteralMode,
+const ByteAtom = union(enum) {
     literal: []u8,
-
-    fn deinit(self: ByteLiteralCase, allocator: std.mem.Allocator) void {
-        allocator.free(self.literal);
-    }
-};
-
-const ByteWildcardCase = struct {
-    mode: AnchoredLiteralMode,
-    prefix: []u8,
-    suffix: []u8,
-
-    fn deinit(self: ByteWildcardCase, allocator: std.mem.Allocator) void {
-        allocator.free(self.prefix);
-        allocator.free(self.suffix);
-    }
-};
-
-const ByteClassCase = struct {
-    mode: AnchoredLiteralMode,
-    prefix: []u8,
+    any_byte,
     class: regex.hir.CharacterClass,
-    suffix: []u8,
 
-    fn deinit(self: ByteClassCase, allocator: std.mem.Allocator) void {
-        allocator.free(self.prefix);
-        allocator.free(self.class.items);
-        allocator.free(self.suffix);
+    fn deinit(self: ByteAtom, allocator: std.mem.Allocator) void {
+        switch (self) {
+            .literal => |bytes| allocator.free(bytes),
+            .class => |class| allocator.free(class.items),
+            .any_byte => {},
+        }
+    }
+};
+
+const BytePattern = struct {
+    mode: AnchoredLiteralMode,
+    atoms: []ByteAtom,
+
+    fn deinit(self: BytePattern, allocator: std.mem.Allocator) void {
+        for (self.atoms) |atom| atom.deinit(allocator);
+        allocator.free(self.atoms);
     }
 };
 
 pub const ByteSearchPlan = union(enum) {
     none,
-    single: ByteLiteralCase,
-    wildcard: ByteWildcardCase,
-    class_case: ByteClassCase,
-    alternation: []ByteLiteralCase,
+    single: BytePattern,
+    alternation: []BytePattern,
 
     pub fn deinit(self: ByteSearchPlan, allocator: std.mem.Allocator) void {
         switch (self) {
             .none => {},
-            .single => |literal_case| literal_case.deinit(allocator),
-            .wildcard => |wildcard_case| wildcard_case.deinit(allocator),
-            .class_case => |class_case| class_case.deinit(allocator),
-            .alternation => |cases| {
-                for (cases) |literal_case| literal_case.deinit(allocator);
-                allocator.free(cases);
+            .single => |pattern| pattern.deinit(allocator),
+            .alternation => |patterns| {
+                for (patterns) |pattern| pattern.deinit(allocator);
+                allocator.free(patterns);
             },
         }
     }
@@ -125,10 +112,8 @@ pub const Searcher = struct {
     pub fn reportFirstByteMatch(self: *Searcher, path: []const u8, haystack: []const u8) ?MatchReport {
         const span = switch (self.byte_plan) {
             .none => null,
-            .single => |literal_case| findByteLiteralSpan(literal_case, haystack),
-            .wildcard => |wildcard_case| findByteWildcardSpan(wildcard_case, haystack),
-            .class_case => |class_case| findByteClassSpan(class_case, haystack),
-            .alternation => |cases| findByteAlternationSpan(cases, haystack),
+            .single => |pattern| findBytePatternSpan(pattern, haystack),
+            .alternation => |patterns| findByteAlternationSpan(patterns, haystack),
         } orelse return null;
 
         return buildReport(path, haystack, .{
@@ -181,43 +166,38 @@ const AnchoredLiteralMode = enum {
 fn extractByteSearchPlan(allocator: std.mem.Allocator, hir: regex.Hir) !ByteSearchPlan {
     return switch (hir.nodes[@intFromEnum(hir.root)]) {
         .alternation => |branches| blk: {
-            var cases: std.ArrayList(ByteLiteralCase) = .empty;
-            defer cases.deinit(allocator);
-            errdefer for (cases.items) |literal_case| literal_case.deinit(allocator);
+            var patterns: std.ArrayList(BytePattern) = .empty;
+            defer patterns.deinit(allocator);
+            errdefer for (patterns.items) |pattern| pattern.deinit(allocator);
 
             for (branches) |branch| {
-                const literal_case = (try extractByteLiteralCase(allocator, hir.nodes, branch)) orelse break :blk .none;
-                try cases.append(allocator, literal_case);
+                const pattern = (try extractBytePattern(allocator, hir.nodes, branch)) orelse break :blk .none;
+                try patterns.append(allocator, pattern);
             }
 
-            if (cases.items.len == 0) break :blk .none;
-            if (cases.items.len == 1) break :blk .{ .single = cases.pop().? };
-            break :blk .{ .alternation = try cases.toOwnedSlice(allocator) };
+            if (patterns.items.len == 0) break :blk .none;
+            if (patterns.items.len == 1) break :blk .{ .single = patterns.pop().? };
+            break :blk .{ .alternation = try patterns.toOwnedSlice(allocator) };
         },
-        else => if (try extractByteLiteralCase(allocator, hir.nodes, hir.root)) |literal_case|
-            .{ .single = literal_case }
-        else if (try extractByteWildcardCase(allocator, hir.nodes, hir.root)) |wildcard_case|
-            .{ .wildcard = wildcard_case }
-        else if (try extractByteClassCase(allocator, hir.nodes, hir.root)) |class_case|
-            .{ .class_case = class_case }
+        else => if (try extractBytePattern(allocator, hir.nodes, hir.root)) |pattern|
+            .{ .single = pattern }
         else
             .none,
     };
 }
 
-fn extractByteLiteralCase(
+fn extractBytePattern(
     allocator: std.mem.Allocator,
     nodes: []const regex.hir.Node,
     root: regex.hir.NodeId,
-) !?ByteLiteralCase {
+) !?BytePattern {
     return switch (nodes[@intFromEnum(root)]) {
-        .literal => |cp| if (cp <= 0x7f)
-            .{
-                .mode = .contains,
-                .literal = try allocator.dupe(u8, &[_]u8{@as(u8, @intCast(cp))}),
-            }
-        else
-            null,
+        .literal => |cp| if (cp <= 0x7f) .{
+            .mode = .contains,
+            .atoms = try allocator.dupe(ByteAtom, &[_]ByteAtom{
+                .{ .literal = try allocator.dupe(u8, &[_]u8{@as(u8, @intCast(cp))}) },
+            }),
+        } else null,
         .concat => |children| blk: {
             var prefix_anchor = false;
             var suffix_anchor = false;
@@ -234,146 +214,40 @@ fn extractByteLiteralCase(
             }
             if (start_index == end_index) break :blk null;
 
-            var bytes = std.ArrayList(u8).empty;
-            defer bytes.deinit(allocator);
+            var atoms: std.ArrayList(ByteAtom) = .empty;
+            defer atoms.deinit(allocator);
+            errdefer for (atoms.items) |atom| atom.deinit(allocator);
+
+            var literal_bytes: std.ArrayList(u8) = .empty;
+            defer literal_bytes.deinit(allocator);
 
             for (children[start_index..end_index]) |child| {
                 switch (nodes[@intFromEnum(child)]) {
                     .literal => |cp| {
                         if (cp > 0x7f) break :blk null;
-                        try bytes.append(allocator, @as(u8, @intCast(cp)));
+                        try literal_bytes.append(allocator, @as(u8, @intCast(cp)));
                     },
-                    else => break :blk null,
-                }
-            }
-            if (bytes.items.len == 0) break :blk null;
-
-            break :blk .{
-                .mode = if (prefix_anchor and suffix_anchor)
-                    .full
-                else if (prefix_anchor)
-                    .start
-                else if (suffix_anchor)
-                    .end
-                else
-                    .contains,
-                .literal = try bytes.toOwnedSlice(allocator),
-            };
-        },
-        else => null,
-    };
-}
-
-fn extractByteWildcardCase(
-    allocator: std.mem.Allocator,
-    nodes: []const regex.hir.Node,
-    root: regex.hir.NodeId,
-) !?ByteWildcardCase {
-    return switch (nodes[@intFromEnum(root)]) {
-        .concat => |children| blk: {
-            var prefix_anchor = false;
-            var suffix_anchor = false;
-            var start_index: usize = 0;
-            var end_index: usize = children.len;
-
-            if (children.len > 0 and std.meta.activeTag(nodes[@intFromEnum(children[0])]) == .anchor_start) {
-                prefix_anchor = true;
-                start_index = 1;
-            }
-            if (end_index > start_index and std.meta.activeTag(nodes[@intFromEnum(children[end_index - 1])]) == .anchor_end) {
-                suffix_anchor = true;
-                end_index -= 1;
-            }
-            if (end_index - start_index < 2) break :blk null;
-
-            var dot_index: ?usize = null;
-            var dot_count: usize = 0;
-            for (children[start_index..end_index], start_index..) |child, absolute_index| {
-                switch (nodes[@intFromEnum(child)]) {
                     .dot => {
-                        dot_count += 1;
-                        dot_index = absolute_index;
+                        try flushLiteralAtom(allocator, &atoms, &literal_bytes);
+                        try atoms.append(allocator, .any_byte);
                     },
-                    .literal => |cp| if (cp > 0x7f) break :blk null,
-                    else => break :blk null,
-                }
-            }
-            if (dot_count != 1) break :blk null;
-
-            const split = dot_index.?;
-            const prefix = try collectAsciiLiteralRange(allocator, nodes, children[start_index..split]);
-            errdefer allocator.free(prefix);
-            const suffix = try collectAsciiLiteralRange(allocator, nodes, children[split + 1 .. end_index]);
-            errdefer allocator.free(suffix);
-
-            if (prefix.len == 0 and suffix.len == 0) break :blk null;
-
-            break :blk .{
-                .mode = if (prefix_anchor and suffix_anchor)
-                    .full
-                else if (prefix_anchor)
-                    .start
-                else if (suffix_anchor)
-                    .end
-                else
-                    .contains,
-                .prefix = prefix,
-                .suffix = suffix,
-            };
-        },
-        else => null,
-    };
-}
-
-fn extractByteClassCase(
-    allocator: std.mem.Allocator,
-    nodes: []const regex.hir.Node,
-    root: regex.hir.NodeId,
-) !?ByteClassCase {
-    return switch (nodes[@intFromEnum(root)]) {
-        .concat => |children| blk: {
-            var prefix_anchor = false;
-            var suffix_anchor = false;
-            var start_index: usize = 0;
-            var end_index: usize = children.len;
-
-            if (children.len > 0 and std.meta.activeTag(nodes[@intFromEnum(children[0])]) == .anchor_start) {
-                prefix_anchor = true;
-                start_index = 1;
-            }
-            if (end_index > start_index and std.meta.activeTag(nodes[@intFromEnum(children[end_index - 1])]) == .anchor_end) {
-                suffix_anchor = true;
-                end_index -= 1;
-            }
-            if (end_index - start_index < 2) break :blk null;
-
-            var class_index: ?usize = null;
-            var class_count: usize = 0;
-            for (children[start_index..end_index], start_index..) |child, absolute_index| {
-                switch (nodes[@intFromEnum(child)]) {
                     .char_class => |class| {
                         if (!isAsciiClass(class)) break :blk null;
-                        class_count += 1;
-                        class_index = absolute_index;
+                        try flushLiteralAtom(allocator, &atoms, &literal_bytes);
+                        const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
+                        @memcpy(duped_items, class.items);
+                        try atoms.append(allocator, .{
+                            .class = .{
+                                .negated = class.negated,
+                                .items = duped_items,
+                            },
+                        });
                     },
-                    .literal => |cp| if (cp > 0x7f) break :blk null,
                     else => break :blk null,
                 }
             }
-            if (class_count != 1) break :blk null;
-
-            const split = class_index.?;
-            const prefix = try collectAsciiLiteralRange(allocator, nodes, children[start_index..split]);
-            errdefer allocator.free(prefix);
-            const suffix = try collectAsciiLiteralRange(allocator, nodes, children[split + 1 .. end_index]);
-            errdefer allocator.free(suffix);
-
-            if (prefix.len == 0 and suffix.len == 0) break :blk null;
-
-            const class = nodes[@intFromEnum(children[split])].char_class;
-            const duped_items = try allocator.alloc(regex.hir.ClassItem, class.items.len);
-            errdefer allocator.free(duped_items);
-            @memcpy(duped_items, class.items);
+            try flushLiteralAtom(allocator, &atoms, &literal_bytes);
+            if (atoms.items.len == 0) break :blk null;
 
             break :blk .{
                 .mode = if (prefix_anchor and suffix_anchor)
@@ -384,36 +258,26 @@ fn extractByteClassCase(
                     .end
                 else
                     .contains,
-                .prefix = prefix,
-                .class = .{
-                    .negated = class.negated,
-                    .items = duped_items,
-                },
-                .suffix = suffix,
+                .atoms = try atoms.toOwnedSlice(allocator),
             };
         },
         else => null,
     };
 }
 
-fn collectAsciiLiteralRange(
+fn flushLiteralAtom(
     allocator: std.mem.Allocator,
-    nodes: []const regex.hir.Node,
-    children: []const regex.hir.NodeId,
-) ![]u8 {
-    var bytes = std.ArrayList(u8).empty;
-    defer bytes.deinit(allocator);
-
-    for (children) |child| {
-        try bytes.append(allocator, @as(u8, @intCast(nodes[@intFromEnum(child)].literal)));
-    }
-    return bytes.toOwnedSlice(allocator);
+    atoms: *std.ArrayList(ByteAtom),
+    literal_bytes: *std.ArrayList(u8),
+) !void {
+    if (literal_bytes.items.len == 0) return;
+    try atoms.append(allocator, .{ .literal = try literal_bytes.toOwnedSlice(allocator) });
 }
 
-fn findByteAlternationSpan(cases: []const ByteLiteralCase, haystack: []const u8) ?Span {
+fn findByteAlternationSpan(patterns: []const BytePattern, haystack: []const u8) ?Span {
     var best: ?Span = null;
-    for (cases) |literal_case| {
-        const span = findByteLiteralSpan(literal_case, haystack) orelse continue;
+    for (patterns) |pattern| {
+        const span = findBytePatternSpan(pattern, haystack) orelse continue;
         if (best == null or span.start < best.?.start) {
             best = span;
         }
@@ -421,163 +285,73 @@ fn findByteAlternationSpan(cases: []const ByteLiteralCase, haystack: []const u8)
     return best;
 }
 
-fn findByteLiteralSpan(literal_case: ByteLiteralCase, haystack: []const u8) ?Span {
-    return switch (literal_case.mode) {
-        .contains => if (std.mem.indexOf(u8, haystack, literal_case.literal)) |start| Span{
-            .start = start,
-            .end = start + literal_case.literal.len,
-        } else null,
-        .start => if (std.mem.startsWith(u8, haystack, literal_case.literal)) Span{
-            .start = 0,
-            .end = literal_case.literal.len,
-        } else null,
-        .end => if (std.mem.endsWith(u8, haystack, literal_case.literal)) Span{
-            .start = haystack.len - literal_case.literal.len,
-            .end = haystack.len,
-        } else null,
-        .full => if (std.mem.eql(u8, haystack, literal_case.literal)) Span{
-            .start = 0,
-            .end = haystack.len,
-        } else null,
+fn findBytePatternSpan(pattern: BytePattern, haystack: []const u8) ?Span {
+    return switch (pattern.mode) {
+        .contains => findBytePatternContainsSpan(pattern, haystack),
+        .start => matchBytePatternAt(pattern, haystack, 0),
+        .end => findBytePatternAnchoredEndSpan(pattern, haystack),
+        .full => findBytePatternAnchoredFullSpan(pattern, haystack),
     };
 }
 
-fn findByteWildcardSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?Span {
-    return switch (wildcard_case.mode) {
-        .contains => findByteWildcardContainsSpan(wildcard_case, haystack),
-        .start => findByteWildcardAnchoredStartSpan(wildcard_case, haystack),
-        .end => findByteWildcardAnchoredEndSpan(wildcard_case, haystack),
-        .full => findByteWildcardAnchoredFullSpan(wildcard_case, haystack),
-    };
-}
-
-fn findByteClassSpan(class_case: ByteClassCase, haystack: []const u8) ?Span {
-    return switch (class_case.mode) {
-        .contains => findByteClassContainsSpan(class_case, haystack),
-        .start => findByteClassAnchoredStartSpan(class_case, haystack),
-        .end => findByteClassAnchoredEndSpan(class_case, haystack),
-        .full => findByteClassAnchoredFullSpan(class_case, haystack),
-    };
-}
-
-fn findByteWildcardContainsSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?Span {
-    var start_index: usize = 0;
-    while (start_index <= haystack.len) {
-        const prefix_index = if (wildcard_case.prefix.len == 0)
-            start_index
-        else
-            (std.mem.indexOfPos(u8, haystack, start_index, wildcard_case.prefix) orelse return null);
-
-        const wildcard_index = prefix_index + wildcard_case.prefix.len;
-        if (wildcard_index >= haystack.len) return null;
-        if (haystack[wildcard_index] == '\n') {
-            start_index = prefix_index + 1;
-            continue;
-        }
-
-        const suffix_start = wildcard_index + 1;
-        if (suffix_start + wildcard_case.suffix.len > haystack.len) return null;
-        if (std.mem.eql(u8, haystack[suffix_start .. suffix_start + wildcard_case.suffix.len], wildcard_case.suffix)) {
-            return .{
-                .start = prefix_index,
-                .end = suffix_start + wildcard_case.suffix.len,
-            };
-        }
-
-        start_index = prefix_index + 1;
+fn findBytePatternContainsSpan(pattern: BytePattern, haystack: []const u8) ?Span {
+    var start: usize = 0;
+    while (start < haystack.len) : (start += 1) {
+        if (matchBytePatternAt(pattern, haystack, start)) |span| return span;
     }
     return null;
 }
 
-fn findByteWildcardAnchoredStartSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?Span {
-    if (!std.mem.startsWith(u8, haystack, wildcard_case.prefix)) return null;
-    const wildcard_index = wildcard_case.prefix.len;
-    if (wildcard_index >= haystack.len or haystack[wildcard_index] == '\n') return null;
-    const suffix_start = wildcard_index + 1;
-    if (suffix_start + wildcard_case.suffix.len > haystack.len) return null;
-    if (!std.mem.eql(u8, haystack[suffix_start .. suffix_start + wildcard_case.suffix.len], wildcard_case.suffix)) return null;
-    return .{ .start = 0, .end = suffix_start + wildcard_case.suffix.len };
-}
-
-fn findByteWildcardAnchoredEndSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?Span {
-    const total_len = wildcard_case.prefix.len + 1 + wildcard_case.suffix.len;
-    if (haystack.len < total_len) return null;
-    const start = haystack.len - total_len;
-    if (!std.mem.eql(u8, haystack[start .. start + wildcard_case.prefix.len], wildcard_case.prefix)) return null;
-    const wildcard_index = start + wildcard_case.prefix.len;
-    if (haystack[wildcard_index] == '\n') return null;
-    if (!std.mem.eql(u8, haystack[wildcard_index + 1 ..], wildcard_case.suffix)) return null;
-    return .{ .start = start, .end = haystack.len };
-}
-
-fn findByteWildcardAnchoredFullSpan(wildcard_case: ByteWildcardCase, haystack: []const u8) ?Span {
-    const total_len = wildcard_case.prefix.len + 1 + wildcard_case.suffix.len;
-    if (haystack.len != total_len) return null;
-    if (!std.mem.startsWith(u8, haystack, wildcard_case.prefix)) return null;
-    const wildcard_index = wildcard_case.prefix.len;
-    if (haystack[wildcard_index] == '\n') return null;
-    if (!std.mem.eql(u8, haystack[wildcard_index + 1 ..], wildcard_case.suffix)) return null;
-    return .{ .start = 0, .end = haystack.len };
-}
-
-fn findByteClassContainsSpan(class_case: ByteClassCase, haystack: []const u8) ?Span {
-    var start_index: usize = 0;
-    while (start_index <= haystack.len) {
-        const prefix_index = if (class_case.prefix.len == 0)
-            start_index
-        else
-            (std.mem.indexOfPos(u8, haystack, start_index, class_case.prefix) orelse return null);
-
-        const class_index = prefix_index + class_case.prefix.len;
-        if (class_index >= haystack.len) return null;
-        if (!byteMatchesClass(class_case.class, haystack[class_index])) {
-            start_index = prefix_index + 1;
-            continue;
+fn findBytePatternAnchoredEndSpan(pattern: BytePattern, haystack: []const u8) ?Span {
+    const min_len = minBytePatternLen(pattern);
+    if (haystack.len < min_len) return null;
+    var start = haystack.len - min_len;
+    while (true) {
+        if (matchBytePatternAt(pattern, haystack, start)) |span| {
+            if (span.end == haystack.len) return span;
         }
-
-        const suffix_start = class_index + 1;
-        if (suffix_start + class_case.suffix.len > haystack.len) return null;
-        if (std.mem.eql(u8, haystack[suffix_start .. suffix_start + class_case.suffix.len], class_case.suffix)) {
-            return .{
-                .start = prefix_index,
-                .end = suffix_start + class_case.suffix.len,
-            };
-        }
-        start_index = prefix_index + 1;
+        if (start == 0) break;
+        start -= 1;
     }
     return null;
 }
 
-fn findByteClassAnchoredStartSpan(class_case: ByteClassCase, haystack: []const u8) ?Span {
-    if (!std.mem.startsWith(u8, haystack, class_case.prefix)) return null;
-    const class_index = class_case.prefix.len;
-    if (class_index >= haystack.len) return null;
-    if (!byteMatchesClass(class_case.class, haystack[class_index])) return null;
-    const suffix_start = class_index + 1;
-    if (suffix_start + class_case.suffix.len > haystack.len) return null;
-    if (!std.mem.eql(u8, haystack[suffix_start .. suffix_start + class_case.suffix.len], class_case.suffix)) return null;
-    return .{ .start = 0, .end = suffix_start + class_case.suffix.len };
+fn findBytePatternAnchoredFullSpan(pattern: BytePattern, haystack: []const u8) ?Span {
+    const span = matchBytePatternAt(pattern, haystack, 0) orelse return null;
+    return if (span.end == haystack.len) span else null;
 }
 
-fn findByteClassAnchoredEndSpan(class_case: ByteClassCase, haystack: []const u8) ?Span {
-    const total_len = class_case.prefix.len + 1 + class_case.suffix.len;
-    if (haystack.len < total_len) return null;
-    const start = haystack.len - total_len;
-    if (!std.mem.eql(u8, haystack[start .. start + class_case.prefix.len], class_case.prefix)) return null;
-    const class_index = start + class_case.prefix.len;
-    if (!byteMatchesClass(class_case.class, haystack[class_index])) return null;
-    if (!std.mem.eql(u8, haystack[class_index + 1 ..], class_case.suffix)) return null;
-    return .{ .start = start, .end = haystack.len };
+fn matchBytePatternAt(pattern: BytePattern, haystack: []const u8, start: usize) ?Span {
+    var pos = start;
+    for (pattern.atoms) |atom| {
+        switch (atom) {
+            .literal => |bytes| {
+                if (pos + bytes.len > haystack.len) return null;
+                if (!std.mem.eql(u8, haystack[pos .. pos + bytes.len], bytes)) return null;
+                pos += bytes.len;
+            },
+            .any_byte => {
+                if (pos >= haystack.len or haystack[pos] == '\n') return null;
+                pos += 1;
+            },
+            .class => |class| {
+                if (pos >= haystack.len or !byteMatchesClass(class, haystack[pos])) return null;
+                pos += 1;
+            },
+        }
+    }
+    return .{ .start = start, .end = pos };
 }
 
-fn findByteClassAnchoredFullSpan(class_case: ByteClassCase, haystack: []const u8) ?Span {
-    const total_len = class_case.prefix.len + 1 + class_case.suffix.len;
-    if (haystack.len != total_len) return null;
-    if (!std.mem.startsWith(u8, haystack, class_case.prefix)) return null;
-    const class_index = class_case.prefix.len;
-    if (!byteMatchesClass(class_case.class, haystack[class_index])) return null;
-    if (!std.mem.eql(u8, haystack[class_index + 1 ..], class_case.suffix)) return null;
-    return .{ .start = 0, .end = haystack.len };
+fn minBytePatternLen(pattern: BytePattern) usize {
+    var total: usize = 0;
+    for (pattern.atoms) |atom| {
+        total += switch (atom) {
+            .literal => |bytes| bytes.len,
+            .any_byte, .class => 1,
+        };
+    }
+    return total;
 }
 
 fn isAsciiClass(class: regex.hir.CharacterClass) bool {
@@ -764,6 +538,19 @@ test "Searcher byte fallback supports negated ASCII class patterns" {
 
     try testing.expectEqual(@as(usize, 1), report.column_number);
     try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
+}
+
+test "Searcher byte fallback supports mixed dot and class sequences" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "a.[0-9]b", .{});
+    defer searcher.deinit();
+
+    const report = searcher.reportFirstByteMatch("mixed.bin", "xxa\xff7byy").?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), report.column_number);
+    try testing.expectEqual(Span{ .start = 2, .end = 6 }, report.match_span);
 }
 
 test "reportFirstMatch stays aligned across buffered and mmap file reads" {
