@@ -2012,6 +2012,28 @@ test "Searcher multiline and dotall flags change newline matching semantics" {
     try testing.expect((try dotall.reportFirstMatch("sample.txt", "a\nb")) != null);
 }
 
+test "Searcher handles shorthand character classes in UTF-8 and raw-byte paths" {
+    const testing = std.testing;
+
+    var digit = try Searcher.init(testing.allocator, "a\\db", .{});
+    defer digit.deinit();
+    try testing.expect((try digit.reportFirstMatch("sample.txt", "xa5by")) != null);
+    try testing.expect((try digit.reportFirstMatch("sample.txt", "xa字by")) == null);
+
+    var not_digit = try Searcher.init(testing.allocator, "a\\Db", .{});
+    defer not_digit.deinit();
+    try testing.expect((try not_digit.reportFirstMatch("sample.txt", "xa字by")) != null);
+    try testing.expect((try not_digit.reportFirstByteMatch("raw.bin", "a\xffb")) != null);
+
+    var word = try Searcher.init(testing.allocator, "\\w+", .{});
+    defer word.deinit();
+    try testing.expect((try word.reportFirstMatch("sample.txt", "!!!word_123!!!")) != null);
+
+    var space = try Searcher.init(testing.allocator, "\\s+", .{ .multiline = true });
+    defer space.deinit();
+    try testing.expect((try space.reportFirstMatch("sample.txt", "a \t\nb")) != null);
+}
+
 test "Searcher forEachMatchReport advances across repeated multiline matches" {
     const testing = std.testing;
 

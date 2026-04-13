@@ -16,6 +16,7 @@ The current engine supports:
 - Quantifiers `*`, `+`, `?`
 - Counted repetition with `{m}`, `{m,}`, and `{m,n}`
 - Character classes like `[abc]`, `[a-z]`, and negated classes like `[^a-z]`
+- Shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S`
 - Escaped metacharacters such as `\.`, `\(`, `\)`, `\[`, `\]`, `\{`, `\}`, `\|`, `\*`, `\+`, `\?`, `\^`, `\$`, and `\\`
 
 Notes:
@@ -33,14 +34,14 @@ Character classes support:
 - Negation in the leading position: `[^0-9]`
 - Literal `]`, `-`, and `^` when used in non-special positions or escaped
 
-The current engine does not yet expose named Unicode properties or shorthand
-class syntax such as `\d`, `\w`, or `\s` in the user-facing regex syntax.
+The current engine does not yet expose named Unicode properties.
 
 Current escape boundary:
 
 - supported control and byte escapes include `\n`, `\r`, `\t`, `\f`, `\v`, `\0`, and `\xNN`
 - escaped metacharacters like `\.`, `\(`, `\)`, `\[`, and `\\` are supported
-- shorthand and boundary escapes such as `\d`, `\w`, `\s`, `\b`, and their uppercase variants are currently rejected explicitly instead of being treated as regex operators
+- shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S` are supported with ASCII semantics
+- boundary escapes such as `\b` and `\B` are still rejected explicitly for now
 
 ## Explicit Non-Goals
 

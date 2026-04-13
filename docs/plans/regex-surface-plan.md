@@ -27,6 +27,12 @@ The goal is not full PCRE2 parity. The goal is:
   - Unicode literal escapes if added
   - Unicode-aware character-class extensions that still lower cleanly into the
     current automata-friendly model
+  - lazy quantifiers if they can be expressed without leaving the current
+    Thompson NFA / DFA / Pike VM territory
+  - non-capturing groups if they are only syntax sugar over existing grouping
+    structure
+  - Unicode property classes only if they lower cleanly enough into the native
+    model
 
 - [x] Fallback-engine out-of-scope direction for the native engine:
   - backreferences
@@ -36,10 +42,7 @@ The goal is not full PCRE2 parity. The goal is:
   - control verbs and other PCRE-style backtracking features
 
 - [x] Non-capturing groups are not a fallback-engine feature by themselves.
-  They should be treated as a separate syntax decision:
-  - pure syntax sugar that can lower to existing native structure is still
-    native-engine territory
-  - they do not justify a second engine on their own
+  They should stay native if they lower to existing grouping structure.
 
 ## Phase 1: Fix Misleading Escape Behavior
 
@@ -61,21 +64,20 @@ The goal is not full PCRE2 parity. The goal is:
 
 ## Phase 2: Add Shorthand Character Classes
 
-- [ ] Add syntax support for:
+- [x] Add syntax support for:
   - `\d`, `\D`
   - `\w`, `\W`
   - `\s`, `\S`
 
-- [ ] Decide and document the semantic boundary up front:
+- [x] Decide and document the semantic boundary up front:
   - ASCII-only shorthand semantics
-  - or Unicode-aware shorthand semantics
 
-- [ ] Prefer lowering shorthand classes into existing character-class HIR where
+- [x] Prefer lowering shorthand classes into existing character-class HIR where
   practical, instead of introducing a separate execution path.
 
-- [ ] Add parser, HIR, VM, search-layer, and CLI tests for shorthand classes.
+- [x] Add parser, HIR, VM, search-layer, and CLI tests for shorthand classes.
 
-- [ ] Add explicit invalid-UTF-8/raw-byte tests for shorthand classes so the
+- [x] Add explicit invalid-UTF-8/raw-byte tests for shorthand classes so the
   behavior is pinned across both UTF-8 and raw-byte matching paths.
 
 ## Phase 3: Add Word Boundaries
@@ -133,6 +135,7 @@ The goal is not full PCRE2 parity. The goal is:
   - Unicode-aware character-class extensions
   - Unicode property classes if they can be lowered cleanly enough
   - non-capturing groups if they are treated purely as syntax sugar
+  - lazy quantifiers if they lower cleanly into the current execution model
 
 - [ ] Separate those features from the constructs that remain intentionally out
   of scope for the native engine:
@@ -165,3 +168,24 @@ The goal is not full PCRE2 parity. The goal is:
 - [ ] Do not mix multiline work back into this plan.
 - [ ] Do not add a second regex engine before the native shorthand/boundary
   surface is cleaned up.
+
+## Clean Separation
+
+- [x] Keep in the native engine:
+  - shorthand classes: `\d`, `\D`, `\w`, `\W`, `\s`, `\S`
+  - word boundaries: `\b`, `\B`
+  - stricter and richer escape handling
+  - Unicode literal escapes if added
+  - Unicode-aware character-class extensions
+  - Unicode property classes only if they lower cleanly enough
+  - lazy quantifiers only if they stay inside the current automata-friendly
+    model
+  - non-capturing groups if they are just syntax sugar
+
+- [x] Keep out of the native engine and reserve for a fallback engine only if
+  that engine is ever added:
+  - lookahead and lookbehind
+  - backreferences
+  - conditional groups
+  - recursion and subroutine calls
+  - control verbs and other PCRE-style backtracking features

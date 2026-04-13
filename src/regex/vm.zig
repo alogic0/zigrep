@@ -601,6 +601,29 @@ test "VM handles negated classes and class edge literals" {
     try expectMatch("[]-^]+", "]^-");
 }
 
+test "VM handles shorthand character classes with ASCII semantics" {
+    try expectMatch("a\\db", "a5b");
+    try expectNoMatch("a\\db", "a字b");
+    try expectMatch("a\\Db", "a字b");
+    try expectMatch("\\w+", "word_123");
+    try expectNoMatch("\\w+", "!!!");
+    try expectMatch("\\s+", " \t");
+    try expectNoMatch("\\s+", "abc");
+}
+
+test "VM shorthand space class follows multiline newline semantics" {
+    const testing = std.testing;
+
+    const no_multiline = compileProgram(testing.allocator, "\\s+", .{});
+    try testing.expectError(error.MultilineRequired, no_multiline);
+
+    const multiline = try compileProgram(testing.allocator, "\\s+", .{ .multiline = true });
+    defer multiline.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect(try engine.isMatch(multiline, "\t \n"));
+}
+
 test "VM handles empty alternation branches and anchor-only patterns" {
     try expectMatch("a|", "");
     try expectMatch("a|", "zzz");

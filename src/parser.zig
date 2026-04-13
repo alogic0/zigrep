@@ -242,6 +242,30 @@ pub const Parser = struct {
                 try self.advance();
                 return self.push(.{ .literal = cp });
             },
+            .digit_class => {
+                try self.advance();
+                return self.push(.{ .char_class = try asciiDigitClass(self.allocator, false) });
+            },
+            .not_digit_class => {
+                try self.advance();
+                return self.push(.{ .char_class = try asciiDigitClass(self.allocator, true) });
+            },
+            .word_class => {
+                try self.advance();
+                return self.push(.{ .char_class = try asciiWordClass(self.allocator, false) });
+            },
+            .not_word_class => {
+                try self.advance();
+                return self.push(.{ .char_class = try asciiWordClass(self.allocator, true) });
+            },
+            .space_class => {
+                try self.advance();
+                return self.push(.{ .char_class = try asciiSpaceClass(self.allocator, false) });
+            },
+            .not_space_class => {
+                try self.advance();
+                return self.push(.{ .char_class = try asciiSpaceClass(self.allocator, true) });
+            },
             .comma => {
                 try self.advance();
                 return self.push(.{ .literal = ',' });
@@ -351,9 +375,49 @@ pub const Parser = struct {
 
     fn canStartPrimary(self: *const Parser) bool {
         return switch (self.lookahead.token) {
-            .literal, .comma, .hyphen, .dot, .anchor_start, .anchor_end, .l_paren, .l_bracket => true,
+            .literal,
+            .digit_class,
+            .not_digit_class,
+            .word_class,
+            .not_word_class,
+            .space_class,
+            .not_space_class,
+            .comma,
+            .hyphen,
+            .dot,
+            .anchor_start,
+            .anchor_end,
+            .l_paren,
+            .l_bracket,
+            => true,
             else => false,
         };
+    }
+
+    fn asciiDigitClass(allocator: std.mem.Allocator, negated: bool) !CharacterClass {
+        const items = try allocator.alloc(ClassItem, 1);
+        items[0] = .{ .range = .{ .start = '0', .end = '9' } };
+        return .{ .negated = negated, .items = items };
+    }
+
+    fn asciiWordClass(allocator: std.mem.Allocator, negated: bool) !CharacterClass {
+        const items = try allocator.alloc(ClassItem, 4);
+        items[0] = .{ .range = .{ .start = 'A', .end = 'Z' } };
+        items[1] = .{ .range = .{ .start = 'a', .end = 'z' } };
+        items[2] = .{ .range = .{ .start = '0', .end = '9' } };
+        items[3] = .{ .literal = '_' };
+        return .{ .negated = negated, .items = items };
+    }
+
+    fn asciiSpaceClass(allocator: std.mem.Allocator, negated: bool) !CharacterClass {
+        const items = try allocator.alloc(ClassItem, 6);
+        items[0] = .{ .literal = ' ' };
+        items[1] = .{ .literal = '\t' };
+        items[2] = .{ .literal = '\n' };
+        items[3] = .{ .literal = '\r' };
+        items[4] = .{ .literal = 0x0b };
+        items[5] = .{ .literal = 0x0c };
+        return .{ .negated = negated, .items = items };
     }
 
     fn fail(self: *Parser, err: ParseError, span: lexer_mod.Span) ParseError {
@@ -547,6 +611,38 @@ test "Parser tracks capture groups in source order" {
 test "Parser init rejects unsupported shorthand escapes" {
     const testing = std.testing;
 
-    try testing.expectError(error.UnsupportedEscape, Parser.init(testing.allocator, "\\d"));
     try testing.expectError(error.UnsupportedEscape, Parser.init(testing.allocator, "\\b"));
+}
+
+test "Parser lowers shorthand character classes to ASCII classes" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "\\d\\D\\w\\W\\s\\S");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 6), root.len);
+
+    const digit = ast.nodes[@intFromEnum(root[0])].char_class;
+    try testing.expect(!digit.negated);
+    try testing.expectEqual(@as(usize, 1), digit.items.len);
+    try testing.expectEqualDeep(ClassItem{ .range = .{ .start = '0', .end = '9' } }, digit.items[0]);
+
+    const not_digit = ast.nodes[@intFromEnum(root[1])].char_class;
+    try testing.expect(not_digit.negated);
+
+    const word = ast.nodes[@intFromEnum(root[2])].char_class;
+    try testing.expect(!word.negated);
+    try testing.expectEqual(@as(usize, 4), word.items.len);
+
+    const not_word = ast.nodes[@intFromEnum(root[3])].char_class;
+    try testing.expect(not_word.negated);
+
+    const space = ast.nodes[@intFromEnum(root[4])].char_class;
+    try testing.expect(!space.negated);
+    try testing.expectEqual(@as(usize, 6), space.items.len);
+
+    const not_space = ast.nodes[@intFromEnum(root[5])].char_class;
+    try testing.expect(not_space.negated);
 }

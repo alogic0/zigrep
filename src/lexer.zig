@@ -15,6 +15,12 @@ pub const Span = struct {
 pub const Token = union(enum) {
     eof,
     literal: u32,
+    digit_class,
+    not_digit_class,
+    word_class,
+    not_word_class,
+    space_class,
+    not_space_class,
     dot,
     anchor_start,
     anchor_end,
@@ -99,7 +105,13 @@ pub fn Lexer(comptime T: type) type {
                 'v' => .{ .literal = 0x0b },
                 '0' => .{ .literal = 0 },
                 'x' => .{ .literal = try self.readHexEscape() },
-                'd', 'D', 'w', 'W', 's', 'S', 'b', 'B' => error.UnsupportedEscape,
+                'd' => .digit_class,
+                'D' => .not_digit_class,
+                'w' => .word_class,
+                'W' => .not_word_class,
+                's' => .space_class,
+                'S' => .not_space_class,
+                'b', 'B' => error.UnsupportedEscape,
                 else => .{ .literal = escaped },
             };
         }
@@ -162,8 +174,22 @@ test "Lexer decodes common escapes and tracks spans" {
 test "Lexer rejects unsupported shorthand and boundary escapes" {
     const testing = @import("std").testing;
 
-    inline for (.{ "\\d", "\\D", "\\w", "\\W", "\\s", "\\S", "\\b", "\\B" }) |pattern| {
+    inline for (.{ "\\b", "\\B" }) |pattern| {
         var lexer = Lexer(u8).init(pattern);
         try testing.expectError(error.UnsupportedEscape, lexer.next());
     }
+}
+
+test "Lexer tokenizes shorthand character classes" {
+    const testing = @import("std").testing;
+
+    var lexer = Lexer(u8).init("\\d\\D\\w\\W\\s\\S");
+
+    try testing.expectEqualDeep(Token.digit_class, try lexer.next());
+    try testing.expectEqualDeep(Token.not_digit_class, try lexer.next());
+    try testing.expectEqualDeep(Token.word_class, try lexer.next());
+    try testing.expectEqualDeep(Token.not_word_class, try lexer.next());
+    try testing.expectEqualDeep(Token.space_class, try lexer.next());
+    try testing.expectEqualDeep(Token.not_space_class, try lexer.next());
+    try testing.expectEqualDeep(Token.eof, try lexer.next());
 }
