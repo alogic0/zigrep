@@ -177,6 +177,10 @@ fn classContainsCodePoint(items: []const hir_mod.ClassItem, cp: u32, multiline: 
         switch (item) {
             .literal => |literal| if (literal == cp) return true,
             .range => |range| if (range.start <= cp and cp <= range.end) return true,
+            .folded_range => |range| {
+                if (cp == '\n' and !multiline) continue;
+                if (unicode.Strategy.foldedRangeContains(cp, range.start, range.end, .simple)) return true;
+            },
             .unicode_property => |property| {
                 const matched = if (property.property == .shorthand_whitespace and cp == '\n' and !multiline)
                     false
@@ -199,6 +203,7 @@ fn isAsciiOnly(instructions: []const Inst) bool {
                     switch (item) {
                         .literal => |literal| if (literal > 0x7f) return false,
                         .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
+                        .folded_range => return false,
                         .unicode_property => return false,
                     }
                 }

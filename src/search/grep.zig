@@ -874,6 +874,7 @@ fn classToByteTerm(
                     try patterns.append(allocator, try bytePatternForLiteralCodePoint(allocator, cp));
                 }
             },
+            .folded_range => return null,
             .unicode_property => return null,
         }
     }
@@ -899,6 +900,7 @@ fn classToUtf8Atom(
             .range => |range| {
                 if (range.start > 0x7f or range.end > 0x7f) saw_non_ascii = true;
             },
+            .folded_range => return null,
             .unicode_property => return null,
         }
     }
@@ -1423,6 +1425,7 @@ fn isAsciiClass(class: regex.hir.CharacterClass) bool {
         switch (item) {
             .literal => |literal| if (literal > 0x7f) return false,
             .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
+            .folded_range => return false,
             .unicode_property => return false,
         }
     }
@@ -1442,6 +1445,10 @@ fn classMatchesCodePoint(class: regex.hir.CharacterClass, cp: u32) bool {
                 break;
             },
             .range => |range| if (range.start <= cp and cp <= range.end) {
+                matched = true;
+                break;
+            },
+            .folded_range => |range| if (cp != '\n' and regex.unicode.Strategy.foldedRangeContains(cp, range.start, range.end, .simple)) {
                 matched = true;
                 break;
             },
@@ -1780,16 +1787,19 @@ test "reportFirstMatch smart-case uses ignore-case for titlecase patterns" {
     try testing.expectEqualStrings("ǆar", report.line);
 }
 
-test "reportFirstMatch rejects oversized case-insensitive ranges" {
+test "reportFirstMatch accepts broad folded BMP case-insensitive range" {
     const testing = std.testing;
 
-    try testing.expectError(error.UnsupportedCaseInsensitivePattern, reportFirstMatch(
+    const report = (try reportFirstMatch(
         testing.allocator,
-        "[\u{0100}-\u{2000}]",
+        "[\u{0000}-\u{FFFF}]",
         "sample.txt",
-        "abc",
+        "AΣ😀",
         .{ .case_mode = .insensitive },
-    ));
+    )).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("A", report.match_text);
 }
 
 test "reportFirstMatch accepts universal Unicode case-insensitive range" {

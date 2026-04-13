@@ -304,10 +304,11 @@ Case-mode note:
   ignore-case path, matching the current observed ripgrep behavior
 - case-folded patterns currently stay off the raw-byte planner and use the
   general VM path
-- broad case-insensitive class ranges are still explicitly rejected when the
-  rewrite would exceed the current bounded expansion model, for example a range
-  like `[\u{0000}-\u{FFFF}]` under `-i`
-- if a case-insensitive character class range is too large to rewrite safely, `zigrep` fails explicitly instead of silently under-matching
+- broad Unicode case-insensitive class ranges now use a dedicated folded-range
+  representation instead of expanding every code point into literal class
+  members
+- examples such as `[\u{0000}-\u{FFFF}]` under `-i` are now accepted and stay
+  on the general VM path instead of the raw-byte planner
 
 Current `--text` note:
 

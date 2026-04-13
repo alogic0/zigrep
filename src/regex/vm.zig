@@ -207,7 +207,7 @@ pub const MatchEngine = struct {
                 return self.addThread(program, haystack, list, visited, literal.out.?, thread.slots, next_pos);
             },
             .char_class => |class| {
-                if (!classMatches(class, cp)) return null;
+                if (!classMatches(class, cp, program)) return null;
                 return self.addThread(program, haystack, list, visited, class.out.?, thread.slots, next_pos);
             },
             .unicode_property => |property| {
@@ -238,7 +238,7 @@ pub const MatchEngine = struct {
                 return self.addThread(program, haystack, list, visited, literal.out.?, thread.slots, unit.end);
             },
             .char_class => |class| {
-                if (!textUnitMatchesClass(class, unit)) return null;
+                if (!textUnitMatchesClass(class, unit, program)) return null;
                 return self.addThread(program, haystack, list, visited, class.out.?, thread.slots, unit.end);
             },
             .unicode_property => |property| {
@@ -362,7 +362,7 @@ fn hasThread(threads: []const Thread, inst_ptr: nfa.InstPtr) bool {
     return false;
 }
 
-fn classMatches(class: anytype, cp: u32) bool {
+fn classMatches(class: anytype, cp: u32, program: nfa.Program) bool {
     var matched = false;
     for (class.items) |item| {
         switch (item) {
@@ -378,6 +378,14 @@ fn classMatches(class: anytype, cp: u32) bool {
                     break;
                 }
             },
+            .folded_range => |range| {
+                if (cp != '\n' or program.can_match_newline) {
+                    if (unicode.Strategy.foldedRangeContains(cp, range.start, range.end, .simple)) {
+                        matched = true;
+                        break;
+                    }
+                }
+            },
             .unicode_property => |property| {
                 const property_matched = unicode.Strategy.hasProperty(cp, property.property);
                 if (property.negated != property_matched) {
@@ -390,12 +398,12 @@ fn classMatches(class: anytype, cp: u32) bool {
     return if (class.negated) !matched else matched;
 }
 
-fn textUnitMatchesClass(class: anytype, unit: TextUnit) bool {
+fn textUnitMatchesClass(class: anytype, unit: TextUnit, program: nfa.Program) bool {
     if (unit.invalid_byte) |byte| {
-        if (isAsciiClass(class)) return classMatches(class, byte);
+        if (isAsciiClass(class)) return classMatches(class, byte, program);
         return class.negated;
     }
-    return classMatches(class, unit.scalar.?);
+    return classMatches(class, unit.scalar.?, program);
 }
 
 fn textUnitMatchesUnicodeProperty(property: unicode.Property, negated: bool, unit: TextUnit, program: nfa.Program) bool {
@@ -416,6 +424,7 @@ fn isAsciiClass(class: anytype) bool {
         switch (item) {
             .literal => |literal| if (literal > 0x7f) return false,
             .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
+            .folded_range => return false,
             .unicode_property => return false,
         }
     }

@@ -122,7 +122,7 @@ pub const Cache = struct {
                     }
                 },
                 .char_class => |class| {
-                    if (classMatches(class, cp)) {
+                    if (classMatches(class, cp, self.program.*)) {
                         if (try self.addEpsilonClosure(&builder, visited, class.out.?, next_pos, input_len, &matched)) {
                             matched = true;
                         }
@@ -234,7 +234,7 @@ fn sortInsts(insts: []nfa.InstPtr) void {
     std.sort.heap(nfa.InstPtr, insts, {}, comptime std.sort.asc(nfa.InstPtr));
 }
 
-fn classMatches(class: anytype, cp: u32) bool {
+fn classMatches(class: anytype, cp: u32, program: nfa.Program) bool {
     var matched = false;
     for (class.items) |item| {
         switch (item) {
@@ -248,6 +248,14 @@ fn classMatches(class: anytype, cp: u32) bool {
                 if (range.start <= cp and cp <= range.end) {
                     matched = true;
                     break;
+                }
+            },
+            .folded_range => |range| {
+                if (cp != '\n' or program.can_match_newline) {
+                    if (unicode.Strategy.foldedRangeContains(cp, range.start, range.end, .simple)) {
+                        matched = true;
+                        break;
+                    }
                 }
             },
             .unicode_property => |property| {

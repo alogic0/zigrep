@@ -2,7 +2,7 @@
 
 This plan covers the remaining deliberate divergence after
 [unicode-case-folding-parity-plan.md](unicode-case-folding-parity-plan.md):
-`zigrep` still rejects some broad case-insensitive class ranges that local
+`zigrep` used to reject some broad case-insensitive class ranges that local
 `ripgrep` accepts, such as:
 
 - `[\u{0000}-\u{FFFF}]` under `-i`
@@ -25,18 +25,16 @@ Current behavior:
 
 - Unicode-aware ignore-case works for literals, classes, and selected property
   items through HIR rewrite
-- broad folded ranges are rejected explicitly with
-  `UnsupportedCaseInsensitivePattern`
+- broader folded ranges now lower to a dedicated folded-range representation
 - the rejection boundary is deterministic and covered by search-layer and CLI
   regressions
 
-Current known divergence from local `ripgrep`:
+Current focused parity result:
 
-- the universal scalar range `[\u{0000}-\u{10FFFF}]` is now accepted under
+- the universal scalar range `[\u{0000}-\u{10FFFF}]` is accepted under `-i`
+- broader folded ranges such as `[\u{0000}-\u{FFFF}]` are also accepted under
   `-i`
-- local `ripgrep` still accepts broader folded ranges such as
-  `[\u{0000}-\u{FFFF}]` under `-i`
-- `zigrep` currently rejects those broader ranges
+- the checked local `ripgrep` samples for broad folded ranges now match
 
 ## Decision Boundary
 
@@ -59,14 +57,12 @@ The core rule remains:
   - full Unicode ranges
   - large mixed ranges
   - ranges that expand badly only after folding
-  - current result: the true universal scalar range is now accepted; the
-    remaining rejected shapes are still broader folded ranges such as
-    `[\u{0000}-\u{FFFF}]` and similarly large mixed ranges
+  - current result: the original broad folded-range rejection surface was
+    confirmed and then removed by the dedicated folded-range representation
 
 - [x] Compare those exact shapes against local `ripgrep`
-  - current result: local `ripgrep` accepts both the universal scalar range
-    and broader folded ranges; `zigrep` now matches `ripgrep` on the universal
-    scalar range but still rejects broader folded ranges
+  - current result: the checked local `ripgrep` samples for universal, BMP,
+    medium, and mixed broad folded ranges now match `zigrep`
 
 - [x] Record the smallest useful subset that would reduce user-visible
   divergence materially
@@ -77,18 +73,39 @@ The core rule remains:
 
 ## Phase 2: Review Rewrite Strategy Options
 
-- [ ] Review the current bounded fold-range rewrite in
+- [x] Review the current bounded fold-range rewrite in
   [src/regex/hir.zig](../../src/regex/hir.zig)
+  - current result: the current rewrite expands each class range code point by
+    code point and then appends each scalar's simple-fold closure as literal
+    items
+  - current result: this is simple and correct for small ranges, but compile
+    cost grows with source range width before any normalization happens
+  - current result: the existing `max_case_folded_range_size` guard is a blunt
+    compile-time blow-up cap, not a semantic boundary
 
-- [ ] Evaluate native-core options for larger folded ranges:
+- [x] Evaluate native-core options for larger folded ranges:
   - larger bounded expansion only
   - canonicalized folded interval sets
   - specialized case-insensitive range node lowered directly to the VM/NFA
+  - current result: simply increasing the bounded expansion limit is not a
+    credible long-term fix because it scales compile cost linearly with source
+    range width and still leaves the newline-suppression problem unsolved
+  - current result: canonicalized folded interval sets are viable in principle
+    but would still require careful newline handling in non-multiline mode and
+    a new coalescing representation instead of today's literal-only expansion
+  - current result: a specialized case-insensitive range/class node lowered
+    directly to the VM/NFA is the most coherent native-core direction if work
+    continues beyond the universal-range exception
 
-- [ ] Reject any option that would:
+- [x] Reject any option that would:
   - silently miss folded equivalents
   - make compile-time blow-up effectively unbounded
   - force planner support before VM semantics are proven
+  - current result: the plan rejects a larger expansion cap as the primary
+    strategy
+  - current result: the planner remains out of scope for these shapes
+  - current result: any future broader relaxation should start from a new
+    matcher representation, not from raising the current limit
 
 ## Phase 3: Choose The Narrowest Safe Improvement
 
@@ -97,13 +114,14 @@ The core rule remains:
   - accepting large but still regular folded interval unions
   - accepting full-range-like classes only when they collapse to an obvious
     universal folded predicate
-  - current result: accept the true universal scalar range
+  - current result: the first step accepted the true universal scalar range
     `[\u{0000}-\u{10FFFF}]` under `-i` by rewriting it to the existing
-    top-level `\p{Any}` representation instead of expanding it as a class
+    top-level `\p{Any}` representation, and the follow-up step broadened this
+    into a general folded-range representation
 
 - [x] Keep the rejection boundary explicit for the remaining unsupported shapes
-  - current result: broader folded ranges such as `[\u{0000}-\u{FFFF}]` remain
-    explicitly rejected
+  - current result: the old broad folded-range rejection boundary is gone for
+    the checked cases in this plan
 
 - [x] Record the new boundary in the plan before implementation
 
@@ -114,9 +132,9 @@ The core rule remains:
   - [src/regex/nfa.zig](../../src/regex/nfa.zig)
   - [src/regex/vm.zig](../../src/regex/vm.zig)
   - any affected Unicode helpers
-  - current result: only [src/regex/hir.zig](../../src/regex/hir.zig) needed
-    code changes for this narrow slice; the universal scalar range now lowers
-    to the existing `Any` property path under `-i`
+  - current result: the final implementation uses both the earlier universal
+    `Any` rewrite and the new folded-range item through HIR, NFA, VM, DFA,
+    and Unicode helpers
 
 - [x] Keep raw-byte planner exclusions unchanged unless equivalence is proven
 
@@ -126,20 +144,19 @@ The core rule remains:
 ## Phase 5: Validation
 
 - [x] Add search-layer regressions for newly accepted broad folded ranges
-  - current result: the universal scalar range is covered directly in the
-    search layer
+  - current result: universal and broader BMP-style folded ranges are covered
+    directly in the search layer
 
 - [x] Add end-to-end CLI regressions for representative accepted cases
-  - current result: the universal scalar range is covered end-to-end through
-    the CLI
+  - current result: universal and broader BMP-style folded ranges are covered
+    end-to-end through the CLI
 
 - [x] Re-run the focused local `ripgrep` comparison matrix for:
   - accepted broad ranges
   - still-rejected broad ranges
   - mixed property-plus-range classes under `-i`
-  - current result: `zigrep` now matches local `ripgrep` for the universal
-    scalar range, while broader folded ranges like `[\u{0000}-\u{FFFF}]`
-    remain a deliberate divergence
+  - current result: `zigrep` now matches the checked local `ripgrep` samples
+    for universal, BMP, medium, and mixed broad folded-range cases
 
 - [x] Run:
   - `zig build test`
@@ -154,6 +171,8 @@ The core rule remains:
   boundary if implementation lands
 
 - [x] Document any remaining explicit rejection cases concretely
+  - current result: no broad folded-range rejection example remains in the
+    checked docs because this plan removed that earlier divergence
 
 ## Recommended Order
 
@@ -165,21 +184,25 @@ The core rule remains:
 
 ## Status
 
-Initial narrow relaxation is complete.
+This plan is complete.
 
 Implemented outcome:
 
 - `[\u{0000}-\u{10FFFF}]` under `-i` is now accepted
 - that universal scalar range is rewritten to the existing `\p{Any}` path
-- broader folded ranges such as `[\u{0000}-\u{FFFF}]` still keep the explicit
-  native-core rejection boundary
+- broader folded ranges such as `[\u{0000}-\u{FFFF}]` now use a dedicated
+  folded-range representation instead of literal expansion or explicit
+  rejection
+- folded-range classes stay off the raw-byte planner and use the general VM
+  path
+- the focused local `ripgrep` comparison matrix now matches for the checked
+  broad folded-range cases
 
 Remaining work, if continued later:
 
-- determine whether additional broad folded ranges can be represented without
-  unbounded rewrite blow-up
-- if broader rewrite work resumes, re-run `zig build bench` again after that
-  structural change
+- there is no unfinished work in this plan
+- any future work here would be a new follow-up for performance tuning or
+  planner support, not more correctness work
 
 ## Explicit Non-Goals
 

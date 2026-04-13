@@ -32,8 +32,8 @@ The work should stay inside the current:
 - Unicode-aware smart-case uppercase detection for non-ASCII patterns
 - stable ASCII and selected Unicode ignore-case behavior already covered by the
   native rewrite
-- explicit rejection of some large folded class/range rewrites via
-  `UnsupportedCaseInsensitivePattern`
+- broad folded-range support through the later dedicated folded-range
+  representation
 
 Current implementation boundary:
 
@@ -42,9 +42,8 @@ Current implementation boundary:
 - a direct attempt to switch literal/class folding to the shared Unicode
   fold-set helper caused false negatives for ordinary ignore-case literals and
   was backed out
-- full Unicode literal/class parity is still open work, not partially shipped
-- broad class/range folding can still fail explicitly
-- current docs do not yet frame the exact Unicode parity target clearly
+- full Unicode literal/class parity and the earlier broad-range divergence are
+  now closed
 
 ## Decision
 
@@ -94,10 +93,9 @@ Non-goal for this plan:
   - broad folded ranges may still fail
   - failure is preferable to silent under-matching
   - current result: folded Unicode literals and literal-class members now use
-    generated simple case-fold data, but broad folded ranges still keep the
-    explicit rejection boundary
-  - current result: the boundary is now pinned by direct search-layer and CLI
-    regressions, including a whole-Unicode range example
+    generated simple case-fold data
+  - current result: broad folded ranges now use a dedicated folded-range
+    representation instead of the old rejection boundary
 
 ## Phase 2: Review Existing Folding Coverage
 
@@ -142,8 +140,8 @@ Non-goal for this plan:
   - deterministic
   - documented
   - covered by regressions
-  - current result: explicit rejection is now covered for oversized Unicode
-    case-insensitive ranges; broader boundary re-evaluation is still open
+  - current result: the old oversized Unicode folded-range rejection boundary
+    was removed in the follow-up relaxation work
 
 ## Phase 4: Smart-Case Unicode Behavior
 
@@ -163,18 +161,18 @@ Non-goal for this plan:
 
 - [x] Review the current `max_case_folded_range_size` boundary in
   [src/regex/hir.zig](../../src/regex/hir.zig)
-  - current result: the existing bounded expansion limit still stands; the
-    whole-Unicode range regression is now the pinned example of the current
-    rejection boundary
+  - current result: the existing bounded expansion limit still stands, but
+    larger ranges now lower to the dedicated folded-range representation
+    instead of failing
 
 - [x] Decide whether current rejection behavior is still the right boundary or
   whether small targeted improvements are justified
-  - current result: keep the current explicit rejection behavior for now and
-    defer any relaxation to a separate focused follow-up
+  - current result: the focused follow-up landed and removed the old broad
+    folded-range rejection boundary
 
 - [x] Keep the core rule explicit:
   - do not silently under-match
-  - either rewrite correctly or reject explicitly
+  - use either a correct rewrite or a dedicated matcher representation
 
 ## Phase 6: Documentation
 
@@ -200,9 +198,8 @@ Non-goal for this plan:
   - explicit rejection boundaries
   - current result: literals, classes, case-related property folding, and
     smart-case titlecase behavior now match the checked local `ripgrep`
-    samples; the deliberate remaining divergence is broad folded ranges like
-    `[\u{0000}-\u{FFFF}]` under `-i`, which `ripgrep` accepts and `zigrep`
-    still rejects explicitly
+    samples; the old broad folded-range divergence was closed by the
+    follow-up relaxation work
 
 ## Recommended Order
 
@@ -224,16 +221,9 @@ Implemented outcome:
 - case-related Unicode properties fold under `-i`
 - smart-case uses Unicode-aware uppercase detection and treats titlecase
   patterns as ignore-case, matching the checked local `ripgrep` behavior
-- the universal scalar range `[\u{0000}-\u{10FFFF}]` is now accepted under
-  `-i`, while broader folded ranges still keep the explicit native-core
-  rejection boundary
-
-Remaining divergence from local `ripgrep`:
-
-- `ripgrep` accepts broad folded ranges such as `[\u{0000}-\u{FFFF}]` under
-  `-i`
-- `zigrep` still rejects those patterns explicitly with
-  `UnsupportedCaseInsensitivePattern`
+- broad folded Unicode ranges now use a dedicated folded-range
+  representation, removing the earlier broad-range divergence from local
+  `ripgrep`
 
 ## Explicit Non-Goals
 

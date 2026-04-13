@@ -330,6 +330,30 @@ pub const Strategy = struct {
         return foldScalar(a, mode) == foldScalar(b, mode);
     }
 
+    pub fn foldedRangeContains(cp: u32, start: u32, end: u32, mode: CaseFoldMode) bool {
+        const canonical = foldScalar(cp, mode);
+        if ((start <= cp and cp <= end) or (start <= canonical and canonical <= end)) return true;
+
+        for (generated.simple_case_fold_mappings) |mapping| {
+            if (foldScalar(mapping.from, mode) == canonical) {
+                if ((start <= mapping.from and mapping.from <= end) or
+                    (start <= mapping.to and mapping.to <= end))
+                {
+                    return true;
+                }
+            }
+            if (foldScalar(mapping.to, mode) == canonical) {
+                if ((start <= mapping.from and mapping.from <= end) or
+                    (start <= mapping.to and mapping.to <= end))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     pub fn foldSet(allocator: std.mem.Allocator, cp: u32, mode: CaseFoldMode) !CaseFold {
         const canonical = foldScalar(cp, mode);
 

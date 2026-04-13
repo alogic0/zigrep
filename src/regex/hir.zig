@@ -8,8 +8,19 @@ pub const NodeId = enum(u32) {
 };
 
 pub const ClassRange = parser.ClassRange;
-pub const ClassItem = parser.ClassItem;
-pub const CharacterClass = parser.CharacterClass;
+pub const ClassItem = union(enum) {
+    literal: u32,
+    range: ClassRange,
+    folded_range: ClassRange,
+    unicode_property: struct {
+        property: unicode.Property,
+        negated: bool,
+    },
+};
+pub const CharacterClass = struct {
+    negated: bool,
+    items: []const ClassItem,
+};
 pub const Quantifier = parser.Quantifier;
 
 pub const Node = union(enum) {
@@ -178,7 +189,7 @@ fn lowerNode(
         } },
         .char_class => |class| .{ .char_class = .{
             .negated = class.negated,
-            .items = try dupClassItems(allocator, class.items),
+            .items = try lowerClassItems(allocator, class.items),
         } },
         .group => |group| .{ .group = .{
             .index = group.index,
@@ -207,6 +218,24 @@ fn lowerChildren(
 
     for (input, 0..) |child, index| {
         lowered[index] = try lowerNode(allocator, ast, child, out);
+    }
+
+    return lowered;
+}
+
+fn lowerClassItems(allocator: std.mem.Allocator, items: []const parser.ClassItem) LowerError![]const ClassItem {
+    const lowered = try allocator.alloc(ClassItem, items.len);
+    errdefer allocator.free(lowered);
+
+    for (items, 0..) |item, index| {
+        lowered[index] = switch (item) {
+            .literal => |cp| .{ .literal = cp },
+            .range => |range| .{ .range = range },
+            .unicode_property => |property| .{ .unicode_property = .{
+                .property = property.property,
+                .negated = property.negated,
+            } },
+        };
     }
 
     return lowered;
@@ -329,13 +358,17 @@ fn foldedCharacterClass(allocator: std.mem.Allocator, class: CharacterClass) Cas
             .literal => |cp| try appendFoldedCodePointItems(allocator, &items, cp),
             .range => |range| {
                 const range_len = range.end - range.start + 1;
-                if (range_len > max_case_folded_range_size) return error.UnsupportedCaseInsensitivePattern;
+                if (range_len > max_case_folded_range_size) {
+                    try items.append(allocator, .{ .folded_range = range });
+                    continue;
+                }
 
                 var cp = range.start;
                 while (cp <= range.end) : (cp += 1) {
                     try appendFoldedCodePointItems(allocator, &items, cp);
                 }
             },
+            .folded_range => |range| try items.append(allocator, .{ .folded_range = range }),
             .unicode_property => |property| try items.append(allocator, .{
                 .unicode_property = .{
                     .property = foldCaseProperty(property.property),
@@ -381,6 +414,7 @@ fn appendUniqueLiteralItem(
         switch (item) {
             .literal => |existing| if (existing == cp) return,
             .range => |range| if (range.start <= cp and cp <= range.end) return,
+            .folded_range => |range| if (range.start <= cp and cp <= range.end) return,
             .unicode_property => {},
         }
     }
