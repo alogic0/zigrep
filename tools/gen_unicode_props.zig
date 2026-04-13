@@ -251,7 +251,8 @@ fn writeOutput(config: Config, letter_ranges: []const Range, number_ranges: []co
     try writer.interface.print("// - {s}\n", .{config.unicode_data});
     try writer.interface.print("// - {s}\n", .{config.prop_list});
     try writer.interface.print("// Data source repository:\n", .{});
-    try writer.interface.print("// - {s}\n\n", .{config.zg_root});
+    try writer.interface.print("// - {s}\n", .{config.zg_root});
+    try writer.interface.print("// - https://codeberg.org/atman/zg\n\n", .{});
     try writer.interface.print("pub const Range = struct {{\n", .{});
     try writer.interface.print("    start: u32,\n", .{});
     try writer.interface.print("    end: u32,\n", .{});

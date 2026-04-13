@@ -4,6 +4,7 @@
 // - ../zig-libs/zg/data/unicode/PropList.txt
 // Data source repository:
 // - ../zig-libs/zg
+// - https://codeberg.org/atman/zg
 
 pub const Range = struct {
     start: u32,
