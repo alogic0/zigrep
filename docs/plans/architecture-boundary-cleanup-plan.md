@@ -64,12 +64,12 @@ The main issues to address are:
 
 ## Phase 4: Public API Boundary Fixes
 
-- [ ] Decide whether `src/root.zig` should expose a real option-carrying
+- [x] Decide whether `src/root.zig` should expose a real option-carrying
   `compile(...)` API
-- [ ] If yes, thread `CompileOptions` through for real
-- [ ] If not, remove the misleading unused option parameter from the public
+- [x] If yes, thread `CompileOptions` through for real
+- [x] If not, remove the misleading unused option parameter from the public
   entrypoint
-- [ ] Re-check any other public aliases in `src/root.zig` for accidental
+- [x] Re-check any other public aliases in `src/root.zig` for accidental
   coupling
 
 ## Validation
@@ -84,7 +84,7 @@ The main issues to address are:
 - [x] 1. Extract the shared command model
 - [x] 2. Move test wrappers out of `src/main.zig`
 - [x] 3. Split `src/search_runner.zig` by responsibility
-- [ ] 4. Fix the public compile boundary in `src/root.zig`
+- [x] 4. Fix the public compile boundary in `src/root.zig`
 
 ## Explicit Non-Goals
 

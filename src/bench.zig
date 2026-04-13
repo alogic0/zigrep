@@ -142,7 +142,7 @@ fn outputCasesForMode(cases: []const OutputBenchCase, mode: BenchMode) []const O
 }
 
 fn runSyntheticCase(allocator: std.mem.Allocator, bench_case: SyntheticBenchCase) !Result {
-    const hir = try zigrep.compile(allocator, bench_case.pattern, .{});
+    const hir = try zigrep.compile(allocator, bench_case.pattern);
     defer hir.deinit(allocator);
 
     const program = try zigrep.regex.Nfa.compile(allocator, hir, .{});
@@ -179,7 +179,7 @@ fn runSyntheticCase(allocator: std.mem.Allocator, bench_case: SyntheticBenchCase
 }
 
 fn runCorpusCase(allocator: std.mem.Allocator, bench_case: CorpusBenchCase) !Result {
-    const hir = try zigrep.compile(allocator, bench_case.pattern, .{});
+    const hir = try zigrep.compile(allocator, bench_case.pattern);
     defer hir.deinit(allocator);
 
     const program = try zigrep.regex.Nfa.compile(allocator, hir, .{});
