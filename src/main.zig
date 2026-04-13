@@ -4422,6 +4422,53 @@ test "runCli supports inline multiline and dotall groups" {
     try testing.expectEqual(@as(u8, 1), scoped_no_dotall.exit_code);
 }
 
+test "runCli supports unscoped inline flag toggles" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "A\n" ++
+            "a\n" ++
+            "aA\n" ++
+            "AA\n" ++
+            "Aa\n" ++
+            "Ж\n" ++
+            "a\n" ++
+            "b\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const local_case = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?i)a(?-i)A", root_path });
+    defer local_case.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), local_case.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, local_case.stdout, 1, "sample.txt:3:1:aA"));
+    try testing.expect(std.mem.containsAtLeast(u8, local_case.stdout, 1, "sample.txt:4:1:AA"));
+    try testing.expect(!std.mem.containsAtLeast(u8, local_case.stdout, 1, "sample.txt:5:1:Aa"));
+
+    const ascii_word = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u)\\w+", root_path });
+    defer ascii_word.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), ascii_word.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:1:1:A"));
+    try testing.expect(!std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:6:1:Ж"));
+
+    const multiline_anchor = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?m)^b$", root_path });
+    defer multiline_anchor.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), multiline_anchor.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, multiline_anchor.stdout, 1, "sample.txt:8:1:b"));
+
+    try testing.expectError(error.MultilineRequired, runCliCaptured(testing.allocator, &.{ "zigrep", "(?s)a.b", root_path }));
+
+    const local_dotall = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "(?s)a.b", root_path });
+    defer local_dotall.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), local_dotall.exit_code);
+}
+
 test "runCli supports non-capturing groups" {
     const testing = std.testing;
 

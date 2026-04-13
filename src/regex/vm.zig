@@ -926,6 +926,28 @@ test "VM supports inline multiline and dotall groups" {
     try testing.expect(!(try engine.isMatch(local_no_dotall, "a\nb")));
 }
 
+test "VM supports unscoped inline flag toggles" {
+    const testing = std.testing;
+
+    try expectMatch("(?i)a(?-i)A", "aA");
+    try expectNoMatch("(?i)a(?-i)A", "Aa");
+    try expectMatch("(?-u)\\w+", "A");
+    try expectNoMatch("(?-u)\\w+", "Ж");
+    try expectMatch("(?m)^b$", "a\nb\n");
+
+    const local_dotall = try compileProgram(testing.allocator, "(?s)a.b", .{ .multiline = true });
+    defer local_dotall.deinit(testing.allocator);
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect(try engine.isMatch(local_dotall, "a\nb"));
+
+    const local_no_dotall = try compileProgram(testing.allocator, "(?-s)a.b", .{
+        .multiline = true,
+        .multiline_dotall = true,
+    });
+    defer local_no_dotall.deinit(testing.allocator);
+    try testing.expect(!(try engine.isMatch(local_no_dotall, "a\nb")));
+}
+
 test "VM handles word boundaries on UTF-8 and raw-byte haystacks" {
     const testing = std.testing;
 
