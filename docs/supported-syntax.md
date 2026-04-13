@@ -59,6 +59,8 @@ Current escape boundary:
   - invalid bytes on the raw-byte path are treated as non-word units
 - Unicode property escapes are supported for:
   - `\p{Alphabetic}` and `\P{Alphabetic}`
+  - `\p{Cased}` and `\P{Cased}`
+  - `\p{Case_Ignorable}` and `\P{Case_Ignorable}`
   - `\p{Letter}` and `\P{Letter}`
   - `\p{Lowercase}` and `\P{Lowercase}`
   - `\p{Titlecase_Letter}` and `\P{Titlecase_Letter}`

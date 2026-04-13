@@ -90,8 +90,8 @@ This bucket also stays native if each property is just a scalar predicate over
   - `White_Space`
   - `Uppercase`
   - `Lowercase`
-  - `Cased`
-  - `Case_Ignorable`
+  - [x] `Cased`
+  - [x] `Case_Ignorable`
 
 - [ ] Evaluate other derived properties that are still good native-core fits:
   - `ID_Start`

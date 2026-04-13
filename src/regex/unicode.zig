@@ -16,6 +16,8 @@ pub const Property = enum {
     number,
     whitespace,
     alphabetic,
+    cased,
+    case_ignorable,
     lowercase,
     uppercase,
     titlecase_letter,
@@ -140,6 +142,8 @@ pub const Strategy = struct {
         if (propertyNameEq(name, "number") or propertyNameEq(name, "n")) return .number;
         if (propertyNameEq(name, "whitespace") or propertyNameEq(name, "space") or propertyNameEq(name, "white_space")) return .whitespace;
         if (propertyNameEq(name, "alphabetic") or propertyNameEq(name, "alpha")) return .alphabetic;
+        if (propertyNameEq(name, "cased")) return .cased;
+        if (propertyNameEq(name, "case_ignorable")) return .case_ignorable;
         if (propertyNameEq(name, "lowercase") or propertyNameEq(name, "lower") or propertyNameEq(name, "ll")) return .lowercase;
         if (propertyNameEq(name, "uppercase") or propertyNameEq(name, "upper") or propertyNameEq(name, "lu")) return .uppercase;
         if (propertyNameEq(name, "titlecase_letter") or propertyNameEq(name, "lt")) return .titlecase_letter;
@@ -184,6 +188,8 @@ pub const Strategy = struct {
             .number => inRanges(cp, &generated.number_ranges),
             .whitespace => inRanges(cp, &generated.whitespace_ranges),
             .alphabetic => inRanges(cp, &generated.alphabetic_ranges),
+            .cased => inRanges(cp, &generated.cased_ranges),
+            .case_ignorable => inRanges(cp, &generated.case_ignorable_ranges),
             .lowercase => inRanges(cp, &generated.lowercase_ranges),
             .uppercase => inRanges(cp, &generated.uppercase_ranges),
             .titlecase_letter => inRanges(cp, &generated.titlecase_letter_ranges),
@@ -448,6 +454,8 @@ test "Unicode strategy looks up named properties and aliases" {
     try testing.expectEqual(@as(?Property, .whitespace), Strategy.lookupProperty("White_Space"));
     try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("Alphabetic"));
     try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("alpha"));
+    try testing.expectEqual(@as(?Property, .cased), Strategy.lookupProperty("Cased"));
+    try testing.expectEqual(@as(?Property, .case_ignorable), Strategy.lookupProperty("Case_Ignorable"));
     try testing.expectEqual(@as(?Property, .lowercase), Strategy.lookupProperty("Ll"));
     try testing.expectEqual(@as(?Property, .titlecase_letter), Strategy.lookupProperty("Lt"));
     try testing.expectEqual(@as(?Property, .modifier_letter), Strategy.lookupProperty("Lm"));
@@ -494,6 +502,8 @@ test "Unicode strategy evaluates property membership" {
     try testing.expect(Strategy.hasProperty('7', .number));
     try testing.expect(Strategy.hasProperty(' ', .whitespace));
     try testing.expect(Strategy.hasProperty(0x0345, .alphabetic));
+    try testing.expect(Strategy.hasProperty('Σ', .cased));
+    try testing.expect(Strategy.hasProperty(0x0345, .case_ignorable));
     try testing.expect(Strategy.hasProperty('ß', .lowercase));
     try testing.expect(Strategy.hasProperty(0x01C5, .titlecase_letter));
     try testing.expect(Strategy.hasProperty(0x02B0, .modifier_letter));

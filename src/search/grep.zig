@@ -2102,6 +2102,14 @@ test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     defer alphabetic.deinit();
     try testing.expect((try alphabetic.reportFirstMatch("sample.txt", "\xCD\x85")) != null);
 
+    var cased = try Searcher.init(testing.allocator, "\\p{Cased}+", .{});
+    defer cased.deinit();
+    try testing.expect((try cased.reportFirstMatch("sample.txt", "Σ")) != null);
+
+    var case_ignorable = try Searcher.init(testing.allocator, "\\p{Case_Ignorable}+", .{});
+    defer case_ignorable.deinit();
+    try testing.expect((try case_ignorable.reportFirstMatch("sample.txt", "\xCD\x85")) != null);
+
     var lowercase = try Searcher.init(testing.allocator, "\\p{Lowercase}+", .{});
     defer lowercase.deinit();
     try testing.expect((try lowercase.reportFirstMatch("sample.txt", "ß")) != null);

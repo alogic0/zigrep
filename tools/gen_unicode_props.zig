@@ -73,6 +73,12 @@ pub fn main() !void {
     var alphabetic_ranges: std.ArrayList(Range) = .empty;
     defer alphabetic_ranges.deinit(arena);
 
+    var cased_ranges: std.ArrayList(Range) = .empty;
+    defer cased_ranges.deinit(arena);
+
+    var case_ignorable_ranges: std.ArrayList(Range) = .empty;
+    defer case_ignorable_ranges.deinit(arena);
+
     var lowercase_ranges: std.ArrayList(Range) = .empty;
     defer lowercase_ranges.deinit(arena);
 
@@ -192,6 +198,8 @@ pub fn main() !void {
     );
     try loadWhitespaceData(arena, config.prop_list, &whitespace_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "Alphabetic", &alphabetic_ranges);
+    try loadNamedPropertyData(arena, config.derived_core_properties, "Cased", &cased_ranges);
+    try loadNamedPropertyData(arena, config.derived_core_properties, "Case_Ignorable", &case_ignorable_ranges);
     try loadGeneralCategoryData(
         arena,
         config.derived_general_category,
@@ -232,6 +240,8 @@ pub fn main() !void {
         number_ranges.items,
         whitespace_ranges.items,
         alphabetic_ranges.items,
+        cased_ranges.items,
+        case_ignorable_ranges.items,
         lowercase_ranges.items,
         uppercase_ranges.items,
         mark_ranges.items,
@@ -740,6 +750,8 @@ fn writeOutput(
     number_ranges: []const Range,
     whitespace_ranges: []const Range,
     alphabetic_ranges: []const Range,
+    cased_ranges: []const Range,
+    case_ignorable_ranges: []const Range,
     lowercase_ranges: []const Range,
     uppercase_ranges: []const Range,
     mark_ranges: []const Range,
@@ -808,6 +820,10 @@ fn writeOutput(
     try writeRangeList(&writer.interface, "whitespace_ranges", whitespace_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "alphabetic_ranges", alphabetic_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "cased_ranges", cased_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "case_ignorable_ranges", case_ignorable_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "lowercase_ranges", lowercase_ranges);
     try writer.interface.print("\n", .{});
