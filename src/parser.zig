@@ -274,11 +274,17 @@ pub const Parser = struct {
             },
             .word_class => {
                 try self.advance();
-                return self.push(.{ .char_class = try asciiWordClass(self.allocator, false) });
+                return self.push(.{ .unicode_property = .{
+                    .property = .shorthand_word,
+                    .negated = false,
+                } });
             },
             .not_word_class => {
                 try self.advance();
-                return self.push(.{ .char_class = try asciiWordClass(self.allocator, true) });
+                return self.push(.{ .unicode_property = .{
+                    .property = .shorthand_word,
+                    .negated = true,
+                } });
             },
             .space_class => {
                 try self.advance();
@@ -462,15 +468,6 @@ pub const Parser = struct {
             => true,
             else => false,
         };
-    }
-
-    fn asciiWordClass(allocator: std.mem.Allocator, negated: bool) !CharacterClass {
-        const items = try allocator.alloc(ClassItem, 4);
-        items[0] = .{ .range = .{ .start = 'A', .end = 'Z' } };
-        items[1] = .{ .range = .{ .start = 'a', .end = 'z' } };
-        items[2] = .{ .range = .{ .start = '0', .end = '9' } };
-        items[3] = .{ .literal = '_' };
-        return .{ .negated = negated, .items = items };
     }
 
     fn fail(self: *Parser, err: ParseError, span: lexer_mod.Span) ParseError {
@@ -716,7 +713,7 @@ test "Parser tracks capture groups in source order" {
     try testing.expectEqual(@as(u32, 1), ast.nodes[@intFromEnum(root[1])].group.index);
 }
 
-test "Parser lowers shorthand character classes to ASCII classes" {
+test "Parser lowers shorthand character classes to Unicode property nodes" {
     const testing = std.testing;
 
     var parser = try Parser.init(testing.allocator, "\\d\\D\\w\\W\\s\\S");
@@ -736,12 +733,15 @@ test "Parser lowers shorthand character classes to ASCII classes" {
         .negated = true,
     } }, ast.nodes[@intFromEnum(root[1])]);
 
-    const word = ast.nodes[@intFromEnum(root[2])].char_class;
-    try testing.expect(!word.negated);
-    try testing.expectEqual(@as(usize, 4), word.items.len);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .shorthand_word,
+        .negated = false,
+    } }, ast.nodes[@intFromEnum(root[2])]);
 
-    const not_word = ast.nodes[@intFromEnum(root[3])].char_class;
-    try testing.expect(not_word.negated);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .shorthand_word,
+        .negated = true,
+    } }, ast.nodes[@intFromEnum(root[3])]);
 
     try testing.expectEqualDeep(Node{ .unicode_property = .{
         .property = .shorthand_whitespace,

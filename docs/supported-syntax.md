@@ -56,15 +56,15 @@ Current escape boundary:
 - shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S` are supported
 - current shorthand semantics are mixed during the compatibility migration:
   - `\d` and `\D` use Unicode decimal-digit semantics
+  - `\w` and `\W` use the Unicode word-character predicate
   - `\s` and `\S` use Unicode whitespace semantics
   - in normal non-multiline search, `\s` does not match `\n`
-  - `\w` and `\W` still use ASCII semantics in the current release
 - word boundaries `\b` and `\B` are supported
   - boundary checks use ASCII wordness (`[A-Za-z0-9_]`) on valid text units
   - invalid bytes on the raw-byte path are treated as non-word units
 - shorthand and word-boundary migration note:
   - the current release is mid-migration toward Unicode-aware shorthand defaults
-  - `\w`, `\W`, `\b`, and `\B` still use ASCII word semantics today
+  - `\b` and `\B` still use ASCII word semantics today
   - explicit ASCII regexes such as `[0-9]` and `[A-Za-z0-9_]` remain the stable way to request ASCII-only behavior
 - Unicode property escapes are supported for:
   - `\p{Any}` and `\P{Any}`

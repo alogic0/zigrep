@@ -718,6 +718,28 @@ test "VM handles Unicode digit and whitespace shorthands" {
     try expectNoMatch("\\s+", "abc");
 }
 
+test "VM handles Unicode word shorthands" {
+    const testing = std.testing;
+
+    try expectMatch("\\w+", "Жβ");
+    try expectMatch("\\w+", "a\xCD\x85");
+    try expectMatch("\\w+", "_");
+    try expectNoMatch("\\w+", "-");
+
+    const word = try compileProgram(testing.allocator, "\\w+", .{});
+    defer word.deinit(testing.allocator);
+
+    const not_word = try compileProgram(testing.allocator, "\\W+", .{});
+    defer not_word.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect((try engine.firstMatchBytes(word, "\xff")) == null);
+
+    const raw_not_word = (try engine.firstMatchBytes(not_word, "\xff")).?;
+    defer raw_not_word.deinit(testing.allocator);
+    try testing.expectEqual(Capture{ .start = 0, .end = 1 }, raw_not_word.span);
+}
+
 test "VM shorthand space class follows multiline newline semantics" {
     const testing = std.testing;
 

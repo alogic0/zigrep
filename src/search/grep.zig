@@ -2058,6 +2058,15 @@ test "Searcher handles shorthand character classes in UTF-8 and raw-byte paths" 
     var word = try Searcher.init(testing.allocator, "\\w+", .{});
     defer word.deinit();
     try testing.expect((try word.reportFirstMatch("sample.txt", "!!!word_123!!!")) != null);
+    try testing.expect((try word.reportFirstMatch("sample.txt", "Жβ")) != null);
+    try testing.expect((try word.reportFirstMatch("sample.txt", "a\xCD\x85")) != null);
+    try testing.expect((try word.reportFirstByteMatch("raw.bin", "\xff")) == null);
+
+    var not_word = try Searcher.init(testing.allocator, "\\W+", .{});
+    defer not_word.deinit();
+    const raw_not_word = (try not_word.reportFirstByteMatch("raw.bin", "\xff")).?;
+    defer raw_not_word.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 0, .end = 1 }, raw_not_word.match_span);
 
     var space = try Searcher.init(testing.allocator, "\\s+", .{ .multiline = true });
     defer space.deinit();

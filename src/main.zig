@@ -5696,6 +5696,8 @@ test "runCli supports mixed shorthand compatibility semantics" {
             "a5b\n" ++
             "a١b\n" ++
             "a²b\n" ++
+            "Жβ\n" ++
+            "a\xCD\x85\n" ++
             "word_123\n" ++
             " \t\n" ++
             "foo\xC2\xA0bar\n",
@@ -5719,7 +5721,9 @@ test "runCli supports mixed shorthand compatibility semantics" {
     defer word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), word_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:1:1:a5b"));
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:4:1:word_123"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:4:1:Жβ"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:5:1:a\xCD\x85"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:6:1:word_123"));
 
     const space_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "\\s+", root_path });
     defer space_run.deinit(testing.allocator);
@@ -5748,6 +5752,44 @@ test "runCli shorthand negation matches invalid UTF-8 bytes on the raw-byte path
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "raw.bin:1:1:a\\xFFb"));
+}
+
+test "runCli uses Unicode word shorthand semantics" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "Жβ\n" ++
+            "a\xCD\x85\n" ++
+            "_\n" ++
+            "-\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "raw.bin",
+        .data = "\xff\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const word_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\w+", root_path });
+    defer word_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), word_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:1:1:Жβ"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:2:1:a\xCD\x85"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:3:1:_"));
+    try testing.expect(!std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:4:1:-"));
+    try testing.expect(!std.mem.containsAtLeast(u8, word_run.stdout, 1, "raw.bin"));
+
+    const not_word_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\W+", root_path });
+    defer not_word_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), not_word_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "sample.txt:4:1:-"));
+    try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "raw.bin:1:1:\\xFF"));
 }
 
 test "runCli supports word boundaries on UTF-8 and raw-byte inputs" {

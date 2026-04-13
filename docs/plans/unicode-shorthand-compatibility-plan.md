@@ -135,10 +135,10 @@ The raw-byte behavior remains explicit:
 
 ## Phase 4: Unicode-Aware `\w`
 
-- [ ] Change shorthand class lowering so `\w` / `\W` use the chosen Unicode
+- [x] Change shorthand class lowering so `\w` / `\W` use the chosen Unicode
   word-character predicate
 
-- [ ] Add representative regressions for:
+- [x] Add representative regressions for:
   - Cyrillic letters
   - Greek letters
   - combining-mark cases
@@ -194,7 +194,7 @@ The raw-byte behavior remains explicit:
 
 - [ ] 1. Lock the exact semantic mapping for `\d`, `\s`, and `\w`
 - [ ] 2. Implement Unicode-aware `\d` and `\s`
-- [ ] 3. Implement Unicode-aware `\w`
+- [x] 3. Implement Unicode-aware `\w`
 - [ ] 4. Implement Unicode-aware `\b` / `\B`
 - [ ] 5. Update docs and migration notes
 - [ ] 6. Reconfirm raw-byte and planner boundaries
