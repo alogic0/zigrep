@@ -1,6 +1,7 @@
 const std = @import("std");
 const reader = @import("../reader.zig");
 const nfa = @import("nfa.zig");
+const unicode = @import("unicode.zig");
 
 pub const Error = reader.ReaderError || error{
     OutOfMemory,
@@ -127,6 +128,14 @@ pub const Cache = struct {
                         }
                     }
                 },
+                .unicode_property => |property| {
+                    const matched_property = unicode.Strategy.hasProperty(cp, property.property);
+                    if (property.negated != matched_property) {
+                        if (try self.addEpsilonClosure(&builder, visited, property.out.?, next_pos, input_len, &matched)) {
+                            matched = true;
+                        }
+                    }
+                },
                 .any => |any| {
                     if (cp != '\n') {
                         if (try self.addEpsilonClosure(&builder, visited, any.out.?, next_pos, input_len, &matched)) {
@@ -179,7 +188,7 @@ pub const Cache = struct {
                 matched.* = true;
                 return true;
             },
-            .literal, .char_class, .any => {
+            .literal, .char_class, .unicode_property, .any => {
                 try builder.append(self.allocator, inst_ptr);
                 return false;
             },

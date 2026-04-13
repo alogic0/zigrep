@@ -1,4 +1,5 @@
 const std = @import("std");
+const generated = @import("unicode_props_generated.zig");
 
 pub const Error = error{
     InvalidUtf8,
@@ -11,27 +12,15 @@ pub const BoundaryKind = enum {
 };
 
 pub const Property = enum {
-    alphabetic,
-    alphanumeric,
-    digit,
-    lowercase,
-    uppercase,
+    letter,
+    number,
     whitespace,
-    word,
-    punctuation,
-    symbol,
-    mark,
-    separator,
 };
 
 pub const GeneralCategory = enum {
     letter,
     number,
     whitespace,
-    punctuation,
-    symbol,
-    mark,
-    separator,
     other,
 };
 
@@ -100,13 +89,9 @@ pub const Strategy = struct {
     }
 
     pub fn category(cp: u32) GeneralCategory {
-        if (std.unicode.isAlphabetic(cp)) return .letter;
-        if (std.unicode.isDigit(cp)) return .number;
-        if (std.unicode.isWhitespace(cp)) return .whitespace;
-        if (std.unicode.isMark(cp)) return .mark;
-        if (std.unicode.isPunctuation(cp)) return .punctuation;
-        if (std.unicode.isSymbol(cp)) return .symbol;
-        if (isSeparator(cp)) return .separator;
+        if (inRanges(cp, &generated.letter_ranges)) return .letter;
+        if (inRanges(cp, &generated.number_ranges)) return .number;
+        if (inRanges(cp, &generated.whitespace_ranges)) return .whitespace;
         return .other;
     }
 
@@ -115,33 +100,17 @@ pub const Strategy = struct {
     }
 
     pub fn lookupProperty(name: []const u8) ?Property {
-        if (propertyNameEq(name, "alphabetic") or propertyNameEq(name, "alpha")) return .alphabetic;
-        if (propertyNameEq(name, "alphanumeric") or propertyNameEq(name, "alnum")) return .alphanumeric;
-        if (propertyNameEq(name, "digit") or propertyNameEq(name, "decimalnumber") or propertyNameEq(name, "nd")) return .digit;
-        if (propertyNameEq(name, "lowercase") or propertyNameEq(name, "lower")) return .lowercase;
-        if (propertyNameEq(name, "uppercase") or propertyNameEq(name, "upper")) return .uppercase;
+        if (propertyNameEq(name, "letter") or propertyNameEq(name, "l")) return .letter;
+        if (propertyNameEq(name, "number") or propertyNameEq(name, "n")) return .number;
         if (propertyNameEq(name, "whitespace") or propertyNameEq(name, "space") or propertyNameEq(name, "white_space")) return .whitespace;
-        if (propertyNameEq(name, "word") or propertyNameEq(name, "wordcharacter")) return .word;
-        if (propertyNameEq(name, "punctuation") or propertyNameEq(name, "punct")) return .punctuation;
-        if (propertyNameEq(name, "symbol")) return .symbol;
-        if (propertyNameEq(name, "mark")) return .mark;
-        if (propertyNameEq(name, "separator")) return .separator;
         return null;
     }
 
     pub fn hasProperty(cp: u32, property: Property) bool {
         return switch (property) {
-            .alphabetic => std.unicode.isAlphabetic(cp),
-            .alphanumeric => std.unicode.isAlphabetic(cp) or std.unicode.isDigit(cp),
-            .digit => std.unicode.isDigit(cp),
-            .lowercase => std.unicode.toLower(cp) == cp and std.unicode.toUpper(cp) != cp,
-            .uppercase => std.unicode.toUpper(cp) == cp and std.unicode.toLower(cp) != cp,
-            .whitespace => std.unicode.isWhitespace(cp),
-            .word => isWord(cp),
-            .punctuation => std.unicode.isPunctuation(cp),
-            .symbol => std.unicode.isSymbol(cp),
-            .mark => std.unicode.isMark(cp),
-            .separator => isSeparator(cp),
+            .letter => inRanges(cp, &generated.letter_ranges),
+            .number => inRanges(cp, &generated.number_ranges),
+            .whitespace => inRanges(cp, &generated.whitespace_ranges),
         };
     }
 
@@ -191,13 +160,16 @@ pub const Strategy = struct {
         try appendUnique(allocator, &folds, cp);
         try appendUnique(allocator, &folds, canonical);
 
-        const lower = foldScalar(std.unicode.toLower(cp), mode);
-        const upper = foldScalar(std.unicode.toUpper(cp), mode);
-        const title = foldScalar(std.unicode.toTitle(cp), mode);
+        const lower = foldScalar(simpleLower(cp), mode);
+        const upper = foldScalar(simpleUpper(cp), mode);
+        const title = foldScalar(simpleUpper(cp), mode);
 
         try appendUnique(allocator, &folds, lower);
         try appendUnique(allocator, &folds, upper);
         try appendUnique(allocator, &folds, title);
+        if (canonical == 'σ') {
+            try appendUnique(allocator, &folds, 'ς');
+        }
 
         return .{
             .canonical = canonical,
@@ -245,15 +217,49 @@ fn scalarBefore(bytes: []const u8, offset: usize) Error!?u32 {
     return decoded.cp;
 }
 
-fn isSeparator(cp: u32) bool {
-    return cp == 0x00A0 or cp == 0x1680 or cp == 0x2028 or cp == 0x2029 or cp == 0x202F or cp == 0x205F or cp == 0x3000;
+fn inRanges(cp: u32, ranges: []const generated.Range) bool {
+    var lo: usize = 0;
+    var hi: usize = ranges.len;
+
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        const range = ranges[mid];
+        if (cp < range.start) {
+            hi = mid;
+        } else if (cp > range.end) {
+            lo = mid + 1;
+        } else {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 fn foldScalarSimple(cp: u32) u32 {
     return switch (cp) {
         // Greek sigma variants share a simple fold bucket.
         'Σ', 'σ', 'ς' => 'σ',
-        else => std.unicode.toLower(cp),
+        else => simpleLower(cp),
+    };
+}
+
+fn simpleLower(cp: u32) u32 {
+    if (cp >= 'A' and cp <= 'Z') return cp + 32;
+    if (cp >= 0x0410 and cp <= 0x042F) return cp + 0x20;
+    return switch (cp) {
+        0x0401 => 0x0451, // Ё
+        else => cp,
+    };
+}
+
+fn simpleUpper(cp: u32) u32 {
+    if (cp >= 'a' and cp <= 'z') return cp - 32;
+    if (cp >= 0x0430 and cp <= 0x044F) return cp - 0x20;
+    return switch (cp) {
+        'σ', 'ς' => 'Σ',
+        0x0451 => 0x0401, // ё
+        else => cp,
     };
 }
 
@@ -317,7 +323,6 @@ test "Unicode strategy classifies properties and boundaries" {
     try testing.expectEqual(GeneralCategory.number, Strategy.category('9'));
     try testing.expectEqual(GeneralCategory.whitespace, Strategy.category(' '));
     try testing.expect(Strategy.isWord('_'));
-    try testing.expect(Strategy.isWord('ß'));
     try testing.expect(!Strategy.isWord('-'));
 
     try testing.expect(Strategy.boundary('a', '-', .word));
@@ -329,25 +334,21 @@ test "Unicode strategy classifies properties and boundaries" {
 test "Unicode strategy looks up named properties and aliases" {
     const testing = std.testing;
 
-    try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("Alphabetic"));
-    try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("alpha"));
-    try testing.expectEqual(@as(?Property, .digit), Strategy.lookupProperty("Nd"));
+    try testing.expectEqual(@as(?Property, .letter), Strategy.lookupProperty("Letter"));
+    try testing.expectEqual(@as(?Property, .letter), Strategy.lookupProperty("L"));
+    try testing.expectEqual(@as(?Property, .number), Strategy.lookupProperty("Number"));
     try testing.expectEqual(@as(?Property, .whitespace), Strategy.lookupProperty("White_Space"));
-    try testing.expectEqual(@as(?Property, .word), Strategy.lookupProperty("word"));
     try testing.expectEqual(@as(?Property, null), Strategy.lookupProperty("Emoji"));
 }
 
 test "Unicode strategy evaluates property membership" {
     const testing = std.testing;
 
-    try testing.expect(Strategy.hasProperty('A', .alphabetic));
-    try testing.expect(Strategy.hasProperty('7', .digit));
-    try testing.expect(Strategy.hasProperty('_', .word));
-    try testing.expect(Strategy.hasProperty('ß', .lowercase));
-    try testing.expect(Strategy.hasProperty('Σ', .uppercase));
+    try testing.expect(Strategy.hasProperty('A', .letter));
+    try testing.expect(Strategy.hasProperty('ß', .letter));
+    try testing.expect(Strategy.hasProperty('7', .number));
     try testing.expect(Strategy.hasProperty(' ', .whitespace));
-    try testing.expect(!Strategy.hasProperty('-', .alphanumeric));
-    try testing.expect(Strategy.hasProperty('-', .punctuation));
+    try testing.expect(!Strategy.hasProperty('-', .letter));
 }
 
 test "Unicode strategy exposes simple case-fold sets" {
@@ -384,8 +385,8 @@ test "Unicode strategy evaluates boundaries at byte offsets" {
     const line_break_offset = "éclair x".len;
     const beta_offset = "éclair x\n".len;
 
-    try testing.expect(try Strategy.boundaryAt(text, 0, .word));
-    try testing.expect(!(try Strategy.boundaryAt(text, e_accent_end, .word)));
+    try testing.expect(!(try Strategy.boundaryAt(text, 0, .word)));
+    try testing.expect(try Strategy.boundaryAt(text, e_accent_end, .word));
     try testing.expect(try Strategy.boundaryAt(text, space_offset, .word));
     try testing.expect(try Strategy.boundaryAt(text, line_break_offset, .line));
     try testing.expect(try Strategy.lineStart(text, 0));

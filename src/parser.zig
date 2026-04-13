@@ -1,5 +1,6 @@
 const std = @import("std");
 const lexer_mod = @import("lexer.zig");
+const unicode = @import("regex/unicode.zig");
 
 pub const NodeId = enum(u32) {
     _,
@@ -34,6 +35,10 @@ pub const Node = union(enum) {
     anchor_end,
     word_boundary,
     not_word_boundary,
+    unicode_property: struct {
+        property: unicode.Property,
+        negated: bool,
+    },
     char_class: CharacterClass,
     group: struct {
         index: u32,
@@ -301,6 +306,13 @@ pub const Parser = struct {
                 try self.advance();
                 return self.push(.not_word_boundary);
             },
+            .unicode_property => |property| {
+                try self.advance();
+                return self.push(.{ .unicode_property = .{
+                    .property = property.property,
+                    .negated = property.negated,
+                } });
+            },
             .l_paren => {
                 const group_span = self.lookahead.span;
                 try self.advance();
@@ -412,6 +424,7 @@ pub const Parser = struct {
             .anchor_end,
             .word_boundary,
             .not_word_boundary,
+            .unicode_property,
             .l_paren,
             .l_bracket,
             => true,
@@ -748,4 +761,23 @@ test "Parser decodes Unicode literal escapes as literals" {
     try testing.expectEqual(@as(usize, 2), root.len);
     try testing.expectEqualDeep(Node{ .literal = 0x0436 }, ast.nodes[@intFromEnum(root[0])]);
     try testing.expectEqualDeep(Node{ .literal = 0x65E5 }, ast.nodes[@intFromEnum(root[1])]);
+}
+
+test "Parser supports Unicode property escapes" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "\\p{Letter}\\P{Number}");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 2), root.len);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .letter,
+        .negated = false,
+    } }, ast.nodes[@intFromEnum(root[0])]);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .number,
+        .negated = true,
+    } }, ast.nodes[@intFromEnum(root[1])]);
 }

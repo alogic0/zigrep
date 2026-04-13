@@ -1,10 +1,13 @@
 const std = @import("std");
 const reader = @import("reader.zig");
+const unicode = @import("regex/unicode.zig");
 
 pub const LexError = reader.ReaderError || error{
     TrailingEscape,
     InvalidHexEscape,
     InvalidUnicodeEscape,
+    InvalidPropertyEscape,
+    UnsupportedProperty,
     UnsupportedEscape,
 };
 
@@ -24,6 +27,10 @@ pub const Token = union(enum) {
     not_space_class,
     word_boundary,
     not_word_boundary,
+    unicode_property: struct {
+        property: unicode.Property,
+        negated: bool,
+    },
     dot,
     anchor_start,
     anchor_end,
@@ -117,8 +124,33 @@ pub fn Lexer(comptime T: type) type {
                 'S' => .not_space_class,
                 'b' => .word_boundary,
                 'B' => .not_word_boundary,
+                'p' => .{ .unicode_property = .{
+                    .property = try self.readPropertyEscape(),
+                    .negated = false,
+                } },
+                'P' => .{ .unicode_property = .{
+                    .property = try self.readPropertyEscape(),
+                    .negated = true,
+                } },
                 else => .{ .literal = escaped },
             };
+        }
+
+        fn readPropertyEscape(self: *Self) LexError!unicode.Property {
+            const open = (try self.input.next()) orelse return error.InvalidPropertyEscape;
+            if (open != '{') return error.InvalidPropertyEscape;
+
+            const start = self.input.pos;
+            while (true) {
+                const cp = (try self.input.peek()) orelse return error.InvalidPropertyEscape;
+                if (cp == '}') break;
+                _ = try self.input.next();
+            }
+            const end = self.input.pos;
+            if (start == end) return error.InvalidPropertyEscape;
+
+            _ = (try self.input.next()) orelse return error.InvalidPropertyEscape;
+            return unicode.Strategy.lookupProperty(self.input.buffer[start..end]) orelse error.UnsupportedProperty;
         }
 
         fn readHexEscape(self: *Self) LexError!u32 {
@@ -250,4 +282,33 @@ test "Lexer tokenizes word boundary escapes" {
     try testing.expectEqualDeep(Token.word_boundary, try lexer.next());
     try testing.expectEqualDeep(Token.not_word_boundary, try lexer.next());
     try testing.expectEqualDeep(Token.eof, try lexer.next());
+}
+
+test "Lexer tokenizes Unicode property escapes" {
+    const testing = @import("std").testing;
+
+    var lexer = Lexer(u8).init("\\p{Letter}\\P{White_Space}");
+
+    try testing.expectEqualDeep(Token{ .unicode_property = .{
+        .property = .letter,
+        .negated = false,
+    } }, try lexer.next());
+    try testing.expectEqualDeep(Token{ .unicode_property = .{
+        .property = .whitespace,
+        .negated = true,
+    } }, try lexer.next());
+    try testing.expectEqualDeep(Token.eof, try lexer.next());
+}
+
+test "Lexer rejects malformed and unsupported Unicode property escapes" {
+    const testing = @import("std").testing;
+
+    var missing_brace = Lexer(u8).init("\\pLetter}");
+    try testing.expectError(error.InvalidPropertyEscape, missing_brace.next());
+
+    var empty = Lexer(u8).init("\\p{}");
+    try testing.expectError(error.InvalidPropertyEscape, empty.next());
+
+    var unsupported = Lexer(u8).init("\\p{Emoji}");
+    try testing.expectError(error.UnsupportedProperty, unsupported.next());
 }

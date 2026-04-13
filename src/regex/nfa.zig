@@ -1,6 +1,7 @@
 const std = @import("std");
 const hir_mod = @import("hir.zig");
 const literal_mod = @import("literal.zig");
+const unicode = @import("unicode.zig");
 
 pub const InstPtr = u32;
 
@@ -47,6 +48,11 @@ pub const Inst = union(enum) {
     not_word_boundary: struct {
         out: ?InstPtr = null,
     },
+    unicode_property: struct {
+        property: unicode.Property,
+        negated: bool,
+        out: ?InstPtr = null,
+    },
     match,
 };
 
@@ -58,6 +64,7 @@ pub const Program = struct {
     prefilter: ?literal_mod.Prefilter,
     ascii_only: bool,
     has_word_boundary: bool,
+    has_unicode_property: bool,
     dot_matches_new_line: bool,
     can_match_newline: bool,
 
@@ -123,6 +130,7 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options:
         .prefilter = try literal_mod.duplicatePrefilter(allocator, compiled_hir.literals),
         .ascii_only = isAsciiOnly(compiler.instructions.items),
         .has_word_boundary = hasWordBoundary(compiler.instructions.items),
+        .has_unicode_property = hasUnicodeProperty(compiler.instructions.items),
         .dot_matches_new_line = options.multiline_dotall,
         .can_match_newline = can_match_newline,
     };
@@ -131,6 +139,7 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options:
 fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, dotall: bool) bool {
     return switch (compiled_hir.nodes[@intFromEnum(node_id)]) {
         .empty, .anchor_start, .anchor_end, .word_boundary, .not_word_boundary => false,
+        .unicode_property => |property| !property.negated and property.property == .whitespace,
         .literal => |cp| cp == '\n',
         .dot => dotall,
         .char_class => |class| classCanMatchNewline(class),
@@ -173,6 +182,7 @@ fn isAsciiOnly(instructions: []const Inst) bool {
     for (instructions) |inst| {
         switch (inst) {
             .literal => |literal| if (literal.value > 0x7f) return false,
+            .unicode_property => return false,
             .char_class => |class| {
                 for (class.items) |item| {
                     switch (item) {
@@ -197,6 +207,16 @@ fn hasWordBoundary(instructions: []const Inst) bool {
     return false;
 }
 
+fn hasUnicodeProperty(instructions: []const Inst) bool {
+    for (instructions) |inst| {
+        switch (inst) {
+            .unicode_property => return true,
+            else => {},
+        }
+    }
+    return false;
+}
+
 const Compiler = struct {
     allocator: std.mem.Allocator,
     instructions: std.ArrayList(Inst),
@@ -210,6 +230,7 @@ const Compiler = struct {
             .anchor_end => self.compileAnchorEnd(),
             .word_boundary => self.compileWordBoundary(),
             .not_word_boundary => self.compileNotWordBoundary(),
+            .unicode_property => |property| self.compileUnicodeProperty(property.property, property.negated),
             .char_class => |class| self.compileClass(class),
             .group => |group| self.compileGroup(compiled_hir, group.index, group.child),
             .concat => |children| self.compileConcat(compiled_hir, children),
@@ -262,6 +283,20 @@ const Compiler = struct {
 
     fn compileNotWordBoundary(self: *Compiler) CompileError!Fragment {
         const index = try self.emit(.{ .not_word_boundary = .{} });
+        var outs: std.ArrayList(PatchRef) = .empty;
+        try outs.append(self.allocator, .{ .inst = index, .slot = .out });
+        return .{ .start = index, .outs = outs };
+    }
+
+    fn compileUnicodeProperty(
+        self: *Compiler,
+        property: unicode.Property,
+        negated: bool,
+    ) CompileError!Fragment {
+        const index = try self.emit(.{ .unicode_property = .{
+            .property = property,
+            .negated = negated,
+        } });
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
         return .{ .start = index, .outs = outs };
@@ -452,6 +487,7 @@ const Compiler = struct {
                 .anchor_end => |*anchor| anchor.out = target,
                 .word_boundary => |*boundary| boundary.out = target,
                 .not_word_boundary => |*boundary| boundary.out = target,
+                .unicode_property => |*property| property.out = target,
                 .split => |*split| switch (patch_ref.slot) {
                     .out => split.out = target,
                     .out1 => split.out1 = target,

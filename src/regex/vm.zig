@@ -45,7 +45,7 @@ pub const MatchEngine = struct {
     }
 
     pub fn isMatch(self: *const MatchEngine, program: nfa.Program, haystack: []const u8) MatchError!bool {
-        if (program.capture_count == 0 and !program.has_word_boundary) {
+        if (program.capture_count == 0 and !program.has_word_boundary and !program.has_unicode_property) {
             var cache = dfa.Cache.init(self.allocator, &program);
             defer cache.deinit();
             return cache.isMatch(haystack);
@@ -210,6 +210,11 @@ pub const MatchEngine = struct {
                 if (!classMatches(class, cp)) return null;
                 return self.addThread(program, haystack, list, visited, class.out.?, thread.slots, next_pos);
             },
+            .unicode_property => |property| {
+                const matched = unicode.Strategy.hasProperty(cp, property.property);
+                if (property.negated == matched) return null;
+                return self.addThread(program, haystack, list, visited, property.out.?, thread.slots, next_pos);
+            },
             .any => |any| {
                 if (!program.dot_matches_new_line and cp == '\n') return null;
                 return self.addThread(program, haystack, list, visited, any.out.?, thread.slots, next_pos);
@@ -235,6 +240,10 @@ pub const MatchEngine = struct {
             .char_class => |class| {
                 if (!textUnitMatchesClass(class, unit)) return null;
                 return self.addThread(program, haystack, list, visited, class.out.?, thread.slots, unit.end);
+            },
+            .unicode_property => |property| {
+                if (!textUnitMatchesUnicodeProperty(property.property, property.negated, unit)) return null;
+                return self.addThread(program, haystack, list, visited, property.out.?, thread.slots, unit.end);
             },
             .any => |any| {
                 if (!program.dot_matches_new_line and unit.isNewline()) return null;
@@ -288,6 +297,9 @@ pub const MatchEngine = struct {
             .not_word_boundary => |boundary| {
                 if (wordBoundaryAt(haystack, pos)) return null;
                 return self.addThread(program, haystack, list, visited, boundary.out.?, slots, pos);
+            },
+            .unicode_property => |property| {
+                return self.addThread(program, haystack, list, visited, property.out.?, slots, pos);
             },
             .match => return try self.buildMatch(program, slots),
             .literal, .char_class, .any => {
@@ -380,6 +392,14 @@ fn textUnitMatchesClass(class: anytype, unit: TextUnit) bool {
         return class.negated;
     }
     return classMatches(class, unit.scalar.?);
+}
+
+fn textUnitMatchesUnicodeProperty(property: unicode.Property, negated: bool, unit: TextUnit) bool {
+    if (unit.scalar) |cp| {
+        const matched = unicode.Strategy.hasProperty(cp, property);
+        return if (negated) !matched else matched;
+    }
+    return negated;
 }
 
 fn isAsciiClass(class: anytype) bool {
@@ -553,6 +573,31 @@ test "VM respects start and end anchors" {
     try testing.expect(try engine.isMatch(program, "abbb"));
     try testing.expect(!(try engine.isMatch(program, "zabbb")));
     try testing.expect(!(try engine.isMatch(program, "abbbz")));
+}
+
+test "VM matches Unicode properties in UTF-8 and raw-byte paths" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "\\p{Letter}+\\p{Number}+", .{});
+    defer program.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+
+    try testing.expect(try engine.isMatch(program, "ж7"));
+    try testing.expect(!(try engine.isMatch(program, "7ж")));
+
+    const raw_letter = (try engine.firstMatchBytes(program, "\xffж7")).?;
+    defer raw_letter.deinit(testing.allocator);
+    try testing.expectEqual(@as(?usize, 1), raw_letter.span.start);
+    try testing.expectEqual(@as(?usize, 4), raw_letter.span.end);
+
+    const negated = try compileProgram(testing.allocator, "\\P{Letter}+", .{});
+    defer negated.deinit(testing.allocator);
+
+    const raw_negated = (try engine.firstMatchBytes(negated, "\xff")).?;
+    defer raw_negated.deinit(testing.allocator);
+    try testing.expectEqual(@as(?usize, 0), raw_negated.span.start);
+    try testing.expectEqual(@as(?usize, 1), raw_negated.span.end);
 }
 
 test "VM requires multiline for newline literal patterns" {

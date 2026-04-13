@@ -5831,6 +5831,54 @@ test "runCli supports Unicode literal escapes" {
     try testing.expect(std.mem.containsAtLeast(u8, kanji_run.stdout, 1, "sample.txt:2:1:日本"));
 }
 
+test "runCli supports Unicode property escapes on UTF-8 and raw-byte inputs" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "ж7\n" ++
+            "7ж\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "raw.bin",
+        .data = "\xffж7\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const utf8_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Letter}+\\p{Number}+", root_path });
+    defer utf8_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), utf8_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, utf8_run.stdout, 1, "sample.txt:1:1:ж7"));
+
+    const raw_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\P{Letter}+", root_path });
+    defer raw_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), raw_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, raw_run.stdout, 1, "raw.bin:1:1:"));
+}
+
+test "runCli rejects unsupported Unicode properties" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "needle\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    try testing.expectError(error.UnsupportedProperty, runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Emoji}", root_path }));
+}
+
 test "runCli rejects invalid Unicode escapes" {
     const testing = std.testing;
 

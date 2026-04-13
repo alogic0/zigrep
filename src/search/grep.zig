@@ -529,7 +529,7 @@ fn extractBytePattern(
             .mode = .contains,
             .terms = try allocator.alloc(ByteTerm, 0),
         },
-        .word_boundary, .not_word_boundary => null,
+        .word_boundary, .not_word_boundary, .unicode_property => null,
         .alternation => blk: {
             const term = (try extractAlternationByteTerm(allocator, nodes, root)) orelse break :blk null;
             const terms = try allocator.alloc(ByteTerm, 1);
@@ -686,7 +686,7 @@ fn appendNodeToByteTerms(
             try terms.append(allocator, .{ .atom = .anchor_end });
             return true;
         },
-        .word_boundary, .not_word_boundary => {
+        .word_boundary, .not_word_boundary, .unicode_property => {
             return false;
         },
         .char_class => |class| {
@@ -2053,6 +2053,25 @@ test "Searcher handles word boundaries in UTF-8 and raw-byte paths" {
     var not_word = try Searcher.init(testing.allocator, "\\Bcat\\B", .{});
     defer not_word.deinit();
     try testing.expect((try not_word.reportFirstMatch("sample.txt", "scatter")) != null);
+}
+
+test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
+    const testing = std.testing;
+
+    var letter_number = try Searcher.init(testing.allocator, "\\p{Letter}+\\p{Number}+", .{});
+    defer letter_number.deinit();
+    try testing.expect((try letter_number.reportFirstMatch("sample.txt", "ж7")) != null);
+    try testing.expect((try letter_number.reportFirstMatch("sample.txt", "7ж")) == null);
+
+    const raw_letter = (try letter_number.reportFirstByteMatch("raw.bin", "\xffж7")).?;
+    defer raw_letter.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 1, .end = 4 }, raw_letter.match_span);
+
+    var not_letter = try Searcher.init(testing.allocator, "\\P{Letter}+", .{});
+    defer not_letter.deinit();
+    const raw_not_letter = (try not_letter.reportFirstByteMatch("raw.bin", "\xff")).?;
+    defer raw_not_letter.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 0, .end = 1 }, raw_not_letter.match_span);
 }
 
 test "Searcher forEachMatchReport advances across repeated multiline matches" {

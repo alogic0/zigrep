@@ -37,7 +37,7 @@ Character classes support:
 - Negation in the leading position: `[^0-9]`
 - Literal `]`, `-`, and `^` when used in non-special positions or escaped
 
-The current engine does not yet expose named Unicode properties.
+The current engine exposes a small Unicode property surface.
 
 Unicode data note:
 
@@ -55,6 +55,13 @@ Current escape boundary:
 - word boundaries `\b` and `\B` are supported
   - boundary checks use ASCII wordness (`[A-Za-z0-9_]`) on valid text units
   - invalid bytes on the raw-byte path are treated as non-word units
+- Unicode property escapes are supported for:
+  - `\p{Letter}` and `\P{Letter}`
+  - `\p{Number}` and `\P{Number}`
+  - `\p{Whitespace}` and `\P{Whitespace}`
+  - accepted aliases currently include `L`, `N`, and `White_Space`
+  - invalid raw bytes do not match positive Unicode properties and do match
+    negated Unicode properties
 - `\u{...}` accepts 1 to 6 hex digits and rejects surrogate code points and values above `U+10FFFF`
 
 ## Explicit Non-Goals

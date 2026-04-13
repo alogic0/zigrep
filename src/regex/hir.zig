@@ -1,6 +1,7 @@
 const std = @import("std");
 const parser = @import("../parser.zig");
 const literal_mod = @import("literal.zig");
+const unicode = @import("unicode.zig");
 
 pub const NodeId = enum(u32) {
     _,
@@ -19,6 +20,10 @@ pub const Node = union(enum) {
     anchor_end,
     word_boundary,
     not_word_boundary,
+    unicode_property: struct {
+        property: unicode.Property,
+        negated: bool,
+    },
     char_class: CharacterClass,
     group: struct {
         index: u32,
@@ -152,6 +157,10 @@ fn lowerNode(
         .anchor_end => .anchor_end,
         .word_boundary => .word_boundary,
         .not_word_boundary => .not_word_boundary,
+        .unicode_property => |property| .{ .unicode_property = .{
+            .property = property.property,
+            .negated = property.negated,
+        } },
         .char_class => |class| .{ .char_class = .{
             .negated = class.negated,
             .items = try dupClassItems(allocator, class.items),
@@ -202,6 +211,10 @@ fn prefixForNode(allocator: std.mem.Allocator, nodes: []const Node, node_id: Nod
     switch (nodes[@intFromEnum(node_id)]) {
         .empty => return .{
             .exact = true,
+            .bytes = try allocator.alloc(u8, 0),
+        },
+        .unicode_property => return .{
+            .exact = false,
             .bytes = try allocator.alloc(u8, 0),
         },
         .literal => |cp| {

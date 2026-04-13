@@ -162,8 +162,12 @@ The goal is:
 
 ## Phase 5: Character-Class Integration
 
-- [ ] Decide whether Unicode property items can appear inside bracket classes in
+- [x] Decide whether Unicode property items can appear inside bracket classes in
   the first implementation or only as top-level escapes.
+
+  Decision:
+  - keep the first implementation top-level only
+  - do not allow property items inside bracket classes yet
 
 - [ ] If bracket integration is included, support property items inside classes
   without creating ambiguous parser behavior.
@@ -175,18 +179,18 @@ The goal is:
 
 ## Phase 6: Validation
 
-- [ ] Add parser tests for:
+- [x] Add parser tests for:
   - valid property syntax
   - malformed property syntax
   - unsupported property names
 
-- [ ] Add VM and search-layer tests for:
+- [x] Add VM and search-layer tests for:
   - positive and negated property checks
   - UTF-8 scalar matching
   - invalid-byte raw-path behavior
   - interaction with multiline mode where relevant
 
-- [ ] Add end-to-end CLI tests for:
+- [x] Add end-to-end CLI tests for:
   - property matching in normal UTF-8 text
   - property matching in invalid-UTF-8 files through the raw-byte path
   - failure behavior for unsupported properties
