@@ -5756,6 +5756,51 @@ test "runCli supports word boundaries on UTF-8 and raw-byte inputs" {
     try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "sample.txt:2:2:scatter"));
 }
 
+test "runCli supports Unicode literal escapes" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "жар\n" ++
+            "日本\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const cyrillic_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\u{0436}ар", root_path });
+    defer cyrillic_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), cyrillic_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, cyrillic_run.stdout, 1, "sample.txt:1:1:жар"));
+
+    const kanji_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\u{65E5}\\u{672C}", root_path });
+    defer kanji_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), kanji_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, kanji_run.stdout, 1, "sample.txt:2:1:日本"));
+}
+
+test "runCli rejects invalid Unicode escapes" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "needle\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    try testing.expectError(error.InvalidUnicodeEscape, runCliCaptured(testing.allocator, &.{ "zigrep", "\\u{}", root_path }));
+    try testing.expectError(error.InvalidUnicodeEscape, runCliCaptured(testing.allocator, &.{ "zigrep", "\\u{110000}", root_path }));
+}
+
 test "runCli default mode matches literal-only UTF-8 classes through the byte path" {
     const testing = std.testing;
 

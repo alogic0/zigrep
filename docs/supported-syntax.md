@@ -40,11 +40,13 @@ The current engine does not yet expose named Unicode properties.
 Current escape boundary:
 
 - supported control and byte escapes include `\n`, `\r`, `\t`, `\f`, `\v`, `\0`, and `\xNN`
+- Unicode literal escapes with braced hex syntax are supported via `\u{...}`
 - escaped metacharacters like `\.`, `\(`, `\)`, `\[`, and `\\` are supported
 - shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S` are supported with ASCII semantics
 - word boundaries `\b` and `\B` are supported
   - boundary checks use ASCII wordness (`[A-Za-z0-9_]`) on valid text units
   - invalid bytes on the raw-byte path are treated as non-word units
+- `\u{...}` accepts 1 to 6 hex digits and rejects surrogate code points and values above `U+10FFFF`
 
 ## Explicit Non-Goals
 

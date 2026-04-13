@@ -668,3 +668,16 @@ test "Parser supports word boundary escapes" {
     try testing.expectEqualDeep(Node{ .literal = 'o' }, ast.nodes[@intFromEnum(root[3])]);
     try testing.expectEqual(.not_word_boundary, std.meta.activeTag(ast.nodes[@intFromEnum(root[4])]));
 }
+
+test "Parser decodes Unicode literal escapes as literals" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "\\u{0436}\\u{65E5}");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 2), root.len);
+    try testing.expectEqualDeep(Node{ .literal = 0x0436 }, ast.nodes[@intFromEnum(root[0])]);
+    try testing.expectEqualDeep(Node{ .literal = 0x65E5 }, ast.nodes[@intFromEnum(root[1])]);
+}

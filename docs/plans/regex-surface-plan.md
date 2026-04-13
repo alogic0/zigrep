@@ -90,7 +90,7 @@ The goal is not full PCRE2 parity. The goal is:
 - [x] Add the missing parser / HIR / NFA node support for word boundaries.
 
 - [x] Decide and document boundary behavior:
-  - Unicode-aware by default on valid UTF-8 scalars
+  - ASCII wordness on valid text units
   - invalid bytes on the raw-byte path are treated as non-word units
 
 - [x] Add tests for:
@@ -102,15 +102,15 @@ The goal is not full PCRE2 parity. The goal is:
 
 ## Phase 4: Unicode Escapes And Escape Surface Cleanup
 
-- [ ] Decide whether to add Unicode literal escapes such as `\u{...}`.
+- [x] Decide whether to add Unicode literal escapes such as `\u{...}`.
 
-- [ ] If yes, add them as lexer/parser/HIR support without changing the native
+- [x] If yes, add them as lexer/parser/HIR support without changing the native
   engine model.
 
-- [ ] Review all current accepted escapes and document them precisely in
+- [x] Review all current accepted escapes and document them precisely in
   `docs/supported-syntax.md`.
 
-- [ ] Add tests proving the escape surface is strict and predictable:
+- [x] Add tests proving the escape surface is strict and predictable:
   - supported escapes compile and match correctly
   - unsupported escapes fail explicitly
 

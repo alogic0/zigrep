@@ -4,6 +4,7 @@ const reader = @import("reader.zig");
 pub const LexError = reader.ReaderError || error{
     TrailingEscape,
     InvalidHexEscape,
+    InvalidUnicodeEscape,
     UnsupportedEscape,
 };
 
@@ -107,6 +108,7 @@ pub fn Lexer(comptime T: type) type {
                 'v' => .{ .literal = 0x0b },
                 '0' => .{ .literal = 0 },
                 'x' => .{ .literal = try self.readHexEscape() },
+                'u' => .{ .literal = try self.readUnicodeEscape() },
                 'd' => .digit_class,
                 'D' => .not_digit_class,
                 'w' => .word_class,
@@ -126,6 +128,32 @@ pub fn Lexer(comptime T: type) type {
             const hi_nibble = std.fmt.charToDigit(@as(u8, @intCast(hi)), 16) catch return error.InvalidHexEscape;
             const lo_nibble = std.fmt.charToDigit(@as(u8, @intCast(lo)), 16) catch return error.InvalidHexEscape;
             return (hi_nibble << 4) | lo_nibble;
+        }
+
+        fn readUnicodeEscape(self: *Self) LexError!u32 {
+            const open = (try self.input.next()) orelse return error.InvalidUnicodeEscape;
+            if (open != '{') return error.InvalidUnicodeEscape;
+
+            var value: u32 = 0;
+            var digits: usize = 0;
+
+            while (true) {
+                const cp = (try self.input.next()) orelse return error.InvalidUnicodeEscape;
+                if (cp == '}') break;
+
+                const digit = std.fmt.charToDigit(@as(u8, @intCast(cp)), 16) catch return error.InvalidUnicodeEscape;
+                if (digits == 6) return error.InvalidUnicodeEscape;
+                digits += 1;
+
+                if (value > (@as(u32, 0x10ffff) - digit) / 16) return error.InvalidUnicodeEscape;
+                value = value * 16 + digit;
+            }
+
+            if (digits == 0) return error.InvalidUnicodeEscape;
+            if (value > 0x10ffff) return error.InvalidUnicodeEscape;
+            if (value >= 0xd800 and value <= 0xdfff) return error.InvalidUnicodeEscape;
+
+            return value;
         }
     };
 }
@@ -172,6 +200,32 @@ test "Lexer decodes common escapes and tracks spans" {
     const hex = try lexer.nextSpanned();
     try testing.expectEqualDeep(Token{ .literal = 'A' }, hex.token);
     try testing.expectEqualDeep(Span{ .start = 4, .end = 8 }, hex.span);
+}
+
+test "Lexer decodes Unicode escapes" {
+    const testing = @import("std").testing;
+
+    var lexer = Lexer(u8).init("\\u{41}\\u{0436}");
+
+    try testing.expectEqualDeep(Token{ .literal = 'A' }, try lexer.next());
+    try testing.expectEqualDeep(Token{ .literal = 0x0436 }, try lexer.next());
+    try testing.expectEqualDeep(Token.eof, try lexer.next());
+}
+
+test "Lexer rejects invalid Unicode escapes" {
+    const testing = @import("std").testing;
+
+    var missing = Lexer(u8).init("\\u");
+    try testing.expectError(error.InvalidUnicodeEscape, missing.next());
+
+    var empty = Lexer(u8).init("\\u{}");
+    try testing.expectError(error.InvalidUnicodeEscape, empty.next());
+
+    var too_large = Lexer(u8).init("\\u{110000}");
+    try testing.expectError(error.InvalidUnicodeEscape, too_large.next());
+
+    var surrogate = Lexer(u8).init("\\u{D800}");
+    try testing.expectError(error.InvalidUnicodeEscape, surrogate.next());
 }
 
 test "Lexer tokenizes shorthand character classes" {
