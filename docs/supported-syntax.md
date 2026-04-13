@@ -34,9 +34,10 @@ Notes:
 - Matching is UTF-8 aware but stays byte-oriented in the hot path.
 - Capture names currently use ASCII letters, digits, and `_`.
 - Captures are supported by the engine, but the current CLI still reports whole-line matches rather than named-capture-specific output.
-- Inline flags outside the native-core `i/u/m/s` subset are still unsupported.
-  In particular, CRLF-specific inline forms like `(?R:...)` are out of scope
-  until `zigrep` has a broader line-terminator model.
+- Inline flags outside the native-core `i/u/m/s` subset are not on the current
+  roadmap.
+- In particular, CRLF-specific inline forms like `(?R:...)` are future
+  consideration only and would require a dedicated line-terminator model.
 
 ## Character Class Behavior
 

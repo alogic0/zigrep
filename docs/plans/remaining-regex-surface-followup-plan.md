@@ -75,7 +75,10 @@ Result:
 - those flags do not map cleanly to the current `zigrep` native core because
   they would require a broader line-terminator model, not just parser syntax
 - no additional inline flags are justified inside this plan
-- any future work on CRLF-aware regex behavior should be its own narrow plan
+- CRLF-aware regex behavior is future consideration only, not part of the
+  current regex-surface roadmap
+- if revisited later, it should begin with a dedicated line-terminator model
+  plan, not with more parser-only flag work
 
 ## Phase 4: Validation And Docs
 
