@@ -11,15 +11,11 @@ pub const BoundaryKind = enum {
     line,
 };
 
-pub const Property = enum {
+pub const script_property_base: u16 = 0x400;
+
+pub const Property = enum(u16) {
     any,
     ascii,
-    script_latin,
-    script_greek,
-    script_cyrillic,
-    script_common,
-    script_inherited,
-    script_unknown,
     letter,
     number,
     whitespace,
@@ -66,6 +62,8 @@ pub const Property = enum {
     surrogate,
     private_use,
     unassigned,
+    script_base = script_property_base,
+    _,
 };
 
 pub const GeneralCategory = enum {
@@ -204,18 +202,20 @@ pub const Strategy = struct {
     }
 
     pub fn hasProperty(cp: u32, property: Property) bool {
+        if (scriptSpecForProperty(property)) |spec| {
+            const matched = inRanges(cp, spec.ranges);
+            if (@intFromEnum(property) == generated.script_unknown_property_id) {
+                return matched or
+                    inRanges(cp, &generated.unassigned_ranges) or
+                    inRanges(cp, &generated.private_use_ranges) or
+                    inRanges(cp, &generated.surrogate_ranges);
+            }
+            return matched;
+        }
+
         return switch (property) {
             .any => cp <= 0x10FFFF and !(cp >= 0xD800 and cp <= 0xDFFF),
             .ascii => cp <= 0x7F,
-            .script_latin => inRanges(cp, &generated.latin_script_ranges),
-            .script_greek => inRanges(cp, &generated.greek_script_ranges),
-            .script_cyrillic => inRanges(cp, &generated.cyrillic_script_ranges),
-            .script_common => inRanges(cp, &generated.common_script_ranges),
-            .script_inherited => inRanges(cp, &generated.inherited_script_ranges),
-            .script_unknown => inRanges(cp, &generated.unknown_script_ranges) or
-                inRanges(cp, &generated.unassigned_ranges) or
-                inRanges(cp, &generated.private_use_ranges) or
-                inRanges(cp, &generated.surrogate_ranges),
             .letter => inRanges(cp, &generated.letter_ranges),
             .number => inRanges(cp, &generated.number_ranges),
             .whitespace => inRanges(cp, &generated.whitespace_ranges),
@@ -262,6 +262,7 @@ pub const Strategy = struct {
             .surrogate => inRanges(cp, &generated.surrogate_ranges),
             .private_use => inRanges(cp, &generated.private_use_ranges),
             .unassigned => inRanges(cp, &generated.unassigned_ranges),
+            else => false,
         };
     }
 
@@ -444,13 +445,20 @@ fn lookupScriptProperty(name: []const u8) ?Property {
 }
 
 fn lookupScriptName(name: []const u8) ?Property {
-    if (propertyNameEq(name, "latin") or propertyNameEq(name, "latn")) return .script_latin;
-    if (propertyNameEq(name, "greek") or propertyNameEq(name, "grek")) return .script_greek;
-    if (propertyNameEq(name, "cyrillic") or propertyNameEq(name, "cyrl")) return .script_cyrillic;
-    if (propertyNameEq(name, "common") or propertyNameEq(name, "zyyy")) return .script_common;
-    if (propertyNameEq(name, "inherited") or propertyNameEq(name, "zinh")) return .script_inherited;
-    if (propertyNameEq(name, "unknown") or propertyNameEq(name, "zzzz")) return .script_unknown;
+    for (generated.script_specs) |spec| {
+        if (propertyNameEq(name, spec.long_name) or propertyNameEq(name, spec.short_name)) {
+            return @enumFromInt(spec.property_id);
+        }
+    }
     return null;
+}
+
+fn scriptSpecForProperty(property: Property) ?generated.ScriptSpec {
+    const property_id = @intFromEnum(property);
+    if (property_id < script_property_base) return null;
+    const index = property_id - script_property_base;
+    if (index >= generated.script_specs.len) return null;
+    return generated.script_specs[index];
 }
 
 fn isPropertySeparator(byte: u8) bool {
@@ -508,13 +516,18 @@ test "Unicode strategy looks up named properties and aliases" {
 
     try testing.expectEqual(@as(?Property, .any), Strategy.lookupProperty("Any"));
     try testing.expectEqual(@as(?Property, .ascii), Strategy.lookupProperty("ASCII"));
-    try testing.expectEqual(@as(?Property, .script_greek), Strategy.lookupProperty("Greek"));
-    try testing.expectEqual(@as(?Property, .script_greek), Strategy.lookupProperty("Grek"));
-    try testing.expectEqual(@as(?Property, .script_greek), Strategy.lookupProperty("Script=Greek"));
-    try testing.expectEqual(@as(?Property, .script_greek), Strategy.lookupProperty("sc=Grek"));
-    try testing.expectEqual(@as(?Property, .script_common), Strategy.lookupProperty("Common"));
-    try testing.expectEqual(@as(?Property, .script_inherited), Strategy.lookupProperty("Inherited"));
-    try testing.expectEqual(@as(?Property, .script_unknown), Strategy.lookupProperty("Unknown"));
+    const greek = Strategy.lookupProperty("Greek").?;
+    try testing.expectEqual(greek, Strategy.lookupProperty("Grek").?);
+    try testing.expectEqual(greek, Strategy.lookupProperty("Script=Greek").?);
+    try testing.expectEqual(greek, Strategy.lookupProperty("sc=Grek").?);
+    const common = Strategy.lookupProperty("Common").?;
+    try testing.expectEqual(common, Strategy.lookupProperty("Zyyy").?);
+    const inherited = Strategy.lookupProperty("Inherited").?;
+    try testing.expectEqual(inherited, Strategy.lookupProperty("Zinh").?);
+    const unknown = Strategy.lookupProperty("Unknown").?;
+    try testing.expectEqual(unknown, Strategy.lookupProperty("Zzzz").?);
+    try testing.expect(Strategy.lookupProperty("Hebrew") != null);
+    try testing.expect(Strategy.lookupProperty("Hebr") != null);
     try testing.expectEqual(@as(?Property, .letter), Strategy.lookupProperty("Letter"));
     try testing.expectEqual(@as(?Property, .letter), Strategy.lookupProperty("L"));
     try testing.expectEqual(@as(?Property, .number), Strategy.lookupProperty("Number"));
@@ -572,12 +585,13 @@ test "Unicode strategy evaluates property membership" {
     try testing.expect(Strategy.hasProperty('A', .any));
     try testing.expect(Strategy.hasProperty('A', .ascii));
     try testing.expect(!Strategy.hasProperty('ж', .ascii));
-    try testing.expect(Strategy.hasProperty('A', .script_latin));
-    try testing.expect(Strategy.hasProperty('Ω', .script_greek));
-    try testing.expect(Strategy.hasProperty('Ж', .script_cyrillic));
-    try testing.expect(Strategy.hasProperty('+', .script_common));
-    try testing.expect(Strategy.hasProperty(0x0301, .script_inherited));
-    try testing.expect(Strategy.hasProperty(0x0378, .script_unknown));
+    try testing.expect(Strategy.hasProperty('A', Strategy.lookupProperty("Latin").?));
+    try testing.expect(Strategy.hasProperty('Ω', Strategy.lookupProperty("Greek").?));
+    try testing.expect(Strategy.hasProperty('Ж', Strategy.lookupProperty("Cyrillic").?));
+    try testing.expect(Strategy.hasProperty('+', Strategy.lookupProperty("Common").?));
+    try testing.expect(Strategy.hasProperty(0x0301, Strategy.lookupProperty("Inherited").?));
+    try testing.expect(Strategy.hasProperty(0x0378, Strategy.lookupProperty("Unknown").?));
+    try testing.expect(Strategy.hasProperty('א', Strategy.lookupProperty("Hebrew").?));
     try testing.expect(Strategy.hasProperty('A', .letter));
     try testing.expect(Strategy.hasProperty('ß', .letter));
     try testing.expect(Strategy.hasProperty('7', .number));

@@ -5957,7 +5957,8 @@ test "runCli supports initial Script Unicode properties" {
         .data =
             "A\n" ++
             "Ω\n" ++
-            "Ж\n",
+            "Ж\n" ++
+            "א\n",
     });
 
     const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
@@ -5977,6 +5978,11 @@ test "runCli supports initial Script Unicode properties" {
     defer cyrillic_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), cyrillic_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, cyrillic_run.stdout, 1, "sample.txt:3:1:Ж"));
+
+    const hebrew_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Hebrew}+", root_path });
+    defer hebrew_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), hebrew_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, hebrew_run.stdout, 1, "sample.txt:4:1:א"));
 }
 
 test "runCli supports identifier-style derived Unicode properties" {

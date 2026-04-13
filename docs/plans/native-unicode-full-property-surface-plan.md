@@ -124,6 +124,8 @@ Script matching is still native-core work if implemented as table lookup over a
 
 - [x] Generate script tables from checked-in Unicode data instead of embedding
   them manually.
+  - current `Script` lookup is generated from `Scripts.txt`
+  - current `sc=` aliases are generated from `PropertyValueAliases.txt`
 
 - [x] Keep raw-byte semantics unchanged:
   - valid scalar => script lookup

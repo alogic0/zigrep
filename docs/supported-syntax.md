@@ -87,17 +87,14 @@ Current escape boundary:
   - `\p{XID_Start}` and `\P{XID_Start}`
   - `\p{XID_Continue}` and `\P{XID_Continue}`
   - `\p{Default_Ignorable_Code_Point}` and `\P{Default_Ignorable_Code_Point}`
-  - initial Script support is also available in these forms:
-    - `\p{Greek}`
-    - `\p{Script=Greek}`
-    - `\p{sc=Grek}`
-  - the current script set is:
-    - `Latin` / `Latn`
-    - `Greek` / `Grek`
-    - `Cyrillic` / `Cyrl`
-    - `Common` / `Zyyy`
-    - `Inherited` / `Zinh`
-    - `Unknown` / `Zzzz`
+  - Script support is also available in these forms:
+    - direct names like `\p{Greek}` and `\p{Hebrew}`
+    - qualified names like `\p{Script=Greek}`
+    - short aliases like `\p{sc=Grek}`
+  - script names and `sc=` aliases are generated from the pinned Unicode
+    `Scripts.txt` and `PropertyValueAliases.txt` data
+  - `Unknown` / `Zzzz` follows the script fallback behavior for unassigned,
+    private-use, and surrogate code points
   - the same property items may also appear inside bracket classes
     - for example `[\p{Letter}\P{Whitespace}]`
   - accepted aliases currently include:
