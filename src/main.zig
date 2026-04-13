@@ -2,6 +2,7 @@ const std = @import("std");
 const zigrep = @import("zigrep");
 const runner = zigrep.search_runner;
 const cli = zigrep.cli;
+const cli_test_support = @import("cli_test_support.zig");
 
 const CliError = cli.CliError;
 
@@ -155,35 +156,10 @@ fn writeFileReports(
     return runner.writeFileReports(allocator, writer, searcher, path, bytes, encoding, output, output_format, max_count);
 }
 
-const CapturedCliRun = struct {
-    exit_code: u8,
-    stdout: []u8,
-    stderr: []u8,
-
-    fn deinit(self: CapturedCliRun, allocator: std.mem.Allocator) void {
-        allocator.free(self.stdout);
-        allocator.free(self.stderr);
-    }
-};
+const CapturedCliRun = cli_test_support.CapturedCliRun;
 
 fn runCliCaptured(allocator: std.mem.Allocator, argv: []const []const u8) !CapturedCliRun {
-    var stdout_capture: std.Io.Writer.Allocating = .init(allocator);
-    defer stdout_capture.deinit();
-    var stderr_capture: std.Io.Writer.Allocating = .init(allocator);
-    defer stderr_capture.deinit();
-
-    const exit_code = try runCli(
-        allocator,
-        &stdout_capture.writer,
-        &stderr_capture.writer,
-        argv,
-    );
-
-    return .{
-        .exit_code = exit_code,
-        .stdout = try allocator.dupe(u8, stdout_capture.written()),
-        .stderr = try allocator.dupe(u8, stderr_capture.written()),
-    };
+    return cli_test_support.runCliCaptured(allocator, runCli, argv);
 }
 
 test "parseArgs defaults to current directory search" {
