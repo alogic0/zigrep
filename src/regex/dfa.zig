@@ -308,7 +308,7 @@ fn compileProgram(allocator: std.mem.Allocator, pattern: []const u8) !nfa.Progra
     const lowered = try regex.compile(allocator, pattern, .{});
     defer lowered.deinit(allocator);
 
-    return nfa.compile(allocator, lowered);
+    return nfa.compile(allocator, lowered, .{});
 }
 
 test "Lazy DFA matches non-capturing literals and alternation" {

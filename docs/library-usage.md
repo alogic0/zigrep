@@ -16,12 +16,160 @@ If you want to embed regex compilation and matching in your own Zig code, use
 
 ## Importing `zigrep`
 
+To make `@import("zigrep")` work, your project must add `zigrep` as a Zig
+module in its `build.zig`.
+
+Minimal example:
+
+```zig
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const zigrep_mod = b.addModule("zigrep", .{
+        .root_source_file = b.path("../zigrep/src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "demo",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    exe.root_module.addImport("zigrep", zigrep_mod);
+    b.installArtifact(exe);
+}
+```
+
+After that, your Zig source can import `zigrep` normally:
+
 At the top level:
 
 ```zig
 const std = @import("std");
 const zigrep = @import("zigrep");
 ```
+
+Practical note:
+
+- your build must define a module named `zigrep`
+- the most reliable setup today is to use `src/root.zig` as the module root
+- if you want dependency management instead of a raw path, package or vendor
+  `zigrep` and expose that same root module through your own build graph
+
+## Importing `zigrep` With `build.zig.zon`
+
+If you want to manage `zigrep` as a Zig dependency, add it in
+`build.zig.zon` and then expose its module from `build.zig`.
+
+Example `build.zig.zon` shape:
+
+```zig
+.{
+    .name = "demo",
+    .version = "0.0.0",
+    .dependencies = .{
+        .zigrep = .{
+            .path = "../zigrep",
+        },
+    },
+}
+```
+
+Then in `build.zig`:
+
+```zig
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const zigrep_dep = b.dependency("zigrep", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "demo",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    exe.root_module.addImport("zigrep", zigrep_dep.module("zigrep"));
+    b.installArtifact(exe);
+}
+```
+
+This gives you the same source-level usage:
+
+```zig
+const zigrep = @import("zigrep");
+```
+
+Practical note:
+
+- this assumes the `zigrep` package exposes a module named `zigrep`
+- if you vendor or rename the dependency, keep the imported module name as
+  `zigrep` on your side for the examples in this document
+- if the package layout changes later, the dependency wiring may need to be
+  adjusted even if the source-level API stays the same
+
+## Importing `zigrep` From The Git Repository
+
+With Zig 0.15.2, the simplest way to add the GitHub repository as a dependency
+is to let `zig fetch` update `build.zig.zon` for you:
+
+```bash
+zig fetch --save=zigrep git+https://github.com/alogic0/zigrep.git
+```
+
+That command:
+
+- downloads the package into Zig's global cache
+- computes the package hash
+- adds the dependency entry to `build.zig.zon`
+
+After that, wire the dependency into your `build.zig` the same way:
+
+```zig
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const zigrep_dep = b.dependency("zigrep", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "demo",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    exe.root_module.addImport("zigrep", zigrep_dep.module("zigrep"));
+    b.installArtifact(exe);
+}
+```
+
+Practical note:
+
+- `zig fetch --save` is better than hand-writing the hash because Zig computes
+  the correct dependency entry for you
+- if you want the dependency URL stored verbatim, Zig also supports
+  `zig fetch --save-exact=zigrep ...`
+- if you specifically need a branch, tag, or commit, fetch the exact Git URL
+  you want Zig to record before wiring it in `build.zig`
 
 ## Simplest Regex Match
 
@@ -34,24 +182,19 @@ const zigrep = @import("zigrep");
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
-    const hir = try zigrep.compile(allocator, "needle");
-    defer hir.deinit(allocator);
+    var re = try zigrep.regex.compileRe(allocator, "needle", .{});
+    defer re.deinit();
 
-    const program = try zigrep.regex.Nfa.compile(allocator, hir, .{});
-    defer program.deinit(allocator);
-
-    var engine = zigrep.regex.Vm.MatchEngine.init(allocator);
-
-    const matched = try engine.isMatch(program, "haystack with needle inside");
+    const matched = try re.isMatch("haystack with needle inside");
     std.debug.print("matched={}\n", .{matched});
 }
 ```
 
 What happens here:
 
-- `zigrep.compile(...)` parses and lowers the pattern to HIR
-- `zigrep.regex.Nfa.compile(...)` compiles the HIR to the executable regex program
-- `zigrep.regex.Vm.MatchEngine` runs the program on text
+- `zigrep.regex.compileRe(...)` parses the pattern, lowers it, compiles it,
+  and returns one reusable compiled regex object
+- `re.isMatch(...)` runs that compiled regex on text
 
 ## Getting The First Match Span
 
@@ -65,15 +208,10 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
     const haystack = "abc needle xyz";
 
-    const hir = try zigrep.compile(allocator, "needle");
-    defer hir.deinit(allocator);
+    var re = try zigrep.regex.compileRe(allocator, "needle", .{});
+    defer re.deinit();
 
-    const program = try zigrep.regex.Nfa.compile(allocator, hir, .{});
-    defer program.deinit(allocator);
-
-    var engine = zigrep.regex.Vm.MatchEngine.init(allocator);
-
-    const maybe_match = try engine.firstMatch(program, haystack);
+    const maybe_match = try re.firstMatch(haystack);
     if (maybe_match) |m| {
         defer m.deinit(allocator);
         std.debug.print("match start={?} end={?}\n", .{ m.span.start, m.span.end });
@@ -93,15 +231,14 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
     const haystack = "abc-123";
 
-    const hir = try zigrep.compile(allocator, "([a-z]+)-([0-9]+)");
-    defer hir.deinit(allocator);
+    var re = try zigrep.regex.compileRe(
+        allocator,
+        "([a-z][a-z][a-z])-([0-9][0-9][0-9])",
+        .{},
+    );
+    defer re.deinit();
 
-    const program = try zigrep.regex.Nfa.compile(allocator, hir, .{});
-    defer program.deinit(allocator);
-
-    var engine = zigrep.regex.Vm.MatchEngine.init(allocator);
-
-    const maybe_match = try engine.firstMatch(program, haystack);
+    const maybe_match = try re.firstMatch(haystack);
     if (maybe_match) |m| {
         defer m.deinit(allocator);
 
@@ -115,8 +252,8 @@ pub fn main() !void {
 
 ## Multiline Compilation
 
-If your pattern can match across newlines, pass multiline options to the NFA
-compiler:
+If your pattern can match across newlines, pass multiline options to
+`compileRe(...)`:
 
 ```zig
 const std = @import("std");
@@ -126,25 +263,16 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
     const haystack = "first line\nsecond line\n";
 
-    const hir = try zigrep.compile(allocator, "first.*second");
-    defer hir.deinit(allocator);
-
-    const program = try zigrep.regex.Nfa.compile(allocator, hir, .{
+    var re = try zigrep.regex.compileRe(allocator, "first.*second", .{
         .multiline = true,
         .multiline_dotall = true,
     });
-    defer program.deinit(allocator);
+    defer re.deinit();
 
-    var engine = zigrep.regex.Vm.MatchEngine.init(allocator);
-    const matched = try engine.isMatch(program, haystack);
+    const matched = try re.isMatch(haystack);
     std.debug.print("matched={}\n", .{matched});
 }
 ```
-
-Important detail:
-
-- `zigrep.compile(...)` is a convenience wrapper
-- multiline behavior is controlled at `zigrep.regex.Nfa.compile(...)`
 
 ## Unicode-Aware Matching
 
@@ -157,19 +285,31 @@ const zigrep = @import("zigrep");
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
-    const hir = try zigrep.compile(allocator, "\\p{Greek}+\\d");
-    defer hir.deinit(allocator);
-
-    const program = try zigrep.regex.Nfa.compile(allocator, hir, .{});
-    defer program.deinit(allocator);
-
-    var engine = zigrep.regex.Vm.MatchEngine.init(allocator);
+    var re = try zigrep.regex.compileRe(allocator, "\\p{Greek}+\\d", .{});
+    defer re.deinit();
 
     try std.debug.print("{}\n", .{
-        try engine.isMatch(program, "αβγ1"),
+        try re.isMatch("αβγ1"),
     });
 }
 ```
+
+## Lower-Level Pipeline
+
+If you need direct access to the engine pipeline, the lower-level path is still
+available:
+
+- `zigrep.compile(...)` for HIR lowering
+- `zigrep.regex.Nfa.compile(...)` for executable program compilation
+- `zigrep.regex.Vm.MatchEngine` for direct execution
+
+That path is useful if you specifically need to work with:
+
+- HIR values
+- executable programs
+- direct VM usage
+
+But it is no longer the recommended first example for ordinary embedding.
 
 ## When To Use `search_runner`
 
@@ -206,8 +346,11 @@ Current intended stability:
 
 So if you are embedding the regex engine in another program, prefer:
 
-- `zigrep.regex`
-- or the top-level convenience wrapper `zigrep.compile(...)`
+- `zigrep.regex.compileRe(...)`
+- and the `Compiled` wrapper methods like:
+  - `isMatch(...)`
+  - `firstMatch(...)`
+  - `firstMatchBytes(...)`
 
 and avoid building new code on top of:
 

@@ -70,23 +70,43 @@ Phase 2 result:
 
 ## Phase 3: Search API Decision
 
-- [ ] decide whether `search_runner` is intended to be a stable public entrypoint
-- [ ] if yes, document that API boundary explicitly
-- [ ] if no, define the narrower app-facing wrapper that should exist instead
-- [ ] do not move code unless the new ownership model is clearly better than
-  the current one
+- [x] decide whether `search_runner` is intended to be a stable public entrypoint
+- [x] treat `search_runner.runSearch(...)` as the intentional app-facing search
+  execution entrypoint for now
+- [x] document that API boundary explicitly
+- [x] decide not to add another wrapper because the current call surface is
+  already narrow and additional indirection would not improve ownership
+
+Phase 3 result:
+
+- `search_runner.runSearch(...)` is the current deliberate app-facing search
+  execution entrypoint
+- the known direct callers are narrow:
+  - `src/bench.zig`
+  - `src/search_runner_tests.zig`
+- no narrower wrapper is justified in this plan
 
 ## Phase 4: Bench And Tooling Boundary Review
 
-- [ ] inspect which root exports are still justified mainly by bench or tooling
-- [ ] decide whether bench should depend on a narrower internal execution
+- [x] inspect which root exports are still justified mainly by bench or tooling
+- [x] decide whether bench should depend on a narrower internal execution
   entrypoint
-- [ ] remove convenience-only exports if there is a small, low-risk wiring fix
-- [ ] otherwise document the remaining deliberate exceptions explicitly
+- [x] decide not to add a narrower bench-only execution entrypoint in this
+  plan, because bench intentionally measures the current app-facing
+  `search_runner.runSearch(...)` path for output-oriented cases
+- [x] document the remaining deliberate exceptions explicitly
+
+Phase 4 result:
+
+- `src/bench.zig` intentionally uses:
+  - `zigrep.search_runner.runSearch(...)` for output-path measurement
+  - `zigrep.search` and `zigrep.regex` for lower-level engine and corpus cases
+- no small, low-risk export cleanup is justified here
+- the remaining root-surface pressure from bench is deliberate, not accidental
 
 ## Phase 5: Root API Review
 
-- [ ] review the remaining exported modules in `src/root.zig`:
+- [x] review the remaining exported modules in `src/root.zig`:
   - `regex`
   - `search`
   - `search_runner`
@@ -94,23 +114,53 @@ Phase 2 result:
   - `command`
   - `cli`
   - `config`
-- [ ] decide which are intentional library surface and which are only current
+- [x] decide which are intentional library surface and which are only current
   app/tooling conveniences
-- [ ] document the intended root API policy
+- [x] document the intended root API policy
+
+Phase 5 result:
+
+- intentional root API surface:
+  - `regex`
+  - `search`
+  - `search_runner`
+  - `search_reporting`
+  - `command`
+  - `cli`
+  - `config`
+  - `app_version`
+- current intended meaning:
+  - `regex` and `search` are low-level library-facing surfaces
+  - `search_runner.runSearch(...)` is the app-facing search execution entrypoint
+  - `search_reporting` remains exposed for the current runner/report test and
+    tooling surface
+  - `command`, `cli`, and `config` are app-facing support modules rather than
+    generic stable library abstractions
+- no further narrowing is justified in this plan without a broader product-level
+  API decision
 
 ## Validation
 
-- [ ] Run:
+- [x] Run:
   - `zig build test`
   - `zig build bench-smoke`
 
+## Outcome
+
+- the remaining test and bench pressure on the root surface is now explicit
+- `search_runner.runSearch(...)` is treated as the deliberate app-facing search
+  execution entrypoint
+- `search_reporting` remains an unstable compatibility/tooling surface
+- no further narrowing is justified in this plan without a broader product-level
+  API change or a build-graph change
+
 ## Recommended Order
 
-- [ ] 1. Audit the current test dependence on root exports
-- [ ] 2. Remove the low-risk convenience-only test dependencies
-- [ ] 3. Decide whether `search_runner` is a public API or an internal surface
-- [ ] 4. Review bench/tooling-driven export pressure
-- [ ] 5. Document the intended root API policy
+- [x] 1. Audit the current test dependence on root exports
+- [x] 2. Remove the low-risk convenience-only test dependencies
+- [x] 3. Decide whether `search_runner` is a public API or an internal surface
+- [x] 4. Review bench/tooling-driven export pressure
+- [x] 5. Document the intended root API policy
 
 ## Explicit Non-Goals
 
