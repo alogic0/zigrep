@@ -2047,7 +2047,8 @@ test "Searcher handles shorthand character classes in UTF-8 and raw-byte paths" 
     var digit = try Searcher.init(testing.allocator, "a\\db", .{});
     defer digit.deinit();
     try testing.expect((try digit.reportFirstMatch("sample.txt", "xa5by")) != null);
-    try testing.expect((try digit.reportFirstMatch("sample.txt", "xa字by")) == null);
+    try testing.expect((try digit.reportFirstMatch("sample.txt", "xa١by")) != null);
+    try testing.expect((try digit.reportFirstMatch("sample.txt", "xa²by")) == null);
 
     var not_digit = try Searcher.init(testing.allocator, "a\\Db", .{});
     defer not_digit.deinit();
@@ -2061,6 +2062,10 @@ test "Searcher handles shorthand character classes in UTF-8 and raw-byte paths" 
     var space = try Searcher.init(testing.allocator, "\\s+", .{ .multiline = true });
     defer space.deinit();
     try testing.expect((try space.reportFirstMatch("sample.txt", "a \t\nb")) != null);
+
+    var single_line_space = try Searcher.init(testing.allocator, "foo\\sbar", .{});
+    defer single_line_space.deinit();
+    try testing.expect((try single_line_space.reportFirstMatch("sample.txt", "foo\nbar")) == null);
 }
 
 test "Searcher handles word boundaries in UTF-8 and raw-byte paths" {

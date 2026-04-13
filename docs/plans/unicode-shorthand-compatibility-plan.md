@@ -117,16 +117,16 @@ The raw-byte behavior remains explicit:
 
 ## Phase 3: Unicode-Aware `\d` And `\s`
 
-- [ ] Change shorthand class lowering so `\d` / `\D` use Unicode decimal-digit
+- [x] Change shorthand class lowering so `\d` / `\D` use Unicode decimal-digit
   semantics
 
-- [ ] Change shorthand class lowering so `\s` / `\S` use Unicode whitespace
+- [x] Change shorthand class lowering so `\s` / `\S` use Unicode whitespace
   semantics
 
-- [ ] Preserve the normal non-multiline boundary:
+- [x] Preserve the normal non-multiline boundary:
   - `\s` must not make a default search match through `\n`
 
-- [ ] Add search-layer and CLI regressions for:
+- [x] Add search-layer and CLI regressions for:
   - non-ASCII digits
   - non-ASCII whitespace
   - non-breaking space

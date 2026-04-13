@@ -211,7 +211,7 @@ pub const MatchEngine = struct {
                 return self.addThread(program, haystack, list, visited, class.out.?, thread.slots, next_pos);
             },
             .unicode_property => |property| {
-                const matched = unicode.Strategy.hasProperty(cp, property.property);
+                const matched = unicodePropertyMatches(program, property.property, cp);
                 if (property.negated == matched) return null;
                 return self.addThread(program, haystack, list, visited, property.out.?, thread.slots, next_pos);
             },
@@ -242,7 +242,7 @@ pub const MatchEngine = struct {
                 return self.addThread(program, haystack, list, visited, class.out.?, thread.slots, unit.end);
             },
             .unicode_property => |property| {
-                if (!textUnitMatchesUnicodeProperty(property.property, property.negated, unit)) return null;
+                if (!textUnitMatchesUnicodeProperty(property.property, property.negated, unit, program)) return null;
                 return self.addThread(program, haystack, list, visited, property.out.?, thread.slots, unit.end);
             },
             .any => |any| {
@@ -298,11 +298,8 @@ pub const MatchEngine = struct {
                 if (wordBoundaryAt(haystack, pos)) return null;
                 return self.addThread(program, haystack, list, visited, boundary.out.?, slots, pos);
             },
-            .unicode_property => |property| {
-                return self.addThread(program, haystack, list, visited, property.out.?, slots, pos);
-            },
             .match => return try self.buildMatch(program, slots),
-            .literal, .char_class, .any => {
+            .literal, .char_class, .unicode_property, .any => {
                 if (!hasThread(list.items, inst_ptr)) {
                     try list.append(self.allocator, .{
                         .inst_ptr = inst_ptr,
@@ -401,12 +398,17 @@ fn textUnitMatchesClass(class: anytype, unit: TextUnit) bool {
     return classMatches(class, unit.scalar.?);
 }
 
-fn textUnitMatchesUnicodeProperty(property: unicode.Property, negated: bool, unit: TextUnit) bool {
+fn textUnitMatchesUnicodeProperty(property: unicode.Property, negated: bool, unit: TextUnit, program: nfa.Program) bool {
     if (unit.scalar) |cp| {
-        const matched = unicode.Strategy.hasProperty(cp, property);
+        const matched = unicodePropertyMatches(program, property, cp);
         return if (negated) !matched else matched;
     }
     return negated;
+}
+
+fn unicodePropertyMatches(program: nfa.Program, property: unicode.Property, cp: u32) bool {
+    if (property == .shorthand_whitespace and cp == '\n' and !program.can_match_newline) return false;
+    return unicode.Strategy.hasProperty(cp, property);
 }
 
 fn isAsciiClass(class: anytype) bool {
@@ -706,26 +708,27 @@ test "VM handles negated classes and class edge literals" {
     try expectMatch("[]-^]+", "]^-");
 }
 
-test "VM handles shorthand character classes with ASCII semantics" {
+test "VM handles Unicode digit and whitespace shorthands" {
     try expectMatch("a\\db", "a5b");
-    try expectNoMatch("a\\db", "a字b");
+    try expectMatch("a\\db", "a١b");
+    try expectNoMatch("a\\db", "a²b");
     try expectMatch("a\\Db", "a字b");
-    try expectMatch("\\w+", "word_123");
-    try expectNoMatch("\\w+", "!!!");
     try expectMatch("\\s+", " \t");
+    try expectMatch("\\s+", "\xC2\xA0");
     try expectNoMatch("\\s+", "abc");
 }
 
 test "VM shorthand space class follows multiline newline semantics" {
     const testing = std.testing;
 
-    const no_multiline = compileProgram(testing.allocator, "\\s+", .{});
-    try testing.expectError(error.MultilineRequired, no_multiline);
+    const no_multiline = try compileProgram(testing.allocator, "\\s+", .{});
+    defer no_multiline.deinit(testing.allocator);
 
     const multiline = try compileProgram(testing.allocator, "\\s+", .{ .multiline = true });
     defer multiline.deinit(testing.allocator);
 
     var engine = MatchEngine.init(testing.allocator);
+    try testing.expect(!(try engine.isMatch(no_multiline, "\t \n")));
     try testing.expect(try engine.isMatch(multiline, "\t \n"));
 }
 

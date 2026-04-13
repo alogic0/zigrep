@@ -5684,7 +5684,7 @@ test "runCli default mode uses the general raw-byte VM when no planner path exis
     try testing.expectEqualStrings("", run.stderr);
 }
 
-test "runCli supports shorthand character classes with ASCII semantics" {
+test "runCli supports mixed shorthand compatibility semantics" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -5694,9 +5694,11 @@ test "runCli supports shorthand character classes with ASCII semantics" {
         .sub_path = "sample.txt",
         .data =
             "a5b\n" ++
-            "a字b\n" ++
+            "a١b\n" ++
+            "a²b\n" ++
             "word_123\n" ++
-            " \t\n",
+            " \t\n" ++
+            "foo\xC2\xA0bar\n",
     });
     try tmp.dir.writeFile(.{
         .sub_path = "space.txt",
@@ -5710,17 +5712,20 @@ test "runCli supports shorthand character classes with ASCII semantics" {
     defer digit_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), digit_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:1:1:a5b"));
-    try testing.expect(!std.mem.containsAtLeast(u8, digit_run.stdout, 1, "a字b"));
+    try testing.expect(std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:2:1:a١b"));
+    try testing.expect(!std.mem.containsAtLeast(u8, digit_run.stdout, 1, "a²b"));
 
     const word_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\w+", root_path });
     defer word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), word_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:1:1:a5b"));
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:3:1:word_123"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:4:1:word_123"));
 
     const space_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "\\s+", root_path });
     defer space_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), space_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, space_run.stdout, 1, "sample.txt:1:4:a5b"));
+    try testing.expect(std.mem.containsAtLeast(u8, space_run.stdout, 1, "foo\xC2\xA0bar"));
     try testing.expect(std.mem.containsAtLeast(u8, space_run.stdout, 1, "space.txt:1:1: \t"));
 }
 
@@ -6211,6 +6216,37 @@ test "runCli supports Emoji Unicode properties" {
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:😀"));
+}
+
+test "runCli uses Unicode digit and whitespace shorthand semantics" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "a١b\n" ++
+            "a²b\n" ++
+            "foo\xC2\xA0bar\n" ++
+            "foo\nbar\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const digit_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a\\db", root_path });
+    defer digit_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), digit_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:1:1:a١b"));
+    try testing.expect(!std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:2:1:a²b"));
+
+    const whitespace_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "foo\\sbar", root_path });
+    defer whitespace_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), whitespace_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, whitespace_run.stdout, 1, "sample.txt:3:1:foo\xC2\xA0bar"));
+    try testing.expect(!std.mem.containsAtLeast(u8, whitespace_run.stdout, 1, "sample.txt:4:1:foo"));
 }
 
 test "runCli rejects invalid Unicode escapes" {
@@ -6708,6 +6744,73 @@ test "reportFileMatch uses the raw-byte matcher when the planner does not cover 
     defer report.deinit(testing.allocator);
     try testing.expect(report.owned_line == null);
     try testing.expectEqualStrings("aby\xff", report.line);
+}
+
+test "reportFileMatch supports Unicode digit shorthand on full file contents" {
+    const testing = std.testing;
+
+    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "a\\db", .{});
+    defer searcher.deinit();
+
+    const report = (try reportFileMatch(
+        testing.allocator,
+        &searcher,
+        "sample.txt",
+        "a5b\na١b\na²b\n",
+        .auto,
+    )).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("a5b", report.line);
+    try testing.expectEqual(@as(usize, 1), report.line_number);
+}
+
+test "writeFileReports supports Unicode digit shorthand on full file contents" {
+    const testing = std.testing;
+
+    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "a\\db", .{});
+    defer searcher.deinit();
+
+    var capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer capture.deinit();
+
+    const matched = try writeFileReports(
+        testing.allocator,
+        &capture.writer,
+        &searcher,
+        "sample.txt",
+        "a5b\na١b\na²b\n",
+        .auto,
+        .{},
+        .text,
+        null,
+    );
+
+    try testing.expect(matched);
+    try testing.expectEqualStrings(
+        "sample.txt:1:1:a5b\n" ++
+            "sample.txt:2:1:a١b\n",
+        capture.written(),
+    );
+}
+
+test "reportFileMatch supports Unicode decimal property inside concatenation" {
+    const testing = std.testing;
+
+    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "a\\p{Decimal_Number}b", .{});
+    defer searcher.deinit();
+
+    const report = (try reportFileMatch(
+        testing.allocator,
+        &searcher,
+        "sample.txt",
+        "a5b\na١b\na²b\n",
+        .auto,
+    )).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("a5b", report.line);
+    try testing.expectEqual(@as(usize, 1), report.line_number);
 }
 
 test "runCli output toggles apply across the end-to-end path" {

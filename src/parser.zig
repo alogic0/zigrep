@@ -260,11 +260,17 @@ pub const Parser = struct {
             },
             .digit_class => {
                 try self.advance();
-                return self.push(.{ .char_class = try asciiDigitClass(self.allocator, false) });
+                return self.push(.{ .unicode_property = .{
+                    .property = .decimal_number,
+                    .negated = false,
+                } });
             },
             .not_digit_class => {
                 try self.advance();
-                return self.push(.{ .char_class = try asciiDigitClass(self.allocator, true) });
+                return self.push(.{ .unicode_property = .{
+                    .property = .decimal_number,
+                    .negated = true,
+                } });
             },
             .word_class => {
                 try self.advance();
@@ -276,11 +282,17 @@ pub const Parser = struct {
             },
             .space_class => {
                 try self.advance();
-                return self.push(.{ .char_class = try asciiSpaceClass(self.allocator, false) });
+                return self.push(.{ .unicode_property = .{
+                    .property = .shorthand_whitespace,
+                    .negated = false,
+                } });
             },
             .not_space_class => {
                 try self.advance();
-                return self.push(.{ .char_class = try asciiSpaceClass(self.allocator, true) });
+                return self.push(.{ .unicode_property = .{
+                    .property = .shorthand_whitespace,
+                    .negated = true,
+                } });
             },
             .comma => {
                 try self.advance();
@@ -452,29 +464,12 @@ pub const Parser = struct {
         };
     }
 
-    fn asciiDigitClass(allocator: std.mem.Allocator, negated: bool) !CharacterClass {
-        const items = try allocator.alloc(ClassItem, 1);
-        items[0] = .{ .range = .{ .start = '0', .end = '9' } };
-        return .{ .negated = negated, .items = items };
-    }
-
     fn asciiWordClass(allocator: std.mem.Allocator, negated: bool) !CharacterClass {
         const items = try allocator.alloc(ClassItem, 4);
         items[0] = .{ .range = .{ .start = 'A', .end = 'Z' } };
         items[1] = .{ .range = .{ .start = 'a', .end = 'z' } };
         items[2] = .{ .range = .{ .start = '0', .end = '9' } };
         items[3] = .{ .literal = '_' };
-        return .{ .negated = negated, .items = items };
-    }
-
-    fn asciiSpaceClass(allocator: std.mem.Allocator, negated: bool) !CharacterClass {
-        const items = try allocator.alloc(ClassItem, 6);
-        items[0] = .{ .literal = ' ' };
-        items[1] = .{ .literal = '\t' };
-        items[2] = .{ .literal = '\n' };
-        items[3] = .{ .literal = '\r' };
-        items[4] = .{ .literal = 0x0b };
-        items[5] = .{ .literal = 0x0c };
         return .{ .negated = negated, .items = items };
     }
 
@@ -731,13 +726,15 @@ test "Parser lowers shorthand character classes to ASCII classes" {
     const root = ast.nodes[@intFromEnum(ast.root)].concat;
     try testing.expectEqual(@as(usize, 6), root.len);
 
-    const digit = ast.nodes[@intFromEnum(root[0])].char_class;
-    try testing.expect(!digit.negated);
-    try testing.expectEqual(@as(usize, 1), digit.items.len);
-    try testing.expectEqualDeep(ClassItem{ .range = .{ .start = '0', .end = '9' } }, digit.items[0]);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .decimal_number,
+        .negated = false,
+    } }, ast.nodes[@intFromEnum(root[0])]);
 
-    const not_digit = ast.nodes[@intFromEnum(root[1])].char_class;
-    try testing.expect(not_digit.negated);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .decimal_number,
+        .negated = true,
+    } }, ast.nodes[@intFromEnum(root[1])]);
 
     const word = ast.nodes[@intFromEnum(root[2])].char_class;
     try testing.expect(!word.negated);
@@ -746,12 +743,15 @@ test "Parser lowers shorthand character classes to ASCII classes" {
     const not_word = ast.nodes[@intFromEnum(root[3])].char_class;
     try testing.expect(not_word.negated);
 
-    const space = ast.nodes[@intFromEnum(root[4])].char_class;
-    try testing.expect(!space.negated);
-    try testing.expectEqual(@as(usize, 6), space.items.len);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .shorthand_whitespace,
+        .negated = false,
+    } }, ast.nodes[@intFromEnum(root[4])]);
 
-    const not_space = ast.nodes[@intFromEnum(root[5])].char_class;
-    try testing.expect(not_space.negated);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .shorthand_whitespace,
+        .negated = true,
+    } }, ast.nodes[@intFromEnum(root[5])]);
 }
 
 test "Parser supports word boundary escapes" {
@@ -800,6 +800,33 @@ test "Parser supports Unicode property escapes" {
         .property = .number,
         .negated = true,
     } }, ast.nodes[@intFromEnum(root[1])]);
+}
+
+test "Parser lowers digit and space shorthands to Unicode property nodes" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "\\d\\D\\s\\S");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 4), root.len);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .decimal_number,
+        .negated = false,
+    } }, ast.nodes[@intFromEnum(root[0])]);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .decimal_number,
+        .negated = true,
+    } }, ast.nodes[@intFromEnum(root[1])]);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .shorthand_whitespace,
+        .negated = false,
+    } }, ast.nodes[@intFromEnum(root[2])]);
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .shorthand_whitespace,
+        .negated = true,
+    } }, ast.nodes[@intFromEnum(root[3])]);
 }
 
 test "Parser supports Unicode property items inside character classes" {

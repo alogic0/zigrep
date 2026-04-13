@@ -97,10 +97,10 @@ const Fragment = struct {
 };
 
 pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options: CompileOptions) CompileError!Program {
-    if (!options.multiline and hirCanMatchNewline(compiled_hir, compiled_hir.root, options.multiline_dotall)) {
+    if (!options.multiline and hirCanMatchNewline(compiled_hir, compiled_hir.root, options.multiline, options.multiline_dotall)) {
         return error.MultilineRequired;
     }
-    const can_match_newline = hirCanMatchNewline(compiled_hir, compiled_hir.root, options.multiline_dotall);
+    const can_match_newline = hirCanMatchNewline(compiled_hir, compiled_hir.root, options.multiline, options.multiline_dotall);
 
     var compiler = Compiler{
         .allocator = allocator,
@@ -136,45 +136,52 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options:
     };
 }
 
-fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, dotall: bool) bool {
+fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, multiline: bool, dotall: bool) bool {
     return switch (compiled_hir.nodes[@intFromEnum(node_id)]) {
         .empty, .anchor_start, .anchor_end, .word_boundary, .not_word_boundary => false,
-        .unicode_property => |property| !property.negated and property.property == .whitespace,
+        .unicode_property => |property| !property.negated and switch (property.property) {
+            .whitespace => true,
+            .shorthand_whitespace => multiline,
+            else => false,
+        },
         .literal => |cp| cp == '\n',
         .dot => dotall,
-        .char_class => |class| classCanMatchNewline(class),
-        .group => |group| hirCanMatchNewline(compiled_hir, group.child, dotall),
+        .char_class => |class| classCanMatchNewline(class, multiline),
+        .group => |group| hirCanMatchNewline(compiled_hir, group.child, multiline, dotall),
         .concat => |children| blk: {
             for (children) |child| {
-                if (hirCanMatchNewline(compiled_hir, child, dotall)) break :blk true;
+                if (hirCanMatchNewline(compiled_hir, child, multiline, dotall)) break :blk true;
             }
             break :blk false;
         },
         .alternation => |branches| blk: {
             for (branches) |branch| {
-                if (hirCanMatchNewline(compiled_hir, branch, dotall)) break :blk true;
+                if (hirCanMatchNewline(compiled_hir, branch, multiline, dotall)) break :blk true;
             }
             break :blk false;
         },
         .repetition => |rep| {
             const can_repeat = rep.quantifier.max == null or rep.quantifier.max.? > 0;
-            return can_repeat and hirCanMatchNewline(compiled_hir, rep.child, dotall);
+            return can_repeat and hirCanMatchNewline(compiled_hir, rep.child, multiline, dotall);
         },
     };
 }
 
-fn classCanMatchNewline(class: hir_mod.CharacterClass) bool {
+fn classCanMatchNewline(class: hir_mod.CharacterClass, multiline: bool) bool {
     if (class.negated) return false;
-    return classContainsCodePoint(class.items, '\n');
+    return classContainsCodePoint(class.items, '\n', multiline);
 }
 
-fn classContainsCodePoint(items: []const hir_mod.ClassItem, cp: u32) bool {
+fn classContainsCodePoint(items: []const hir_mod.ClassItem, cp: u32, multiline: bool) bool {
     for (items) |item| {
         switch (item) {
             .literal => |literal| if (literal == cp) return true,
             .range => |range| if (range.start <= cp and cp <= range.end) return true,
             .unicode_property => |property| {
-                const matched = unicode.Strategy.hasProperty(cp, property.property);
+                const matched = if (property.property == .shorthand_whitespace and cp == '\n' and !multiline)
+                    false
+                else
+                    unicode.Strategy.hasProperty(cp, property.property);
                 if (property.negated != matched) return true;
             },
         }
