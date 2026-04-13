@@ -1,6 +1,7 @@
 const std = @import("std");
 const config = @import("config.zig");
 const build_options = @import("build_options");
+const command = @import("command.zig");
 const search = @import("search/root.zig");
 const runner = @import("search_runner.zig");
 
@@ -14,11 +15,11 @@ pub const CliError = error{
     InvalidTypeAddSpec,
 };
 
-pub const OutputOptions = runner.OutputOptions;
-pub const OutputFormat = runner.OutputFormat;
-pub const BinaryMode = runner.BinaryMode;
-pub const ReportMode = runner.ReportMode;
-pub const CliOptions = runner.CliOptions;
+pub const OutputOptions = command.OutputOptions;
+pub const OutputFormat = command.OutputFormat;
+pub const BinaryMode = command.BinaryMode;
+pub const ReportMode = command.ReportMode;
+pub const CliOptions = command.CliOptions;
 pub const app_version = build_options.app_version;
 
 pub const ParseResult = union(enum) {

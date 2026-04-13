@@ -1,16 +1,17 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
+const command = zigrep.command;
 const runner = zigrep.search_runner;
 const cli = zigrep.cli;
 const cli_test_support = @import("cli_test_support.zig");
 
 const CliError = cli.CliError;
 
-pub const OutputOptions = runner.OutputOptions;
-const OutputFormat = runner.OutputFormat;
-const BinaryMode = runner.BinaryMode;
-const ReportMode = runner.ReportMode;
-pub const CliOptions = runner.CliOptions;
+pub const OutputOptions = command.OutputOptions;
+const OutputFormat = command.OutputFormat;
+const BinaryMode = command.BinaryMode;
+const ReportMode = command.ReportMode;
+pub const CliOptions = command.CliOptions;
 const SearchStats = runner.SearchStats;
 const SearchResult = runner.SearchResult;
 const ParseResult = cli.ParseResult;

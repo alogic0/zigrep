@@ -5,6 +5,7 @@ const build_options = @import("build_options");
 pub const regex = regex_mod;
 pub const search = @import("search/root.zig");
 pub const search_runner = @import("search_runner.zig");
+pub const command = @import("command.zig");
 pub const cli = @import("cli.zig");
 pub const config = @import("config.zig");
 pub const app_version = build_options.app_version;
