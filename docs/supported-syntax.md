@@ -298,10 +298,15 @@ Case-mode note:
 - under `-i`, case-related Unicode properties such as `Lowercase`,
   `Uppercase`, and `Titlecase_Letter` are folded through the same simple
   case-fold closure in both top-level `\p{...}` atoms and bracket classes
-- smart-case uppercase detection is Unicode-aware and treats `Uppercase` and
-  `Titlecase_Letter` code points as case-sensitive triggers
+- smart-case uppercase detection is Unicode-aware and currently treats
+  `Uppercase` code points as case-sensitive triggers
+- titlecase characters do not force smart-case sensitivity; they stay on the
+  ignore-case path, matching the current observed ripgrep behavior
 - case-folded patterns currently stay off the raw-byte planner and use the
   general VM path
+- broad case-insensitive class ranges are still explicitly rejected when the
+  rewrite would exceed the current bounded expansion model, for example a range
+  like `[\u{0000}-\u{10FFFF}]` under `-i`
 - if a case-insensitive character class range is too large to rewrite safely, `zigrep` fails explicitly instead of silently under-matching
 
 Current `--text` note:

@@ -329,8 +329,7 @@ fn patternHasUppercase(pattern: []const u8) bool {
 }
 
 fn isUppercaseCodePoint(cp: u32) bool {
-    return regex.unicode.Strategy.hasProperty(cp, .uppercase) or
-        regex.unicode.Strategy.hasProperty(cp, .titlecase_letter);
+    return regex.unicode.Strategy.hasProperty(cp, .uppercase);
 }
 
 pub fn reportFirstMatch(
@@ -1767,16 +1766,18 @@ test "reportFirstMatch smart-case keeps uppercase Unicode patterns case-sensitiv
     try testing.expectEqualStrings("ЖАР", report.line);
 }
 
-test "reportFirstMatch smart-case treats titlecase patterns as case-sensitive" {
+test "reportFirstMatch smart-case uses ignore-case for titlecase patterns" {
     const testing = std.testing;
 
-    try testing.expect((try reportFirstMatch(
+    const report = (try reportFirstMatch(
         testing.allocator,
         "ǅar",
         "sample.txt",
         "ǆar",
         .{ .case_mode = .smart },
-    )) == null);
+    )).?;
+    defer report.deinit(testing.allocator);
+    try testing.expectEqualStrings("ǆar", report.line);
 }
 
 test "reportFirstMatch rejects oversized case-insensitive ranges" {
@@ -1785,6 +1786,14 @@ test "reportFirstMatch rejects oversized case-insensitive ranges" {
     try testing.expectError(error.UnsupportedCaseInsensitivePattern, reportFirstMatch(
         testing.allocator,
         "[\u{0100}-\u{2000}]",
+        "sample.txt",
+        "abc",
+        .{ .case_mode = .insensitive },
+    ));
+
+    try testing.expectError(error.UnsupportedCaseInsensitivePattern, reportFirstMatch(
+        testing.allocator,
+        "[\u{0000}-\u{10FFFF}]",
         "sample.txt",
         "abc",
         .{ .case_mode = .insensitive },

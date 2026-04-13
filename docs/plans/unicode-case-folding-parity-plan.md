@@ -90,12 +90,14 @@ Non-goal for this plan:
   - simple case folding only
   - no locale-sensitive behavior
 
-- [ ] Document the current explicit-failure boundary:
+- [x] Document the current explicit-failure boundary:
   - broad folded ranges may still fail
   - failure is preferable to silent under-matching
   - current result: folded Unicode literals and literal-class members now use
     generated simple case-fold data, but broad folded ranges still keep the
     explicit rejection boundary
+  - current result: the boundary is now pinned by direct search-layer and CLI
+    regressions, including a whole-Unicode range example
 
 ## Phase 2: Review Existing Folding Coverage
 
@@ -120,14 +122,14 @@ Non-goal for this plan:
 
 ## Phase 3: Unicode Literal And Class Parity
 
-- [ ] Expand tests for Unicode literal folding under `-i`
+- [x] Expand tests for Unicode literal folding under `-i`
   - Greek sigma family
   - accented Latin letters
   - non-ASCII lowercase and uppercase pairs
   - current result: representative sigma and accented-latin literal regressions
     are now covered in the search layer and CLI
 
-- [ ] Expand tests for class folding under `-i`
+- [x] Expand tests for class folding under `-i`
   - mixed ASCII and Unicode classes
   - Unicode literals inside bracket classes
   - property-containing classes under ignore-case
@@ -136,10 +138,12 @@ Non-goal for this plan:
     `Lowercase`, `Uppercase`, and `Titlecase_Letter` now fold under `-i` in
     both top-level property atoms and bracket classes
 
-- [ ] Tighten the behavior of explicit rejection cases so they are:
+- [x] Tighten the behavior of explicit rejection cases so they are:
   - deterministic
   - documented
   - covered by regressions
+  - current result: explicit rejection is now covered for oversized Unicode
+    case-insensitive ranges; broader boundary re-evaluation is still open
 
 ## Phase 4: Smart-Case Unicode Behavior
 
@@ -148,6 +152,8 @@ Non-goal for this plan:
   - Cyrillic
   - titlecase characters
   - edge cases where uppercase detection should keep smart-case sensitive
+  - current result: smart-case sensitivity now follows `Uppercase` only;
+    titlecase characters no longer force case-sensitive search
 
 - [x] Add end-to-end CLI regressions for:
   - lowercase non-ASCII patterns under `--smart-case`
@@ -155,13 +161,18 @@ Non-goal for this plan:
 
 ## Phase 5: Range And Blow-Up Boundary
 
-- [ ] Review the current `max_case_folded_range_size` boundary in
+- [x] Review the current `max_case_folded_range_size` boundary in
   [src/regex/hir.zig](../../src/regex/hir.zig)
+  - current result: the existing bounded expansion limit still stands; the
+    whole-Unicode range regression is now the pinned example of the current
+    rejection boundary
 
-- [ ] Decide whether current rejection behavior is still the right boundary or
+- [x] Decide whether current rejection behavior is still the right boundary or
   whether small targeted improvements are justified
+  - current result: keep the current explicit rejection behavior for now and
+    defer any relaxation to a separate focused follow-up
 
-- [ ] Keep the core rule explicit:
+- [x] Keep the core rule explicit:
   - do not silently under-match
   - either rewrite correctly or reject explicitly
 
@@ -172,7 +183,7 @@ Non-goal for this plan:
   - smart-case behavior on Unicode patterns
   - explicit rejection for unsupported broad folded range rewrites
 
-- [ ] Add migration notes only if visible behavior changes from the current
+- [x] Add migration notes only if visible behavior changes from the current
   release
 
 ## Phase 7: Validation
@@ -182,11 +193,16 @@ Non-goal for this plan:
 
 - [x] Add end-to-end CLI regressions for multilingual case-insensitive search
 
-- [ ] Compare a focused matrix against local `ripgrep` behavior for:
+- [x] Compare a focused matrix against local `ripgrep` behavior for:
   - literals
   - classes
   - smart-case
   - explicit rejection boundaries
+  - current result: literals, classes, case-related property folding, and
+    smart-case titlecase behavior now match the checked local `ripgrep`
+    samples; the deliberate remaining divergence is broad folded ranges like
+    `[\u{0000}-\u{10FFFF}]` under `-i`, which `ripgrep` accepts and `zigrep`
+    still rejects explicitly
 
 ## Recommended Order
 
@@ -194,8 +210,28 @@ Non-goal for this plan:
 - [x] 2. Audit the current rewrite and smart-case implementation
 - [x] 3. Expand Unicode literal and class folding coverage
 - [x] 4. Fix smart-case Unicode edge cases
-- [ ] 5. Re-evaluate the broad-range rejection boundary
-- [ ] 6. Update docs and finalize validation against ripgrep
+- [x] 5. Re-evaluate the broad-range rejection boundary
+- [x] 6. Update docs and finalize validation against ripgrep
+
+## Status
+
+This plan is complete.
+
+Implemented outcome:
+
+- generated simple case-fold data now backs Unicode-aware literal and class
+  folding under `-i`
+- case-related Unicode properties fold under `-i`
+- smart-case uses Unicode-aware uppercase detection and treats titlecase
+  patterns as ignore-case, matching the checked local `ripgrep` behavior
+- broad folded ranges still keep the explicit native-core rejection boundary
+
+Remaining divergence from local `ripgrep`:
+
+- `ripgrep` accepts broad folded ranges such as `[\u{0000}-\u{10FFFF}]` under
+  `-i`
+- `zigrep` still rejects those patterns explicitly with
+  `UnsupportedCaseInsensitivePattern`
 
 ## Explicit Non-Goals
 
