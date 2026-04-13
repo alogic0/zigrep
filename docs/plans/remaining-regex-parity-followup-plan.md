@@ -99,11 +99,20 @@ Implementation order for this plan:
 
 ## Phase 3: Remaining Property-Surface Re-Check
 
-- [ ] Re-check whether any still-missing property names remain materially useful
+- [x] Re-check whether any still-missing property names remain materially useful
   after the syntax-surface gaps are closed
+  - current result:
+    - no broader property expansion is justified inside this plan
+    - the highest-value syntax-surface parity gaps are now closed
+    - any future missing property name should be handled as its own narrow
+      follow-up only when it is backed by a concrete ripgrep-parity or user
+      need
 
-- [ ] If yes, spin that into a separate narrow follow-up plan instead of
+- [x] If yes, spin that into a separate narrow follow-up plan instead of
   widening this one
+  - current result:
+    - no new property follow-up is created from this plan
+    - the separation rule stays in force for future work
 
 ## Phase 4: Validation And Docs
 
@@ -120,7 +129,19 @@ Implementation order for this plan:
 
 - [x] 1. Land the smallest useful inline-flag group subset
 - [x] 2. Land nested class-set expressions
-- [ ] 3. Re-evaluate any remaining property-surface follow-up
+- [x] 3. Re-evaluate any remaining property-surface follow-up
+
+## Status
+
+This plan is complete.
+
+The remaining future work in this area, if any, should be handled by separate
+narrow plans such as:
+
+- broader inline flag groups beyond the implemented `i` and `u` local-group
+  surface
+- deeper class-set algebra only if local `ripgrep` behavior or users justify it
+- targeted property-name additions only when a concrete parity gap appears
 
 ## Explicit Non-Goals
 
