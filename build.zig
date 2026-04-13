@@ -49,6 +49,14 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const cli_entry_mod = b.addModule("cli_entry", .{
+        .root_source_file = b.path("src/cli_entry.zig"),
+        .target = target,
+        .imports = &.{
+            .{ .name = "zigrep", .module = mod },
+        },
+    });
+
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
     // to the module defined above, it's sometimes preferable to split business
@@ -87,7 +95,7 @@ pub fn build(b: *std.Build) void {
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
                 .{ .name = "zigrep", .module = mod },
-                .{ .name = "build_options", .module = build_options.createModule() },
+                .{ .name = "cli_entry", .module = cli_entry_mod },
             },
         }),
     });

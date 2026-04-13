@@ -1,6 +1,5 @@
 const std = @import("std");
-const zigrep = @import("zigrep");
-const cli_entry = zigrep.cli_entry;
+const cli_entry = @import("cli_entry");
 
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;

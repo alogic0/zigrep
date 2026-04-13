@@ -1,5 +1,5 @@
 const std = @import("std");
-const zigrep = @import("zigrep");
+const cli_entry = @import("cli_entry");
 
 pub const CapturedCliRun = struct {
     exit_code: u8,
@@ -45,5 +45,5 @@ pub fn runCliCaptured(
     allocator: std.mem.Allocator,
     argv: []const []const u8,
 ) !CapturedCliRun {
-    return runCliCapturedWith(allocator, zigrep.cli_entry.runCli, argv);
+    return runCliCapturedWith(allocator, cli_entry.runCli, argv);
 }

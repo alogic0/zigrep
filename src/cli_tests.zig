@@ -1,7 +1,7 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
 const cli = zigrep.cli;
-const cli_entry = zigrep.cli_entry;
+const cli_entry = @import("cli_entry");
 const search = zigrep.search;
 
 const OutputFormat = cli.OutputFormat;

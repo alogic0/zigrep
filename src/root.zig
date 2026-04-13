@@ -3,8 +3,7 @@ const regex_mod = @import("regex/root.zig");
 const build_options = @import("build_options");
 
 // App-facing root surface.
-// Internal decomposition modules are intentionally not re-exported here unless
-// the current build or test wiring still requires a stable access path.
+// Internal decomposition modules are intentionally not re-exported here.
 
 pub const regex = regex_mod;
 pub const search = @import("search/root.zig");
@@ -12,7 +11,7 @@ pub const search_runner = @import("search_runner.zig");
 pub const search_reporting = @import("search_reporting.zig");
 pub const command = @import("command.zig");
 pub const cli = @import("cli.zig");
-pub const cli_entry = @import("cli_entry.zig");
+pub const cli_dispatch = @import("cli_dispatch.zig");
 pub const config = @import("config.zig");
 pub const app_version = build_options.app_version;
 

@@ -37,14 +37,10 @@
 
 ## Public root
 
-`src/root.zig` exposes the app-facing surface and intentionally does not re-export most internal decomposition modules. The remaining exceptions are present to keep the current build and test wiring practical.
-
-Today that mainly means `cli_entry`: it remains exported through the root
-surface because the current Zig build/test wiring still makes direct imports of
-that internal entry module awkward.
+`src/root.zig` exposes the app-facing surface and intentionally does not re-export most internal decomposition modules. The remaining CLI-facing support export is `cli_dispatch`; `cli_entry` itself is no longer on the root surface.
 
 See also:
-- [docs/module-boundary-rules.md](/home/oleg/prog/zigrep/docs/module-boundary-rules.md)
+- [docs/module-boundary-rules.md](module-boundary-rules.md)
 
 ## Current boundary rule
 

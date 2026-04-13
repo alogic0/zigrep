@@ -1,14 +1,14 @@
 const std = @import("std");
-const build_options = @import("build_options");
-const cli = @import("cli.zig");
-const cli_dispatch = @import("cli_dispatch.zig");
-const config = @import("config.zig");
+const zigrep = @import("zigrep");
+const cli = zigrep.cli;
+const cli_dispatch = zigrep.cli_dispatch;
+const config = zigrep.config;
 
 // Top-level CLI entry orchestration.
 // This module resolves config, handles help/version, and bridges parsed CLI
 // results into the dispatch layer.
 
-pub const app_version = build_options.app_version;
+pub const app_version = zigrep.app_version;
 
 pub fn writeFatalError(writer: *std.Io.Writer, argv0: []const u8, err: anyerror) !void {
     try writer.print("error: {s}\n", .{@errorName(err)});
