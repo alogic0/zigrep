@@ -34,3 +34,7 @@ These rules are the current working contract for the `zigrep` codebase.
 
 - Treat [src/root.zig](/home/oleg/prog/zigrep/src/root.zig) as the app-facing surface, not as a dump of internal modules.
 - Any exception kept in [src/root.zig](/home/oleg/prog/zigrep/src/root.zig) for build or test convenience should be treated as temporary and documented when added.
+- Current documented exception:
+  `cli_entry` remains on the root surface because direct file imports currently
+  trigger duplicated module wiring in the existing build/test setup. Do not copy
+  that exception to other internal modules.
