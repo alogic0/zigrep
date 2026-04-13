@@ -79,6 +79,21 @@ pub fn main() !void {
     var case_ignorable_ranges: std.ArrayList(Range) = .empty;
     defer case_ignorable_ranges.deinit(arena);
 
+    var id_start_ranges: std.ArrayList(Range) = .empty;
+    defer id_start_ranges.deinit(arena);
+
+    var id_continue_ranges: std.ArrayList(Range) = .empty;
+    defer id_continue_ranges.deinit(arena);
+
+    var xid_start_ranges: std.ArrayList(Range) = .empty;
+    defer xid_start_ranges.deinit(arena);
+
+    var xid_continue_ranges: std.ArrayList(Range) = .empty;
+    defer xid_continue_ranges.deinit(arena);
+
+    var default_ignorable_code_point_ranges: std.ArrayList(Range) = .empty;
+    defer default_ignorable_code_point_ranges.deinit(arena);
+
     var lowercase_ranges: std.ArrayList(Range) = .empty;
     defer lowercase_ranges.deinit(arena);
 
@@ -200,6 +215,11 @@ pub fn main() !void {
     try loadNamedPropertyData(arena, config.derived_core_properties, "Alphabetic", &alphabetic_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "Cased", &cased_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "Case_Ignorable", &case_ignorable_ranges);
+    try loadNamedPropertyData(arena, config.derived_core_properties, "ID_Start", &id_start_ranges);
+    try loadNamedPropertyData(arena, config.derived_core_properties, "ID_Continue", &id_continue_ranges);
+    try loadNamedPropertyData(arena, config.derived_core_properties, "XID_Start", &xid_start_ranges);
+    try loadNamedPropertyData(arena, config.derived_core_properties, "XID_Continue", &xid_continue_ranges);
+    try loadNamedPropertyData(arena, config.derived_core_properties, "Default_Ignorable_Code_Point", &default_ignorable_code_point_ranges);
     try loadGeneralCategoryData(
         arena,
         config.derived_general_category,
@@ -242,6 +262,11 @@ pub fn main() !void {
         alphabetic_ranges.items,
         cased_ranges.items,
         case_ignorable_ranges.items,
+        id_start_ranges.items,
+        id_continue_ranges.items,
+        xid_start_ranges.items,
+        xid_continue_ranges.items,
+        default_ignorable_code_point_ranges.items,
         lowercase_ranges.items,
         uppercase_ranges.items,
         mark_ranges.items,
@@ -752,6 +777,11 @@ fn writeOutput(
     alphabetic_ranges: []const Range,
     cased_ranges: []const Range,
     case_ignorable_ranges: []const Range,
+    id_start_ranges: []const Range,
+    id_continue_ranges: []const Range,
+    xid_start_ranges: []const Range,
+    xid_continue_ranges: []const Range,
+    default_ignorable_code_point_ranges: []const Range,
     lowercase_ranges: []const Range,
     uppercase_ranges: []const Range,
     mark_ranges: []const Range,
@@ -824,6 +854,16 @@ fn writeOutput(
     try writeRangeList(&writer.interface, "cased_ranges", cased_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "case_ignorable_ranges", case_ignorable_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "id_start_ranges", id_start_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "id_continue_ranges", id_continue_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "xid_start_ranges", xid_start_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "xid_continue_ranges", xid_continue_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "default_ignorable_code_point_ranges", default_ignorable_code_point_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "lowercase_ranges", lowercase_ranges);
     try writer.interface.print("\n", .{});

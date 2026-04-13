@@ -5910,6 +5910,49 @@ test "runCli supports Cased and Case_Ignorable Unicode properties" {
     try testing.expect(std.mem.containsAtLeast(u8, case_ignorable_run.stdout, 1, "sample.txt:2:1:"));
 }
 
+test "runCli supports identifier-style derived Unicode properties" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "A\n" ++
+            "0\n" ++
+            "\xC2\xAD\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const id_start_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{ID_Start}+", root_path });
+    defer id_start_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), id_start_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, id_start_run.stdout, 1, "sample.txt:1:1:A"));
+
+    const id_continue_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{ID_Continue}+", root_path });
+    defer id_continue_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), id_continue_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, id_continue_run.stdout, 1, "sample.txt:2:1:0"));
+
+    const xid_start_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{XID_Start}+", root_path });
+    defer xid_start_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), xid_start_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, xid_start_run.stdout, 1, "sample.txt:1:1:A"));
+
+    const xid_continue_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{XID_Continue}+", root_path });
+    defer xid_continue_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), xid_continue_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, xid_continue_run.stdout, 1, "sample.txt:2:1:0"));
+
+    const default_ignorable_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Default_Ignorable_Code_Point}+", root_path });
+    defer default_ignorable_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), default_ignorable_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, default_ignorable_run.stdout, 1, "sample.txt:3:1:"));
+}
+
 test "runCli supports Lowercase and Uppercase Unicode properties" {
     const testing = std.testing;
 

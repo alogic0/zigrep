@@ -2110,6 +2110,26 @@ test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     defer case_ignorable.deinit();
     try testing.expect((try case_ignorable.reportFirstMatch("sample.txt", "\xCD\x85")) != null);
 
+    var id_start = try Searcher.init(testing.allocator, "\\p{ID_Start}+", .{});
+    defer id_start.deinit();
+    try testing.expect((try id_start.reportFirstMatch("sample.txt", "A")) != null);
+
+    var id_continue = try Searcher.init(testing.allocator, "\\p{ID_Continue}+", .{});
+    defer id_continue.deinit();
+    try testing.expect((try id_continue.reportFirstMatch("sample.txt", "0")) != null);
+
+    var xid_start = try Searcher.init(testing.allocator, "\\p{XID_Start}+", .{});
+    defer xid_start.deinit();
+    try testing.expect((try xid_start.reportFirstMatch("sample.txt", "A")) != null);
+
+    var xid_continue = try Searcher.init(testing.allocator, "\\p{XID_Continue}+", .{});
+    defer xid_continue.deinit();
+    try testing.expect((try xid_continue.reportFirstMatch("sample.txt", "0")) != null);
+
+    var default_ignorable = try Searcher.init(testing.allocator, "\\p{Default_Ignorable_Code_Point}+", .{});
+    defer default_ignorable.deinit();
+    try testing.expect((try default_ignorable.reportFirstMatch("sample.txt", "\xC2\xAD")) != null);
+
     var lowercase = try Searcher.init(testing.allocator, "\\p{Lowercase}+", .{});
     defer lowercase.deinit();
     try testing.expect((try lowercase.reportFirstMatch("sample.txt", "ß")) != null);

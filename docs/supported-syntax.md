@@ -61,6 +61,8 @@ Current escape boundary:
   - `\p{Alphabetic}` and `\P{Alphabetic}`
   - `\p{Cased}` and `\P{Cased}`
   - `\p{Case_Ignorable}` and `\P{Case_Ignorable}`
+  - `\p{ID_Start}` and `\P{ID_Start}`
+  - `\p{ID_Continue}` and `\P{ID_Continue}`
   - `\p{Letter}` and `\P{Letter}`
   - `\p{Lowercase}` and `\P{Lowercase}`
   - `\p{Titlecase_Letter}` and `\P{Titlecase_Letter}`
@@ -80,6 +82,9 @@ Current escape boundary:
   - `\p{Control}`, `\p{Format}`, `\p{Surrogate}`, `\p{Private_Use}`, and `\p{Unassigned}`
   - `\p{Uppercase}` and `\P{Uppercase}`
   - `\p{Whitespace}` and `\P{Whitespace}`
+  - `\p{XID_Start}` and `\P{XID_Start}`
+  - `\p{XID_Continue}` and `\P{XID_Continue}`
+  - `\p{Default_Ignorable_Code_Point}` and `\P{Default_Ignorable_Code_Point}`
   - the same property items may also appear inside bracket classes
     - for example `[\p{Letter}\P{Whitespace}]`
   - accepted aliases currently include:

@@ -18,6 +18,11 @@ pub const Property = enum {
     alphabetic,
     cased,
     case_ignorable,
+    id_start,
+    id_continue,
+    xid_start,
+    xid_continue,
+    default_ignorable_code_point,
     lowercase,
     uppercase,
     titlecase_letter,
@@ -144,6 +149,11 @@ pub const Strategy = struct {
         if (propertyNameEq(name, "alphabetic") or propertyNameEq(name, "alpha")) return .alphabetic;
         if (propertyNameEq(name, "cased")) return .cased;
         if (propertyNameEq(name, "case_ignorable")) return .case_ignorable;
+        if (propertyNameEq(name, "id_start")) return .id_start;
+        if (propertyNameEq(name, "id_continue")) return .id_continue;
+        if (propertyNameEq(name, "xid_start")) return .xid_start;
+        if (propertyNameEq(name, "xid_continue")) return .xid_continue;
+        if (propertyNameEq(name, "default_ignorable_code_point")) return .default_ignorable_code_point;
         if (propertyNameEq(name, "lowercase") or propertyNameEq(name, "lower") or propertyNameEq(name, "ll")) return .lowercase;
         if (propertyNameEq(name, "uppercase") or propertyNameEq(name, "upper") or propertyNameEq(name, "lu")) return .uppercase;
         if (propertyNameEq(name, "titlecase_letter") or propertyNameEq(name, "lt")) return .titlecase_letter;
@@ -190,6 +200,11 @@ pub const Strategy = struct {
             .alphabetic => inRanges(cp, &generated.alphabetic_ranges),
             .cased => inRanges(cp, &generated.cased_ranges),
             .case_ignorable => inRanges(cp, &generated.case_ignorable_ranges),
+            .id_start => inRanges(cp, &generated.id_start_ranges),
+            .id_continue => inRanges(cp, &generated.id_continue_ranges),
+            .xid_start => inRanges(cp, &generated.xid_start_ranges),
+            .xid_continue => inRanges(cp, &generated.xid_continue_ranges),
+            .default_ignorable_code_point => inRanges(cp, &generated.default_ignorable_code_point_ranges),
             .lowercase => inRanges(cp, &generated.lowercase_ranges),
             .uppercase => inRanges(cp, &generated.uppercase_ranges),
             .titlecase_letter => inRanges(cp, &generated.titlecase_letter_ranges),
@@ -456,6 +471,11 @@ test "Unicode strategy looks up named properties and aliases" {
     try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("alpha"));
     try testing.expectEqual(@as(?Property, .cased), Strategy.lookupProperty("Cased"));
     try testing.expectEqual(@as(?Property, .case_ignorable), Strategy.lookupProperty("Case_Ignorable"));
+    try testing.expectEqual(@as(?Property, .id_start), Strategy.lookupProperty("ID_Start"));
+    try testing.expectEqual(@as(?Property, .id_continue), Strategy.lookupProperty("ID_Continue"));
+    try testing.expectEqual(@as(?Property, .xid_start), Strategy.lookupProperty("XID_Start"));
+    try testing.expectEqual(@as(?Property, .xid_continue), Strategy.lookupProperty("XID_Continue"));
+    try testing.expectEqual(@as(?Property, .default_ignorable_code_point), Strategy.lookupProperty("Default_Ignorable_Code_Point"));
     try testing.expectEqual(@as(?Property, .lowercase), Strategy.lookupProperty("Ll"));
     try testing.expectEqual(@as(?Property, .titlecase_letter), Strategy.lookupProperty("Lt"));
     try testing.expectEqual(@as(?Property, .modifier_letter), Strategy.lookupProperty("Lm"));
@@ -504,6 +524,11 @@ test "Unicode strategy evaluates property membership" {
     try testing.expect(Strategy.hasProperty(0x0345, .alphabetic));
     try testing.expect(Strategy.hasProperty('Σ', .cased));
     try testing.expect(Strategy.hasProperty(0x0345, .case_ignorable));
+    try testing.expect(Strategy.hasProperty('A', .id_start));
+    try testing.expect(Strategy.hasProperty('0', .id_continue));
+    try testing.expect(Strategy.hasProperty('A', .xid_start));
+    try testing.expect(Strategy.hasProperty('0', .xid_continue));
+    try testing.expect(Strategy.hasProperty(0x00AD, .default_ignorable_code_point));
     try testing.expect(Strategy.hasProperty('ß', .lowercase));
     try testing.expect(Strategy.hasProperty(0x01C5, .titlecase_letter));
     try testing.expect(Strategy.hasProperty(0x02B0, .modifier_letter));

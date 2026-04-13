@@ -94,13 +94,13 @@ This bucket also stays native if each property is just a scalar predicate over
   - [x] `Case_Ignorable`
 
 - [ ] Evaluate other derived properties that are still good native-core fits:
-  - `ID_Start`
-  - `ID_Continue`
-  - `XID_Start`
-  - `XID_Continue`
-  - `Default_Ignorable_Code_Point`
+  - [x] `ID_Start`
+  - [x] `ID_Continue`
+  - [x] `XID_Start`
+  - [x] `XID_Continue`
+  - [x] `Default_Ignorable_Code_Point`
 
-- [ ] Keep each derived property table generated from checked-in Unicode data,
+- [x] Keep each derived property table generated from checked-in Unicode data,
   not handwritten logic.
 
 - [ ] Decide whether `Any`, `ASCII`, and similar special pseudo-properties are
