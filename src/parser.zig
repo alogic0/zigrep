@@ -64,6 +64,10 @@ pub const Node = union(enum) {
         rhs: CharacterClass,
         op: ClassSetOp,
     },
+    case_fold_group: struct {
+        enabled: bool,
+        child: NodeId,
+    },
     group: struct {
         index: u32,
         child: NodeId,
@@ -407,6 +411,20 @@ pub const Parser = struct {
                     }
                     if (self.lookahead.token == .hyphen) {
                         try self.advance();
+                        if (self.lookahead.token == .literal and self.lookahead.token.literal == 'i') {
+                            try self.advance();
+                            if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
+                                return self.fail(error.UnsupportedGroup, group_span);
+                            }
+                            try self.advance();
+                            const expr = try self.parseAlternation();
+                            if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+                            try self.advance();
+                            return self.push(.{ .case_fold_group = .{
+                                .enabled = false,
+                                .child = expr,
+                            } });
+                        }
                         if (self.lookahead.token != .literal or self.lookahead.token.literal != 'u') {
                             return self.fail(error.UnsupportedGroup, group_span);
                         }
@@ -422,6 +440,20 @@ pub const Parser = struct {
                         if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
                         try self.advance();
                         return expr;
+                    }
+                    if (self.lookahead.token == .literal and self.lookahead.token.literal == 'i') {
+                        try self.advance();
+                        if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
+                            return self.fail(error.UnsupportedGroup, group_span);
+                        }
+                        try self.advance();
+                        const expr = try self.parseAlternation();
+                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+                        try self.advance();
+                        return self.push(.{ .case_fold_group = .{
+                            .enabled = true,
+                            .child = expr,
+                        } });
                     }
                     if (self.lookahead.token == .literal and self.lookahead.token.literal == 'u') {
                         try self.advance();
@@ -1081,6 +1113,21 @@ test "Parser supports basic class-set operators" {
     defer intersection_ast.deinit(testing.allocator);
     try testing.expectEqual(.char_class_set, std.meta.activeTag(intersection_ast.nodes[@intFromEnum(intersection_ast.root)]));
     try testing.expectEqual(.intersection, intersection_ast.nodes[@intFromEnum(intersection_ast.root)].char_class_set.op);
+}
+
+test "Parser supports inline case-fold groups" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "(?i:a)(?-i:b)");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 2), root.len);
+    try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(root[0])]));
+    try testing.expect(ast.nodes[@intFromEnum(root[0])].case_fold_group.enabled);
+    try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(root[1])]));
+    try testing.expect(!ast.nodes[@intFromEnum(root[1])].case_fold_group.enabled);
 }
 
 test "Parser decodes Unicode literal escapes as literals" {

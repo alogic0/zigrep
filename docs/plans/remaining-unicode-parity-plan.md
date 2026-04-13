@@ -140,11 +140,22 @@ Implementation order for this plan:
 
 ## Phase 5: Remaining Property-Surface Review
 
-- [ ] Re-check whether broader property expansion is still materially useful
+- [x] Re-check whether broader property expansion is still materially useful
   after the syntax-surface gaps are closed
+  - current result:
+    - no further broad property expansion is justified inside this plan
+    - the main remaining parity value was in syntax surface, and that is now
+      covered by `Script_Extensions`, inline Unicode mode toggles,
+      half-boundaries, and the initial class-set subset
+    - any future property expansion should be driven by a concrete property
+      need, not by continuing this plan
 
-- [ ] If yes, spin that into a separate follow-up plan instead of widening this
+- [x] If yes, spin that into a separate follow-up plan instead of widening this
   plan
+  - current result:
+    - no new follow-up property-expansion plan is needed right now
+    - if a concrete gap appears later, it should be handled in its own narrow
+      plan instead of reopening this one
 
 ## Phase 6: Validation And Docs
 
@@ -163,7 +174,26 @@ Implementation order for this plan:
 - [x] 2. Land inline Unicode mode toggles
 - [x] 3. Land half-boundaries
 - [x] 4. Decide and land the smallest useful class-set subset
-- [ ] 5. Re-evaluate remaining property-surface gaps
+- [x] 5. Re-evaluate remaining property-surface gaps
+
+## Status
+
+This plan is complete.
+
+The originally identified remaining Unicode regex-surface gaps in local
+`ripgrep` that fit this plan have now been covered:
+
+- `Script_Extensions` / `scx=...`
+- inline Unicode mode toggles `(?-u:...)` and `(?u:...)`
+- half-boundaries `\b{start-half}` and `\b{end-half}`
+- a useful first class-set subset with subtraction and intersection
+
+Remaining future work, if any, should be handled as separate follow-up plans:
+
+- nested class-set expressions, if they become important enough to justify the
+  parser and matcher complexity
+- concrete additional Unicode properties only when there is a specific parity
+  or user-facing need
 
 ## Explicit Non-Goals
 

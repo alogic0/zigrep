@@ -22,6 +22,7 @@ The current engine supports:
 - Half-word boundaries `\b{start-half}` and `\b{end-half}`
 - Non-capturing groups `(?:...)`
 - Inline Unicode mode groups `(?-u:...)` and `(?u:...)`
+- Inline local case-fold groups `(?i:...)` and `(?-i:...)`
 - Escaped metacharacters such as `\.`, `\(`, `\)`, `\[`, `\]`, `\{`, `\}`, `\|`, `\*`, `\+`, `\?`, `\^`, `\$`, and `\\`
 
 Notes:
@@ -80,6 +81,12 @@ Current escape boundary:
   - `(?-u:...)` switches shorthand and boundary operators inside the group to ASCII behavior
   - `(?u:...)` switches them back to Unicode-aware behavior inside a nested group
   - inside `(?-u:...)`, Unicode property escapes like `\p{Greek}` remain unsupported
+- inline local case-fold groups are supported:
+  - `(?i:...)` enables local case-insensitive matching for the group
+  - `(?-i:...)` disables local case-insensitive matching for the group
+  - they compose with global `--ignore-case` and `--smart-case` by overriding
+    only the local subgroup
+  - broader inline flag syntax remains unsupported
 - explicit ASCII regexes such as `[0-9]` and `[A-Za-z0-9_]` remain the stable
   way to request ASCII-only behavior outside inline mode groups
 - explicit ASCII whitespace classes such as `[ \t\r\n\f\v]` remain the stable
@@ -154,9 +161,9 @@ of scope for the main engine:
 - Features that require general backtracking semantics
 - Full PCRE2 compatibility
 
-In particular, `(?:...)`, `(?-u:...)`, and `(?u:...)` are supported, but other
-`(?...)` group forms are rejected explicitly rather than being interpreted
-partially.
+In particular, `(?:...)`, `(?-u:...)`, `(?u:...)`, `(?i:...)`, and `(?-i:...)`
+are supported, but other `(?...)` group forms are rejected explicitly rather
+than being interpreted partially.
 
 ## CLI Behavior
 

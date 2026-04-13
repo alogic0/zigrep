@@ -6148,6 +6148,51 @@ test "runCli supports basic class-set operators" {
     try testing.expect(!std.mem.containsAtLeast(u8, intersection_run.stdout, 1, "sample.txt:4:1:ω"));
 }
 
+test "runCli supports inline case-fold groups" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "A\n" ++
+            "a\n" ++
+            "aA\n" ++
+            "Aa\n" ++
+            "Ω\n" ++
+            "ω\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const local_on_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?i:a)", root_path });
+    defer local_on_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), local_on_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, local_on_run.stdout, 1, "sample.txt:1:1:A"));
+    try testing.expect(std.mem.containsAtLeast(u8, local_on_run.stdout, 1, "sample.txt:2:1:a"));
+
+    const local_off_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?i:a)(?-i:A)", root_path });
+    defer local_off_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), local_off_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, local_off_run.stdout, 1, "sample.txt:3:1:aA"));
+    try testing.expect(!std.mem.containsAtLeast(u8, local_off_run.stdout, 1, "sample.txt:4:1:Aa"));
+
+    const unicode_local_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?i:ω)", root_path });
+    defer unicode_local_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), unicode_local_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, unicode_local_run.stdout, 1, "sample.txt:5:1:Ω"));
+    try testing.expect(std.mem.containsAtLeast(u8, unicode_local_run.stdout, 1, "sample.txt:6:1:ω"));
+
+    const override_global_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "(?-i:A)", root_path });
+    defer override_global_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), override_global_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, override_global_run.stdout, 1, "sample.txt:1:1:A"));
+    try testing.expect(!std.mem.containsAtLeast(u8, override_global_run.stdout, 1, "sample.txt:2:1:a"));
+}
+
 test "runCli supports non-capturing groups" {
     const testing = std.testing;
 

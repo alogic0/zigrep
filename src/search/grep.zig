@@ -121,9 +121,10 @@ pub const Searcher = struct {
         defer hir.deinit(allocator);
 
         const fold_case = shouldFoldCase(pattern, options.case_mode);
+        const has_local_case_groups = hirHasCaseFoldGroups(hir.nodes, hir.root);
 
-        if (fold_case) {
-            regex.hir.applySimpleCaseFold(allocator, &hir) catch |err| switch (err) {
+        if (fold_case or has_local_case_groups) {
+            regex.hir.applyScopedCaseFold(allocator, &hir, fold_case) catch |err| switch (err) {
                 error.UnsupportedCaseInsensitivePattern => return error.UnsupportedCaseInsensitivePattern,
                 error.OutOfMemory => return error.OutOfMemory,
             };
@@ -139,7 +140,7 @@ pub const Searcher = struct {
             // Case-folded patterns stay on the general VM path until planner
             // equivalence is proven for folded classes and Unicode-aware case
             // semantics.
-            .byte_plan = if (fold_case)
+            .byte_plan = if (fold_case or has_local_case_groups)
                 .none
             else
                 try extractByteSearchPlan(allocator, hir),
@@ -297,6 +298,27 @@ fn shouldFoldCase(pattern: []const u8, case_mode: CaseMode) bool {
         .sensitive => false,
         .insensitive => true,
         .smart => !patternHasUppercase(pattern),
+    };
+}
+
+fn hirHasCaseFoldGroups(nodes: []const regex.hir.Node, node_id: regex.hir.NodeId) bool {
+    return switch (nodes[@intFromEnum(node_id)]) {
+        .case_fold_group => true,
+        .group => |group| hirHasCaseFoldGroups(nodes, group.child),
+        .concat => |children| blk: {
+            for (children) |child| {
+                if (hirHasCaseFoldGroups(nodes, child)) break :blk true;
+            }
+            break :blk false;
+        },
+        .alternation => |branches| blk: {
+            for (branches) |branch| {
+                if (hirHasCaseFoldGroups(nodes, branch)) break :blk true;
+            }
+            break :blk false;
+        },
+        .repetition => |rep| hirHasCaseFoldGroups(nodes, rep.child),
+        else => false,
     };
 }
 
@@ -527,6 +549,7 @@ fn extractBytePattern(
             .terms = try allocator.alloc(ByteTerm, 0),
         },
         .word_boundary, .not_word_boundary, .word_boundary_start_half, .word_boundary_end_half, .unicode_property, .char_class_set => null,
+        .case_fold_group => |group| extractBytePattern(allocator, nodes, group.child),
         .alternation => blk: {
             const term = (try extractAlternationByteTerm(allocator, nodes, root)) orelse break :blk null;
             const terms = try allocator.alloc(ByteTerm, 1);
@@ -2331,6 +2354,30 @@ test "Searcher supports basic class-set operators" {
     try testing.expect(!intersection.hasBytePlan());
     try testing.expect((try intersection.reportFirstMatch("sample.txt", "Ω")) != null);
     try testing.expect((try intersection.reportFirstMatch("sample.txt", "ω")) == null);
+}
+
+test "Searcher supports inline case-fold groups" {
+    const testing = std.testing;
+
+    var local_on = try Searcher.init(testing.allocator, "(?i:a)", .{});
+    defer local_on.deinit();
+    try testing.expect((try local_on.reportFirstMatch("sample.txt", "A")) != null);
+    try testing.expect((try local_on.reportFirstMatch("sample.txt", "a")) != null);
+
+    var local_off = try Searcher.init(testing.allocator, "(?i:a)(?-i:A)", .{});
+    defer local_off.deinit();
+    try testing.expect((try local_off.reportFirstMatch("sample.txt", "aA")) != null);
+    try testing.expect((try local_off.reportFirstMatch("sample.txt", "AA")) == null);
+
+    var unicode_local = try Searcher.init(testing.allocator, "(?i:ω)", .{});
+    defer unicode_local.deinit();
+    try testing.expect((try unicode_local.reportFirstMatch("sample.txt", "Ω")) != null);
+    try testing.expect((try unicode_local.reportFirstMatch("sample.txt", "ω")) != null);
+
+    var override_global = try Searcher.init(testing.allocator, "(?-i:A)", .{ .case_mode = .insensitive });
+    defer override_global.deinit();
+    try testing.expect((try override_global.reportFirstMatch("sample.txt", "A")) != null);
+    try testing.expect((try override_global.reportFirstMatch("sample.txt", "a")) == null);
 }
 
 test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {

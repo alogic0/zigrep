@@ -176,6 +176,7 @@ fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, multil
         .dot => dotall,
         .char_class => |class| classCanMatchNewline(class, multiline),
         .char_class_set => |class_set| classSetCanMatchNewline(class_set, multiline),
+        .case_fold_group => |group| hirCanMatchNewline(compiled_hir, group.child, multiline, dotall),
         .group => |group| hirCanMatchNewline(compiled_hir, group.child, multiline, dotall),
         .concat => |children| blk: {
             for (children) |child| {
@@ -293,6 +294,7 @@ const Compiler = struct {
             .unicode_property => |property| self.compileUnicodeProperty(property.property, property.negated),
             .char_class => |class| self.compileClass(class),
             .char_class_set => |class_set| self.compileClassSet(class_set),
+            .case_fold_group => |group| self.compileNode(compiled_hir, group.child),
             .group => |group| self.compileGroup(compiled_hir, group.index, group.child),
             .concat => |children| self.compileConcat(compiled_hir, children),
             .alternation => |branches| self.compileAlternation(compiled_hir, branches),

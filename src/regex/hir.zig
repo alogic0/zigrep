@@ -53,6 +53,10 @@ pub const Node = union(enum) {
     },
     char_class: CharacterClass,
     char_class_set: CharacterClassSet,
+    case_fold_group: struct {
+        enabled: bool,
+        child: NodeId,
+    },
     group: struct {
         index: u32,
         child: NodeId,
@@ -154,45 +158,12 @@ pub fn lower(allocator: std.mem.Allocator, ast: parser.Ast) LowerError!Hir {
 }
 
 pub fn applySimpleCaseFold(allocator: std.mem.Allocator, hir: *Hir) CaseFoldError!void {
-    for (hir.nodes) |*node| {
-        switch (node.*) {
-            .literal => |cp| {
-                node.* = .{ .char_class = try foldedLiteralClass(allocator, cp) };
-            },
-            .unicode_property => |property| {
-                node.* = .{ .unicode_property = .{
-                    .property = foldCaseProperty(property.property),
-                    .negated = property.negated,
-                } };
-            },
-            .char_class => |class| {
-                if (classIsUniversalScalarClass(class)) {
-                    allocator.free(class.items);
-                    node.* = .{ .unicode_property = .{
-                        .property = .any,
-                        .negated = false,
-                    } };
-                    continue;
-                }
+    try applyScopedCaseFold(allocator, hir, true);
 
-                const folded = try foldedCharacterClass(allocator, class);
-                allocator.free(class.items);
-                node.* = .{ .char_class = folded };
-            },
-            .char_class_set => |class_set| {
-                const folded_lhs = try foldedCharacterClass(allocator, class_set.lhs);
-                const folded_rhs = try foldedCharacterClass(allocator, class_set.rhs);
-                allocator.free(class_set.lhs.items);
-                allocator.free(class_set.rhs.items);
-                node.* = .{ .char_class_set = .{
-                    .lhs = folded_lhs,
-                    .rhs = folded_rhs,
-                    .op = class_set.op,
-                } };
-            },
-            else => {},
-        }
-    }
+}
+
+pub fn applyScopedCaseFold(allocator: std.mem.Allocator, hir: *Hir, default_enabled: bool) CaseFoldError!void {
+    try applyScopedCaseFoldNode(allocator, hir, hir.root, default_enabled);
 
     allocator.free(hir.prefix.bytes);
     hir.prefix = .{
@@ -202,6 +173,63 @@ pub fn applySimpleCaseFold(allocator: std.mem.Allocator, hir: *Hir) CaseFoldErro
     allocator.free(hir.literals);
     hir.literals = try allocator.alloc(literal_mod.LiteralSequence, 0);
     hir.fast_path = .none;
+}
+
+fn applyScopedCaseFoldNode(
+    allocator: std.mem.Allocator,
+    hir: *Hir,
+    node_id: NodeId,
+    enabled: bool,
+) CaseFoldError!void {
+    switch (hir.nodes[@intFromEnum(node_id)]) {
+        .group => |group| try applyScopedCaseFoldNode(allocator, hir, group.child, enabled),
+        .case_fold_group => |group| try applyScopedCaseFoldNode(allocator, hir, group.child, group.enabled),
+        .concat => |children| for (children) |child| try applyScopedCaseFoldNode(allocator, hir, child, enabled),
+        .alternation => |branches| for (branches) |branch| try applyScopedCaseFoldNode(allocator, hir, branch, enabled),
+        .repetition => |rep| try applyScopedCaseFoldNode(allocator, hir, rep.child, enabled),
+        else => {},
+    }
+
+    if (!enabled) return;
+
+    const node = &hir.nodes[@intFromEnum(node_id)];
+    switch (node.*) {
+        .literal => |cp| {
+            node.* = .{ .char_class = try foldedLiteralClass(allocator, cp) };
+        },
+        .unicode_property => |property| {
+            node.* = .{ .unicode_property = .{
+                .property = foldCaseProperty(property.property),
+                .negated = property.negated,
+            } };
+        },
+        .char_class => |class| {
+            if (classIsUniversalScalarClass(class)) {
+                allocator.free(class.items);
+                node.* = .{ .unicode_property = .{
+                    .property = .any,
+                    .negated = false,
+                } };
+                return;
+            }
+
+            const folded = try foldedCharacterClass(allocator, class);
+            allocator.free(class.items);
+            node.* = .{ .char_class = folded };
+        },
+        .char_class_set => |class_set| {
+            const folded_lhs = try foldedCharacterClass(allocator, class_set.lhs);
+            const folded_rhs = try foldedCharacterClass(allocator, class_set.rhs);
+            allocator.free(class_set.lhs.items);
+            allocator.free(class_set.rhs.items);
+            node.* = .{ .char_class_set = .{
+                .lhs = folded_lhs,
+                .rhs = folded_rhs,
+                .op = class_set.op,
+            } };
+        },
+        else => {},
+    }
 }
 
 fn lowerNode(
@@ -239,6 +267,10 @@ fn lowerNode(
                 .items = try lowerClassItems(allocator, class_set.rhs.items),
             },
             .op = class_set.op,
+        } },
+        .case_fold_group => |group| .{ .case_fold_group = .{
+            .enabled = group.enabled,
+            .child = try lowerNode(allocator, ast, group.child, out),
         } },
         .group => |group| .{ .group = .{
             .index = group.index,
@@ -322,6 +354,7 @@ fn prefixForNode(allocator: std.mem.Allocator, nodes: []const Node, node_id: Nod
             bytes[0] = @as(u8, @intCast(cp));
             return .{ .exact = true, .bytes = bytes };
         },
+        .case_fold_group => |group| return prefixForNode(allocator, nodes, group.child),
         .concat => |children| {
             var builder: std.ArrayList(u8) = .empty;
             defer builder.deinit(allocator);
