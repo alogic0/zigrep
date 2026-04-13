@@ -3,6 +3,7 @@ const zigrep = struct {
     pub const search = @import("search/root.zig");
 };
 const command = @import("command.zig");
+const search_entry_runner = @import("search_entry_runner.zig");
 const search_execution = @import("search_execution.zig");
 const search_filtering = @import("search_filtering.zig");
 const search_output = @import("search_output.zig");
@@ -149,82 +150,32 @@ pub fn searchEntriesSequential(
         var file_arena_state = std.heap.ArenaAllocator.init(allocator);
         defer file_arena_state.deinit();
         const file_allocator = file_arena_state.allocator();
-
-        const suppress_binary_output = if (options.search_compressed)
-            null
-        else blk: {
-            if (options.encoding != .auto) break :blk false;
-            switch (options.binary_mode) {
-                .text => break :blk false,
-                .skip, .suppress => {
-                    const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
-                        if (try search_execution.warnAndSkipFileError(stderr, entry.path, err)) {
-                            result.stats.warnings_emitted += 1;
-                            continue;
-                        }
-                        return err;
-                    };
-                    if (decision == .binary) {
-                        if (options.binary_mode == .skip) {
-                            result.stats.skipped_binary_files += 1;
-                            continue;
-                        }
-                        break :blk true;
-                    }
-                    break :blk false;
-                },
-            }
-        };
-
-        const buffer = zigrep.search.io.readFile(file_allocator, entry.path, .{
-            .strategy = options.read_strategy,
-        }) catch |err| {
-            if (try search_execution.warnAndSkipFileError(stderr, entry.path, err)) {
-                result.stats.warnings_emitted += 1;
-                continue;
-            }
-            return err;
-        };
-        defer buffer.deinit(file_allocator);
-        const search_bytes = search_execution.prepareSearchBytes(file_allocator, entry.path, buffer.bytes(), options) catch |err| {
-            if (try search_execution.warnAndSkipFileError(stderr, entry.path, err)) {
-                result.stats.warnings_emitted += 1;
-                continue;
-            }
-            return err;
-        };
-        const effective_binary_output = if (options.search_compressed or options.preprocessor != null)
-            search_execution.decideBinaryBehavior(search_bytes, options.encoding, options.binary_mode) orelse {
-                result.stats.skipped_binary_files += 1;
-                continue;
-            }
-        else
-            suppress_binary_output.?;
-        result.stats.searched_files += 1;
-        result.stats.searched_bytes += search_bytes.len;
-
-        var capture: std.Io.Writer.Allocating = .init(file_allocator);
-        defer capture.deinit();
-        const writer = if (options.output.heading) &capture.writer else stdout;
-
-        if (try writeFileOutput(
+        var entry_output = try search_entry_runner.searchEntryToOwnedOutput(
             file_allocator,
-            writer,
+            file_allocator,
+            stderr,
             &searcher,
-            entry.path,
-            search_bytes,
-            options.encoding,
-            effective_binary_output,
-            options.invert_match,
-            options.output,
-            options.output_format,
-            options.report_mode,
-            options.max_count,
-            options.context_before,
-            options.context_after,
-        )) {
+            entry,
+            options,
+        );
+        defer entry_output.deinit(file_allocator);
+
+        if (entry_output.warning_emitted) {
+            result.stats.warnings_emitted += 1;
+            continue;
+        }
+        if (entry_output.skipped_binary) {
+            result.stats.skipped_binary_files += 1;
+            continue;
+        }
+
+        result.stats.searched_files += 1;
+        result.stats.searched_bytes += entry_output.searched_bytes;
+        if (entry_output.matched) {
             if (options.output.heading) {
-                try search_output.writeHeadingBlock(stdout, entry.path, capture.written(), &wrote_heading_group);
+                try search_output.writeHeadingBlock(stdout, entry.path, entry_output.bytes.items, &wrote_heading_group);
+            } else {
+                try stdout.writeAll(entry_output.bytes.items);
             }
             result.matched = true;
             result.stats.matched_files += 1;
@@ -315,84 +266,39 @@ fn searchEntriesParallel(
             var file_arena_state = std.heap.ArenaAllocator.init(std.heap.smp_allocator);
             defer file_arena_state.deinit();
             const file_allocator = file_arena_state.allocator();
-
-            const suppress_binary_output = if (self.options.search_compressed)
-                null
-            else blk: {
-                if (self.options.encoding != .auto) break :blk false;
-                switch (self.options.binary_mode) {
-                    .text => break :blk false,
-                    .skip, .suppress => {
-                        const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
-                            if (try self.warnAndSkip(entry.path, err)) return;
-                            return err;
-                        };
-                        if (decision == .binary) {
-                            if (self.options.binary_mode == .skip) {
-                                self.result_reports[index] = .{
-                                    .bytes = .empty,
-                                    .searched_bytes = 0,
-                                    .matched = false,
-                                    .skipped_binary = true,
-                                    .path = null,
-                                };
-                                return;
-                            }
-                            break :blk true;
-                        }
-                        break :blk false;
-                    },
-                }
-            };
-
-            const buffer = zigrep.search.io.readFile(file_allocator, entry.path, .{
-                .strategy = self.options.read_strategy,
-            }) catch |err| {
-                if (try self.warnAndSkip(entry.path, err)) return;
-                return err;
-            };
-            defer buffer.deinit(file_allocator);
-            const search_bytes = search_execution.prepareSearchBytes(file_allocator, entry.path, buffer.bytes(), self.options) catch |err| {
-                if (try self.warnAndSkip(entry.path, err)) return;
-                return err;
-            };
-            const effective_binary_output = if (self.options.search_compressed or self.options.preprocessor != null)
-                search_execution.decideBinaryBehavior(search_bytes, self.options.encoding, self.options.binary_mode) orelse {
-                    self.result_reports[index] = .{
-                        .bytes = .empty,
-                        .searched_bytes = 0,
-                        .matched = false,
-                        .skipped_binary = true,
-                        .path = null,
-                    };
-                    return;
-                }
-            else
-                suppress_binary_output.?;
-
-            var capture: std.Io.Writer.Allocating = .init(std.heap.smp_allocator);
-            defer capture.deinit();
-
-            const matched = try writeFileOutput(
+            var entry_output = search_entry_runner.searchEntryToOwnedOutput(
                 file_allocator,
-                &capture.writer,
+                std.heap.smp_allocator,
+                self.stderr,
                 searcher,
-                entry.path,
-                search_bytes,
-                self.options.encoding,
-                effective_binary_output,
-                self.options.invert_match,
-                self.options.output,
-                self.options.output_format,
-                self.options.report_mode,
-                self.options.max_count,
-                self.options.context_before,
-                self.options.context_after,
-            );
+                entry,
+                self.options,
+            ) catch |err| {
+                if (try self.warnAndSkip(entry.path, err)) return;
+                return err;
+            };
+            errdefer entry_output.deinit(std.heap.smp_allocator);
+            if (entry_output.warning_emitted) {
+                self.warning_mutex.lock();
+                self.warning_count += 1;
+                self.warning_mutex.unlock();
+                return;
+            }
+            if (entry_output.skipped_binary) {
+                self.result_reports[index] = .{
+                    .bytes = .empty,
+                    .searched_bytes = 0,
+                    .matched = false,
+                    .skipped_binary = true,
+                    .path = null,
+                };
+                entry_output.deinit(std.heap.smp_allocator);
+                return;
+            }
             self.result_reports[index] = .{
-                .bytes = capture.toArrayList(),
-                .searched_bytes = search_bytes.len,
-                .matched = matched,
+                .bytes = entry_output.bytes,
+                .searched_bytes = entry_output.searched_bytes,
+                .matched = entry_output.matched,
                 .skipped_binary = false,
                 .path = if (self.options.output.heading) try std.heap.smp_allocator.dupe(u8, entry.path) else null,
             };
@@ -952,7 +858,7 @@ fn mergeMultilineMatchesAlloc(
     return merged_infos.toOwnedSlice(allocator);
 }
 
-fn writeFileOutput(
+pub fn writeFileOutput(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
     searcher: *zigrep.search.grep.Searcher,
