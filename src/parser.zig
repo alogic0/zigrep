@@ -162,7 +162,7 @@ pub const Parser = struct {
         var node_id = try self.parsePrimary();
 
         while (true) {
-            const quantifier = switch (self.lookahead.token) {
+            var quantifier = switch (self.lookahead.token) {
                 .star => blk: {
                     try self.advance();
                     break :blk Quantifier{ .min = 0, .max = null };
@@ -178,6 +178,11 @@ pub const Parser = struct {
                 .l_brace => try self.parseCountedQuantifier(),
                 else => return node_id,
             };
+
+            if (self.lookahead.token == .question) {
+                try self.advance();
+                quantifier.greedy = false;
+            }
 
             node_id = try self.push(.{
                 .repetition = .{
@@ -509,6 +514,41 @@ test "Parser supports counted repetition" {
     const third = ast.nodes[@intFromEnum(root[2])].repetition.quantifier;
     try testing.expectEqual(@as(u32, 5), third.min);
     try testing.expectEqual(@as(?u32, null), third.max);
+}
+
+test "Parser supports lazy quantifiers" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "a*?b+?c??d{2,4}?e{3}?f{5,}?");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 6), root.len);
+
+    const first = ast.nodes[@intFromEnum(root[0])].repetition.quantifier;
+    try testing.expectEqual(false, first.greedy);
+
+    const second = ast.nodes[@intFromEnum(root[1])].repetition.quantifier;
+    try testing.expectEqual(false, second.greedy);
+
+    const third = ast.nodes[@intFromEnum(root[2])].repetition.quantifier;
+    try testing.expectEqual(false, third.greedy);
+
+    const fourth = ast.nodes[@intFromEnum(root[3])].repetition.quantifier;
+    try testing.expectEqual(@as(u32, 2), fourth.min);
+    try testing.expectEqual(@as(?u32, 4), fourth.max);
+    try testing.expectEqual(false, fourth.greedy);
+
+    const fifth = ast.nodes[@intFromEnum(root[4])].repetition.quantifier;
+    try testing.expectEqual(@as(u32, 3), fifth.min);
+    try testing.expectEqual(@as(?u32, 3), fifth.max);
+    try testing.expectEqual(false, fifth.greedy);
+
+    const sixth = ast.nodes[@intFromEnum(root[5])].repetition.quantifier;
+    try testing.expectEqual(@as(u32, 5), sixth.min);
+    try testing.expectEqual(@as(?u32, null), sixth.max);
+    try testing.expectEqual(false, sixth.greedy);
 }
 
 test "Parser supports character classes and ranges" {

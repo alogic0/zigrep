@@ -15,6 +15,7 @@ The current engine supports:
 - Anchors `^` and `$`
 - Quantifiers `*`, `+`, `?`
 - Counted repetition with `{m}`, `{m,}`, and `{m,n}`
+- Lazy quantifiers `*?`, `+?`, `??`, and `{m}`, `{m,}`, `{m,n}` followed by `?`
 - Character classes like `[abc]`, `[a-z]`, and negated classes like `[^a-z]`
 - Shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S`
 - Word boundaries `\b` and `\B`

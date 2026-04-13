@@ -626,6 +626,26 @@ test "VM handles counted repetition regressions" {
     try expectNoMatch("x{3}", "zzxxy");
 }
 
+test "VM honors lazy quantifier priority" {
+    const testing = std.testing;
+
+    const lazy = try compileProgram(testing.allocator, "a.+?b");
+    defer lazy.deinit(testing.allocator);
+
+    const greedy = try compileProgram(testing.allocator, "a.+b");
+    defer greedy.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+
+    const lazy_match = (try engine.firstMatch(lazy, "zzaxxbxxbyy")).?;
+    defer lazy_match.deinit(testing.allocator);
+    try testing.expectEqual(Capture{ .start = 2, .end = 6 }, lazy_match.span);
+
+    const greedy_match = (try engine.firstMatch(greedy, "zzaxxbxxbyy")).?;
+    defer greedy_match.deinit(testing.allocator);
+    try testing.expectEqual(Capture{ .start = 2, .end = 9 }, greedy_match.span);
+}
+
 test "VM handles negated classes and class edge literals" {
     try expectMatch("[^a-c]+", "zzz");
     try expectMatch("[^-\\]]+", "abc");

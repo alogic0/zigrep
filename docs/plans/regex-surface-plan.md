@@ -159,7 +159,6 @@ The goal is not full PCRE2 parity. The goal is:
 
   Result:
   - active native-engine queue:
-    - lazy quantifiers
   - deferred native-engine candidates:
     - Unicode-aware character-class extensions
     - Unicode property classes
@@ -183,6 +182,10 @@ The goal is not full PCRE2 parity. The goal is:
 - [x] Implement non-capturing groups `(?:...)` as native syntax sugar over the
   existing grouping structure, without allocating capture slots or changing VM
   semantics.
+
+- [x] Implement lazy quantifiers `*?`, `+?`, `??`, and counted forms with a
+  trailing `?` by preserving the existing native engine model and changing only
+  parser state plus NFA branch priority.
 
 ## Phase 6: Fallback Engine Decision
 

@@ -385,7 +385,7 @@ const Compiler = struct {
         if (quantifier.max) |upper| {
             var optional_count = upper - quantifier.min;
             while (optional_count > 0) : (optional_count -= 1) {
-                const optional_fragment = try self.compileOptional(compiled_hir, child);
+                const optional_fragment = try self.compileOptional(compiled_hir, child, quantifier.greedy);
                 try self.patch(result.outs.items, optional_fragment.start);
                 result.outs.deinit(self.allocator);
                 result.outs = optional_fragment.outs;
@@ -395,41 +395,41 @@ const Compiler = struct {
 
         if (quantifier.min == 0) {
             result.outs.deinit(self.allocator);
-            return self.compileStar(compiled_hir, child);
+            return self.compileStar(compiled_hir, child, quantifier.greedy);
         }
 
-        const tail = try self.compileStar(compiled_hir, child);
+        const tail = try self.compileStar(compiled_hir, child, quantifier.greedy);
         try self.patch(result.outs.items, tail.start);
         result.outs.deinit(self.allocator);
         result.outs = tail.outs;
         return result;
     }
 
-    fn compileStar(self: *Compiler, compiled_hir: hir_mod.Hir, child: hir_mod.NodeId) CompileError!Fragment {
+    fn compileStar(self: *Compiler, compiled_hir: hir_mod.Hir, child: hir_mod.NodeId, greedy: bool) CompileError!Fragment {
         var body = try self.compileNode(compiled_hir, child);
         const split = try self.emit(.{ .split = .{
-            .out = body.start,
-            .out1 = null,
+            .out = if (greedy) body.start else null,
+            .out1 = if (greedy) null else body.start,
         } });
         try self.patch(body.outs.items, split);
         body.outs.deinit(self.allocator);
 
         var outs: std.ArrayList(PatchRef) = .empty;
-        try outs.append(self.allocator, .{ .inst = split, .slot = .out1 });
+        try outs.append(self.allocator, .{ .inst = split, .slot = if (greedy) .out1 else .out });
         return .{ .start = split, .outs = outs };
     }
 
-    fn compileOptional(self: *Compiler, compiled_hir: hir_mod.Hir, child: hir_mod.NodeId) CompileError!Fragment {
+    fn compileOptional(self: *Compiler, compiled_hir: hir_mod.Hir, child: hir_mod.NodeId, greedy: bool) CompileError!Fragment {
         var body = try self.compileNode(compiled_hir, child);
         const split = try self.emit(.{ .split = .{
-            .out = body.start,
-            .out1 = null,
+            .out = if (greedy) body.start else null,
+            .out1 = if (greedy) null else body.start,
         } });
 
         var outs: std.ArrayList(PatchRef) = .empty;
         errdefer outs.deinit(self.allocator);
         try outs.appendSlice(self.allocator, body.outs.items);
-        try outs.append(self.allocator, .{ .inst = split, .slot = .out1 });
+        try outs.append(self.allocator, .{ .inst = split, .slot = if (greedy) .out1 else .out });
 
         body.outs.deinit(self.allocator);
         return .{ .start = split, .outs = outs };
