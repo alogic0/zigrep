@@ -32,6 +32,8 @@ pub const Node = union(enum) {
     dot,
     anchor_start,
     anchor_end,
+    word_boundary,
+    not_word_boundary,
     char_class: CharacterClass,
     group: struct {
         index: u32,
@@ -286,6 +288,14 @@ pub const Parser = struct {
                 try self.advance();
                 return self.push(.anchor_end);
             },
+            .word_boundary => {
+                try self.advance();
+                return self.push(.word_boundary);
+            },
+            .not_word_boundary => {
+                try self.advance();
+                return self.push(.not_word_boundary);
+            },
             .l_paren => {
                 const group_span = self.lookahead.span;
                 try self.advance();
@@ -387,6 +397,8 @@ pub const Parser = struct {
             .dot,
             .anchor_start,
             .anchor_end,
+            .word_boundary,
+            .not_word_boundary,
             .l_paren,
             .l_bracket,
             => true,
@@ -608,12 +620,6 @@ test "Parser tracks capture groups in source order" {
     try testing.expectEqual(@as(u32, 1), ast.nodes[@intFromEnum(root[1])].group.index);
 }
 
-test "Parser init rejects unsupported shorthand escapes" {
-    const testing = std.testing;
-
-    try testing.expectError(error.UnsupportedEscape, Parser.init(testing.allocator, "\\b"));
-}
-
 test "Parser lowers shorthand character classes to ASCII classes" {
     const testing = std.testing;
 
@@ -645,4 +651,20 @@ test "Parser lowers shorthand character classes to ASCII classes" {
 
     const not_space = ast.nodes[@intFromEnum(root[5])].char_class;
     try testing.expect(not_space.negated);
+}
+
+test "Parser supports word boundary escapes" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "\\bfoo\\B");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 5), root.len);
+    try testing.expectEqual(.word_boundary, std.meta.activeTag(ast.nodes[@intFromEnum(root[0])]));
+    try testing.expectEqualDeep(Node{ .literal = 'f' }, ast.nodes[@intFromEnum(root[1])]);
+    try testing.expectEqualDeep(Node{ .literal = 'o' }, ast.nodes[@intFromEnum(root[2])]);
+    try testing.expectEqualDeep(Node{ .literal = 'o' }, ast.nodes[@intFromEnum(root[3])]);
+    try testing.expectEqual(.not_word_boundary, std.meta.activeTag(ast.nodes[@intFromEnum(root[4])]));
 }

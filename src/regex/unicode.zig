@@ -111,7 +111,7 @@ pub const Strategy = struct {
     }
 
     pub fn isWord(cp: u32) bool {
-        return std.unicode.isAlphabetic(cp) or std.unicode.isDigit(cp) or cp == '_';
+        return cp <= 0x7f and (std.ascii.isAlphanumeric(@intCast(cp)) or cp == '_');
     }
 
     pub fn lookupProperty(name: []const u8) ?Property {

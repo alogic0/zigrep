@@ -17,6 +17,7 @@ The current engine supports:
 - Counted repetition with `{m}`, `{m,}`, and `{m,n}`
 - Character classes like `[abc]`, `[a-z]`, and negated classes like `[^a-z]`
 - Shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S`
+- Word boundaries `\b` and `\B`
 - Escaped metacharacters such as `\.`, `\(`, `\)`, `\[`, `\]`, `\{`, `\}`, `\|`, `\*`, `\+`, `\?`, `\^`, `\$`, and `\\`
 
 Notes:
@@ -41,7 +42,9 @@ Current escape boundary:
 - supported control and byte escapes include `\n`, `\r`, `\t`, `\f`, `\v`, `\0`, and `\xNN`
 - escaped metacharacters like `\.`, `\(`, `\)`, `\[`, and `\\` are supported
 - shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S` are supported with ASCII semantics
-- boundary escapes such as `\b` and `\B` are still rejected explicitly for now
+- word boundaries `\b` and `\B` are supported
+  - boundary checks use ASCII wordness (`[A-Za-z0-9_]`) on valid text units
+  - invalid bytes on the raw-byte path are treated as non-word units
 
 ## Explicit Non-Goals
 

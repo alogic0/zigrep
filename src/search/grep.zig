@@ -529,6 +529,7 @@ fn extractBytePattern(
             .mode = .contains,
             .terms = try allocator.alloc(ByteTerm, 0),
         },
+        .word_boundary, .not_word_boundary => null,
         .alternation => blk: {
             const term = (try extractAlternationByteTerm(allocator, nodes, root)) orelse break :blk null;
             const terms = try allocator.alloc(ByteTerm, 1);
@@ -684,6 +685,9 @@ fn appendNodeToByteTerms(
             try flushLiteralTerm(allocator, terms, literal_bytes);
             try terms.append(allocator, .{ .atom = .anchor_end });
             return true;
+        },
+        .word_boundary, .not_word_boundary => {
+            return false;
         },
         .char_class => |class| {
             try flushLiteralTerm(allocator, terms, literal_bytes);
@@ -2032,6 +2036,23 @@ test "Searcher handles shorthand character classes in UTF-8 and raw-byte paths" 
     var space = try Searcher.init(testing.allocator, "\\s+", .{ .multiline = true });
     defer space.deinit();
     try testing.expect((try space.reportFirstMatch("sample.txt", "a \t\nb")) != null);
+}
+
+test "Searcher handles word boundaries in UTF-8 and raw-byte paths" {
+    const testing = std.testing;
+
+    var word = try Searcher.init(testing.allocator, "\\bcat\\b", .{});
+    defer word.deinit();
+    try testing.expect((try word.reportFirstMatch("sample.txt", "a cat!")) != null);
+    try testing.expect((try word.reportFirstMatch("sample.txt", "scatter")) == null);
+
+    const raw_report = (try word.reportFirstByteMatch("raw.bin", "\xffcat\xff")).?;
+    defer raw_report.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 1, .end = 4 }, raw_report.match_span);
+
+    var not_word = try Searcher.init(testing.allocator, "\\Bcat\\B", .{});
+    defer not_word.deinit();
+    try testing.expect((try not_word.reportFirstMatch("sample.txt", "scatter")) != null);
 }
 
 test "Searcher forEachMatchReport advances across repeated multiline matches" {

@@ -41,6 +41,12 @@ pub const Inst = union(enum) {
     anchor_end: struct {
         out: ?InstPtr = null,
     },
+    word_boundary: struct {
+        out: ?InstPtr = null,
+    },
+    not_word_boundary: struct {
+        out: ?InstPtr = null,
+    },
     match,
 };
 
@@ -51,6 +57,7 @@ pub const Program = struct {
     slot_count: u32,
     prefilter: ?literal_mod.Prefilter,
     ascii_only: bool,
+    has_word_boundary: bool,
     dot_matches_new_line: bool,
     can_match_newline: bool,
 
@@ -115,6 +122,7 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options:
         .slot_count = 2 * (compiled_hir.capture_count + 1),
         .prefilter = try literal_mod.duplicatePrefilter(allocator, compiled_hir.literals),
         .ascii_only = isAsciiOnly(compiler.instructions.items),
+        .has_word_boundary = hasWordBoundary(compiler.instructions.items),
         .dot_matches_new_line = options.multiline_dotall,
         .can_match_newline = can_match_newline,
     };
@@ -122,7 +130,7 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options:
 
 fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, dotall: bool) bool {
     return switch (compiled_hir.nodes[@intFromEnum(node_id)]) {
-        .empty, .anchor_start, .anchor_end => false,
+        .empty, .anchor_start, .anchor_end, .word_boundary, .not_word_boundary => false,
         .literal => |cp| cp == '\n',
         .dot => dotall,
         .char_class => |class| classCanMatchNewline(class),
@@ -179,6 +187,16 @@ fn isAsciiOnly(instructions: []const Inst) bool {
     return true;
 }
 
+fn hasWordBoundary(instructions: []const Inst) bool {
+    for (instructions) |inst| {
+        switch (inst) {
+            .word_boundary, .not_word_boundary => return true,
+            else => {},
+        }
+    }
+    return false;
+}
+
 const Compiler = struct {
     allocator: std.mem.Allocator,
     instructions: std.ArrayList(Inst),
@@ -190,6 +208,8 @@ const Compiler = struct {
             .dot => self.compileAny(),
             .anchor_start => self.compileAnchorStart(),
             .anchor_end => self.compileAnchorEnd(),
+            .word_boundary => self.compileWordBoundary(),
+            .not_word_boundary => self.compileNotWordBoundary(),
             .char_class => |class| self.compileClass(class),
             .group => |group| self.compileGroup(compiled_hir, group.index, group.child),
             .concat => |children| self.compileConcat(compiled_hir, children),
@@ -228,6 +248,20 @@ const Compiler = struct {
 
     fn compileAnchorEnd(self: *Compiler) CompileError!Fragment {
         const index = try self.emit(.{ .anchor_end = .{} });
+        var outs: std.ArrayList(PatchRef) = .empty;
+        try outs.append(self.allocator, .{ .inst = index, .slot = .out });
+        return .{ .start = index, .outs = outs };
+    }
+
+    fn compileWordBoundary(self: *Compiler) CompileError!Fragment {
+        const index = try self.emit(.{ .word_boundary = .{} });
+        var outs: std.ArrayList(PatchRef) = .empty;
+        try outs.append(self.allocator, .{ .inst = index, .slot = .out });
+        return .{ .start = index, .outs = outs };
+    }
+
+    fn compileNotWordBoundary(self: *Compiler) CompileError!Fragment {
+        const index = try self.emit(.{ .not_word_boundary = .{} });
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
         return .{ .start = index, .outs = outs };
@@ -416,6 +450,8 @@ const Compiler = struct {
                 .any => |*any| any.out = target,
                 .anchor_start => |*anchor| anchor.out = target,
                 .anchor_end => |*anchor| anchor.out = target,
+                .word_boundary => |*boundary| boundary.out = target,
+                .not_word_boundary => |*boundary| boundary.out = target,
                 .split => |*split| switch (patch_ref.slot) {
                     .out => split.out = target,
                     .out1 => split.out1 = target,

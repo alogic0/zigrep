@@ -2582,23 +2582,6 @@ test "writeFatalError omits usage for runtime search errors" {
     try testing.expectEqualStrings("error: FileNotFound\n", stderr_capture.written());
 }
 
-test "runCli returns UnsupportedEscape for unsupported boundary escapes" {
-    const testing = std.testing;
-
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.writeFile(.{
-        .sub_path = "sample.txt",
-        .data = "123\n",
-    });
-
-    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
-    defer testing.allocator.free(root_path);
-
-    try testing.expectError(error.UnsupportedEscape, runCliCaptured(testing.allocator, &.{ "zigrep", "\\bfoo", root_path }));
-}
-
 test "parseArgs treats version-like args as positional after the pattern starts" {
     const testing = std.testing;
 
@@ -5679,23 +5662,6 @@ test "runCli default mode uses the general raw-byte VM when no planner path exis
     try testing.expectEqualStrings("", run.stderr);
 }
 
-test "runCli rejects unsupported boundary escapes before invalid UTF-8 matching" {
-    const testing = std.testing;
-
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.writeFile(.{
-        .sub_path = "dot.bin",
-        .data = "\xffa字b\n",
-    });
-
-    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
-    defer testing.allocator.free(root_path);
-
-    try testing.expectError(error.UnsupportedEscape, runCliCaptured(testing.allocator, &.{ "zigrep", "a\\bb", root_path }));
-}
-
 test "runCli supports shorthand character classes with ASCII semantics" {
     const testing = std.testing;
 
@@ -5755,6 +5721,39 @@ test "runCli shorthand negation matches invalid UTF-8 bytes on the raw-byte path
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "raw.bin:1:1:a\\xFFb"));
+}
+
+test "runCli supports word boundaries on UTF-8 and raw-byte inputs" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "a cat!\n" ++
+            "scatter\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "raw.bin",
+        .data = "\xffcat\xff\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const word_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\bcat\\b", root_path });
+    defer word_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), word_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:1:3:a cat!"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "raw.bin:1:2:\\xFFcat\\xFF"));
+    try testing.expect(!std.mem.containsAtLeast(u8, word_run.stdout, 1, "scatter"));
+
+    const not_word_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\Bcat\\B", root_path });
+    defer not_word_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), not_word_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "sample.txt:2:2:scatter"));
 }
 
 test "runCli default mode matches literal-only UTF-8 classes through the byte path" {

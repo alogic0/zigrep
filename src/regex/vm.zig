@@ -2,6 +2,7 @@ const std = @import("std");
 const reader = @import("../reader.zig");
 const dfa = @import("dfa.zig");
 const nfa = @import("nfa.zig");
+const unicode = @import("unicode.zig");
 
 pub const MatchError = reader.ReaderError || error{
     OutOfMemory,
@@ -44,7 +45,7 @@ pub const MatchEngine = struct {
     }
 
     pub fn isMatch(self: *const MatchEngine, program: nfa.Program, haystack: []const u8) MatchError!bool {
-        if (program.capture_count == 0) {
+        if (program.capture_count == 0 and !program.has_word_boundary) {
             var cache = dfa.Cache.init(self.allocator, &program);
             defer cache.deinit();
             return cache.isMatch(haystack);
@@ -80,7 +81,7 @@ pub const MatchEngine = struct {
         defer self.allocator.free(start_slots);
 
         @memset(visited, false);
-        if (try self.addThread(program, &current, visited, program.start, start_slots, 0, haystack.len)) |match| return match;
+        if (try self.addThread(program, haystack, &current, visited, program.start, start_slots, 0)) |match| return match;
 
         var input = reader.CodePointReader(u8).init(haystack);
         while (true) {
@@ -92,7 +93,7 @@ pub const MatchEngine = struct {
             @memset(visited, false);
 
             for (current.items) |thread| {
-                if (try self.step(program, &next, visited, thread, cp, end, haystack.len)) |match| return match;
+                if (try self.step(program, haystack, &next, visited, thread, cp, end)) |match| return match;
             }
             self.clearThreadList(&current);
 
@@ -102,7 +103,7 @@ pub const MatchEngine = struct {
             if (start != end) {
                 const restart_slots = try self.allocSlots(program.slot_count);
                 defer self.allocator.free(restart_slots);
-                if (try self.addThread(program, &current, visited, program.start, restart_slots, end, haystack.len)) |match| return match;
+                if (try self.addThread(program, haystack, &current, visited, program.start, restart_slots, end)) |match| return match;
             }
         }
 
@@ -131,7 +132,7 @@ pub const MatchEngine = struct {
         defer self.allocator.free(start_slots);
 
         @memset(visited, false);
-        if (try self.addThread(program, &current, visited, program.start, start_slots, 0, haystack.len)) |match| return match;
+        if (try self.addThread(program, haystack, &current, visited, program.start, start_slots, 0)) |match| return match;
 
         var pos: usize = 0;
         while (nextTextUnit(haystack, &pos)) |unit| {
@@ -139,7 +140,7 @@ pub const MatchEngine = struct {
             @memset(visited, false);
 
             for (current.items) |thread| {
-                if (try self.stepByte(program, &next, visited, thread, unit, haystack.len)) |match| return match;
+                if (try self.stepByte(program, haystack, &next, visited, thread, unit)) |match| return match;
             }
             self.clearThreadList(&current);
 
@@ -148,7 +149,7 @@ pub const MatchEngine = struct {
             @memset(visited, false);
             const restart_slots = try self.allocSlots(program.slot_count);
             defer self.allocator.free(restart_slots);
-            if (try self.addThread(program, &current, visited, program.start, restart_slots, unit.end, haystack.len)) |match| return match;
+            if (try self.addThread(program, haystack, &current, visited, program.start, restart_slots, unit.end)) |match| return match;
         }
 
         return null;
@@ -168,14 +169,14 @@ pub const MatchEngine = struct {
         defer self.allocator.free(start_slots);
 
         @memset(visited, false);
-        if (try self.addThread(program, &current, visited, program.start, start_slots, 0, haystack.len)) |match| return match;
+        if (try self.addThread(program, haystack, &current, visited, program.start, start_slots, 0)) |match| return match;
 
         for (haystack, 0..) |byte, index| {
             self.clearThreadList(&next);
             @memset(visited, false);
 
             for (current.items) |thread| {
-                if (try self.step(program, &next, visited, thread, byte, index + 1, haystack.len)) |match| return match;
+                if (try self.step(program, haystack, &next, visited, thread, byte, index + 1)) |match| return match;
             }
             self.clearThreadList(&current);
 
@@ -184,7 +185,7 @@ pub const MatchEngine = struct {
             @memset(visited, false);
             const restart_slots = try self.allocSlots(program.slot_count);
             defer self.allocator.free(restart_slots);
-            if (try self.addThread(program, &current, visited, program.start, restart_slots, index + 1, haystack.len)) |match| return match;
+            if (try self.addThread(program, haystack, &current, visited, program.start, restart_slots, index + 1)) |match| return match;
         }
 
         return null;
@@ -193,25 +194,25 @@ pub const MatchEngine = struct {
     fn step(
         self: *const MatchEngine,
         program: nfa.Program,
+        haystack: []const u8,
         list: *std.ArrayList(Thread),
         visited: []bool,
         thread: Thread,
         cp: u32,
         next_pos: usize,
-        input_len: usize,
     ) MatchError!?Match {
         switch (program.instructions[thread.inst_ptr]) {
             .literal => |literal| {
                 if (literal.value != cp) return null;
-                return self.addThread(program, list, visited, literal.out.?, thread.slots, next_pos, input_len);
+                return self.addThread(program, haystack, list, visited, literal.out.?, thread.slots, next_pos);
             },
             .char_class => |class| {
                 if (!classMatches(class, cp)) return null;
-                return self.addThread(program, list, visited, class.out.?, thread.slots, next_pos, input_len);
+                return self.addThread(program, haystack, list, visited, class.out.?, thread.slots, next_pos);
             },
             .any => |any| {
                 if (!program.dot_matches_new_line and cp == '\n') return null;
-                return self.addThread(program, list, visited, any.out.?, thread.slots, next_pos, input_len);
+                return self.addThread(program, haystack, list, visited, any.out.?, thread.slots, next_pos);
             },
             else => return null,
         }
@@ -220,24 +221,24 @@ pub const MatchEngine = struct {
     fn stepByte(
         self: *const MatchEngine,
         program: nfa.Program,
+        haystack: []const u8,
         list: *std.ArrayList(Thread),
         visited: []bool,
         thread: Thread,
         unit: TextUnit,
-        input_len: usize,
     ) MatchError!?Match {
         switch (program.instructions[thread.inst_ptr]) {
             .literal => |literal| {
                 if (unit.scalar == null or literal.value != unit.scalar.?) return null;
-                return self.addThread(program, list, visited, literal.out.?, thread.slots, unit.end, input_len);
+                return self.addThread(program, haystack, list, visited, literal.out.?, thread.slots, unit.end);
             },
             .char_class => |class| {
                 if (!textUnitMatchesClass(class, unit)) return null;
-                return self.addThread(program, list, visited, class.out.?, thread.slots, unit.end, input_len);
+                return self.addThread(program, haystack, list, visited, class.out.?, thread.slots, unit.end);
             },
             .any => |any| {
                 if (!program.dot_matches_new_line and unit.isNewline()) return null;
-                return self.addThread(program, list, visited, any.out.?, thread.slots, unit.end, input_len);
+                return self.addThread(program, haystack, list, visited, any.out.?, thread.slots, unit.end);
             },
             else => return null,
         }
@@ -246,12 +247,12 @@ pub const MatchEngine = struct {
     fn addThread(
         self: *const MatchEngine,
         program: nfa.Program,
+        haystack: []const u8,
         list: *std.ArrayList(Thread),
         visited: []bool,
         inst_ptr: nfa.InstPtr,
         slots: []const ?usize,
         pos: usize,
-        input_len: usize,
     ) MatchError!?Match {
         if (visited[inst_ptr]) return null;
         visited[inst_ptr] = true;
@@ -261,24 +262,32 @@ pub const MatchEngine = struct {
                 const updated_slots = try self.cloneSlots(slots);
                 defer self.allocator.free(updated_slots);
                 updated_slots[save.slot] = pos;
-                return self.addThread(program, list, visited, save.out.?, updated_slots, pos, input_len);
+                return self.addThread(program, haystack, list, visited, save.out.?, updated_slots, pos);
             },
             .split => |split| {
                 if (split.out) |out| {
-                    if (try self.addThread(program, list, visited, out, slots, pos, input_len)) |match| return match;
+                    if (try self.addThread(program, haystack, list, visited, out, slots, pos)) |match| return match;
                 }
                 if (split.out1) |out1| {
-                    if (try self.addThread(program, list, visited, out1, slots, pos, input_len)) |match| return match;
+                    if (try self.addThread(program, haystack, list, visited, out1, slots, pos)) |match| return match;
                 }
                 return null;
             },
             .anchor_start => |anchor| {
                 if (pos != 0) return null;
-                return self.addThread(program, list, visited, anchor.out.?, slots, pos, input_len);
+                return self.addThread(program, haystack, list, visited, anchor.out.?, slots, pos);
             },
             .anchor_end => |anchor| {
-                if (pos != input_len) return null;
-                return self.addThread(program, list, visited, anchor.out.?, slots, pos, input_len);
+                if (pos != haystack.len) return null;
+                return self.addThread(program, haystack, list, visited, anchor.out.?, slots, pos);
+            },
+            .word_boundary => |boundary| {
+                if (!wordBoundaryAt(haystack, pos)) return null;
+                return self.addThread(program, haystack, list, visited, boundary.out.?, slots, pos);
+            },
+            .not_word_boundary => |boundary| {
+                if (wordBoundaryAt(haystack, pos)) return null;
+                return self.addThread(program, haystack, list, visited, boundary.out.?, slots, pos);
             },
             .match => return try self.buildMatch(program, slots),
             .literal, .char_class, .any => {
@@ -429,6 +438,29 @@ fn nextTextUnit(haystack: []const u8, pos: *usize) ?TextUnit {
         .invalid_byte = null,
         .end = pos.*,
     };
+}
+
+fn isWordTextUnit(unit: TextUnit) bool {
+    if (unit.scalar) |cp| return unicode.Strategy.isWord(cp);
+    return false;
+}
+
+fn wordBoundaryAt(haystack: []const u8, offset: usize) bool {
+    var before_is_word = false;
+    var pos: usize = 0;
+    while (pos < offset) {
+        const unit = nextTextUnit(haystack, &pos) orelse break;
+        if (unit.end > offset) break;
+        before_is_word = isWordTextUnit(unit);
+    }
+
+    var after_pos = offset;
+    const after_is_word = if (nextTextUnit(haystack, &after_pos)) |unit|
+        isWordTextUnit(unit)
+    else
+        false;
+
+    return before_is_word != after_is_word;
 }
 
 fn isAsciiBytes(bytes: []const u8) bool {
@@ -622,6 +654,25 @@ test "VM shorthand space class follows multiline newline semantics" {
 
     var engine = MatchEngine.init(testing.allocator);
     try testing.expect(try engine.isMatch(multiline, "\t \n"));
+}
+
+test "VM handles word boundaries on UTF-8 and raw-byte haystacks" {
+    const testing = std.testing;
+
+    const word_boundary = try compileProgram(testing.allocator, "\\bcat\\b", .{});
+    defer word_boundary.deinit(testing.allocator);
+
+    const not_word_boundary = try compileProgram(testing.allocator, "\\Bcat\\B", .{});
+    defer not_word_boundary.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect(try engine.isMatch(word_boundary, "a cat!"));
+    try testing.expect(!(try engine.isMatch(word_boundary, "scatter")));
+    try testing.expect(try engine.isMatch(not_word_boundary, "scatter"));
+
+    const raw = (try engine.firstMatchBytes(word_boundary, "\xffcat\xff")).?;
+    defer raw.deinit(testing.allocator);
+    try testing.expectEqual(Capture{ .start = 1, .end = 4 }, raw.span);
 }
 
 test "VM handles empty alternation branches and anchor-only patterns" {

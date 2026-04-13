@@ -82,19 +82,18 @@ The goal is not full PCRE2 parity. The goal is:
 
 ## Phase 3: Add Word Boundaries
 
-- [ ] Expose `\b` and `\B` in the regex surface.
+- [x] Expose `\b` and `\B` in the regex surface.
 
-- [ ] Reuse the existing boundary logic in `src/regex/unicode.zig` instead of
+- [x] Reuse the existing boundary logic in `src/regex/unicode.zig` instead of
   inventing a second boundary implementation.
 
-- [ ] Add the missing parser / HIR / NFA node support for word boundaries.
+- [x] Add the missing parser / HIR / NFA node support for word boundaries.
 
-- [ ] Decide and document whether boundary behavior is:
-  - Unicode-aware by default
-  - ASCII-only
-  - or mode-dependent
+- [x] Decide and document boundary behavior:
+  - Unicode-aware by default on valid UTF-8 scalars
+  - invalid bytes on the raw-byte path are treated as non-word units
 
-- [ ] Add tests for:
+- [x] Add tests for:
   - ASCII words
   - non-ASCII words
   - punctuation boundaries

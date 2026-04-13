@@ -17,6 +17,8 @@ pub const Node = union(enum) {
     dot,
     anchor_start,
     anchor_end,
+    word_boundary,
+    not_word_boundary,
     char_class: CharacterClass,
     group: struct {
         index: u32,
@@ -148,6 +150,8 @@ fn lowerNode(
         .dot => .dot,
         .anchor_start => .anchor_start,
         .anchor_end => .anchor_end,
+        .word_boundary => .word_boundary,
+        .not_word_boundary => .not_word_boundary,
         .char_class => |class| .{ .char_class = .{
             .negated = class.negated,
             .items = try dupClassItems(allocator, class.items),

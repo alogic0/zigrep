@@ -21,6 +21,8 @@ pub const Token = union(enum) {
     not_word_class,
     space_class,
     not_space_class,
+    word_boundary,
+    not_word_boundary,
     dot,
     anchor_start,
     anchor_end,
@@ -111,7 +113,8 @@ pub fn Lexer(comptime T: type) type {
                 'W' => .not_word_class,
                 's' => .space_class,
                 'S' => .not_space_class,
-                'b', 'B' => error.UnsupportedEscape,
+                'b' => .word_boundary,
+                'B' => .not_word_boundary,
                 else => .{ .literal = escaped },
             };
         }
@@ -171,15 +174,6 @@ test "Lexer decodes common escapes and tracks spans" {
     try testing.expectEqualDeep(Span{ .start = 4, .end = 8 }, hex.span);
 }
 
-test "Lexer rejects unsupported shorthand and boundary escapes" {
-    const testing = @import("std").testing;
-
-    inline for (.{ "\\b", "\\B" }) |pattern| {
-        var lexer = Lexer(u8).init(pattern);
-        try testing.expectError(error.UnsupportedEscape, lexer.next());
-    }
-}
-
 test "Lexer tokenizes shorthand character classes" {
     const testing = @import("std").testing;
 
@@ -191,5 +185,15 @@ test "Lexer tokenizes shorthand character classes" {
     try testing.expectEqualDeep(Token.not_word_class, try lexer.next());
     try testing.expectEqualDeep(Token.space_class, try lexer.next());
     try testing.expectEqualDeep(Token.not_space_class, try lexer.next());
+    try testing.expectEqualDeep(Token.eof, try lexer.next());
+}
+
+test "Lexer tokenizes word boundary escapes" {
+    const testing = @import("std").testing;
+
+    var lexer = Lexer(u8).init("\\b\\B");
+
+    try testing.expectEqualDeep(Token.word_boundary, try lexer.next());
+    try testing.expectEqualDeep(Token.not_word_boundary, try lexer.next());
     try testing.expectEqualDeep(Token.eof, try lexer.next());
 }
