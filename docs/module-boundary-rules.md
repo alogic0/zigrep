@@ -27,6 +27,9 @@ These rules are the current working contract for the `zigrep` codebase.
 
 - [src/search_runner.zig](../src/search_runner.zig) remains the top-level
   coordinator and intentionally keeps the sequential execution path.
+- `search_runner.runSearch(...)` is the current app-facing search execution
+  entrypoint. Do not add another wrapper unless it produces a meaningfully
+  clearer public boundary than the current one.
 - [src/search_path_runner.zig](../src/search_path_runner.zig) owns traversal, filtering, and schedule selection.
 - [src/search_parallel.zig](../src/search_parallel.zig) owns parallel execution.
 - [src/search_entry_runner.zig](../src/search_entry_runner.zig) owns per-file execution.
@@ -45,3 +48,16 @@ These rules are the current working contract for the `zigrep` codebase.
   [src/search_reporting.zig](../src/search_reporting.zig), because bench and
   runner/report tests still use them directly and there is no narrow
   lower-risk wiring cleanup that clearly improves that boundary today.
+- Bench is allowed to depend on both the app-facing `search_runner` entrypoint
+  and the lower-level `search`/`regex` surfaces when that matches the specific
+  benchmark being measured.
+- Treat the current root API as intentional in these buckets:
+  - `regex` and `search` as low-level library-facing modules
+  - `search_runner.runSearch(...)` as the app-facing search execution entrypoint
+  - `search_reporting` as an exposed support surface for current tests/tooling
+  - `command`, `cli`, and `config` as app-facing support modules
+- Apply these stability expectations to that root surface:
+  - stable library-facing: `regex`, `search`
+  - stable app-facing support: `search_runner.runSearch(...)`, `cli`,
+    `config`, `command`, `app_version`
+  - unstable compatibility/tooling: `search_reporting`

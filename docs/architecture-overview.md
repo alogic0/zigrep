@@ -47,6 +47,37 @@ The remaining exported search helpers are `search_runner` and
 `search_reporting`. They are kept for the current bench and runner/report test
 surface, not because the internal search stack needs another public wrapper.
 
+Within that surface, `search_runner.runSearch(...)` is the current deliberate
+app-facing search execution entrypoint.
+
+The bench target intentionally uses both that app-facing execution entrypoint
+and the lower-level `search`/`regex` surfaces for different benchmark classes.
+
+Current intended root API buckets:
+
+- `regex` and `search`
+  - low-level library-facing modules
+- `search_runner`
+  - app-facing search execution entrypoint
+- `search_reporting`
+  - exposed support surface for current tests and tooling
+- `command`, `cli`, and `config`
+  - app-facing support modules
+
+Current stability policy:
+
+- stable library-facing surface:
+  - `regex`
+  - `search`
+- stable app-facing execution/support surface:
+  - `search_runner.runSearch(...)`
+  - `cli`
+  - `config`
+  - `command`
+  - `app_version`
+- unstable compatibility/tooling surface:
+  - `search_reporting`
+
 See also:
 - [docs/module-boundary-rules.md](module-boundary-rules.md)
 
