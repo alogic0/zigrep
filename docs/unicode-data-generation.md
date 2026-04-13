@@ -33,6 +33,7 @@ Specifically, the current property generator reads:
 
 - `UnicodeData.txt`
 - `PropList.txt`
+- Unicode version `16.0.0`
 
 This is a generation-time input only.
 

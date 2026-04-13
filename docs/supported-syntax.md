@@ -45,6 +45,8 @@ Unicode data note:
   from the local `zg` repository at generation time only
 - `zigrep` runtime code is expected to use only generated files checked into
   this repo, not a runtime dependency on `zg`
+- the current generated Unicode property tables are pinned to Unicode version
+  `16.0.0`
 
 Current escape boundary:
 

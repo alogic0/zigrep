@@ -1947,6 +1947,21 @@ test "Searcher byte matching falls back to the general VM when no byte plan exis
     try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
 }
 
+test "Searcher Unicode property patterns stay on the general raw-byte VM path" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "\\p{Letter}+", .{});
+    defer searcher.deinit();
+
+    try testing.expect(!searcher.hasBytePlan());
+
+    const report = (try searcher.reportFirstByteMatch("unicode.bin", "\xffж7")).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), report.column_number);
+    try testing.expectEqual(Span{ .start = 1, .end = 3 }, report.match_span);
+}
+
 test "Searcher planner and raw-byte VM agree on invalid UTF-8 spans" {
     try expectPlannerAndVmEquivalent("needle", "xx\xffneedleyy");
     try expectPlannerAndVmEquivalent("a.b", "xxa\xffbyy");

@@ -129,14 +129,14 @@ The goal is:
 
 ## Phase 3: Add Unicode Property Syntax
 
-- [ ] Add lexer support for property escapes only if Phase 1 and 2 are settled.
+- [x] Add lexer support for property escapes only if Phase 1 and 2 are settled.
   Candidate syntax:
   - `\p{Letter}`
   - `\P{Letter}`
 
-- [ ] Reject unsupported or malformed property names explicitly.
+- [x] Reject unsupported or malformed property names explicitly.
 
-- [ ] Lower supported property escapes into native-engine class/property nodes
+- [x] Lower supported property escapes into native-engine class/property nodes
   without introducing a second execution path.
 
 - [x] Keep ASCII shorthand classes unchanged unless there is an explicit
@@ -148,15 +148,15 @@ The goal is:
 
 ## Phase 4: Engine Integration
 
-- [ ] Extend HIR to represent Unicode property predicates cleanly.
+- [x] Extend HIR to represent Unicode property predicates cleanly.
 
-- [ ] Extend NFA compilation without changing the overall execution model.
+- [x] Extend NFA compilation without changing the overall execution model.
 
-- [ ] Extend VM matching rules:
+- [x] Extend VM matching rules:
   - valid UTF-8 scalar => Unicode property lookup
   - invalid byte on raw-byte path => non-scalar behavior stays explicit
 
-- [ ] Decide whether DFA boolean-search fast paths need to opt out for Unicode
+- [x] Decide whether DFA boolean-search fast paths need to opt out for Unicode
   property patterns at first, similar to the boundary decision, before any more
   aggressive optimization work.
 
@@ -172,7 +172,7 @@ The goal is:
 - [ ] If bracket integration is included, support property items inside classes
   without creating ambiguous parser behavior.
 
-- [ ] Keep non-Unicode class behavior stable:
+- [x] Keep non-Unicode class behavior stable:
   - existing ASCII classes
   - negated classes
   - raw-byte matching semantics on invalid UTF-8 input
@@ -195,15 +195,20 @@ The goal is:
   - property matching in invalid-UTF-8 files through the raw-byte path
   - failure behavior for unsupported properties
 
-- [ ] Re-run planner-vs-general-VM equivalence coverage if any byte-path fast
+- [x] Re-run planner-vs-general-VM equivalence coverage if any byte-path fast
   path is taught about Unicode properties.
+
+  Result:
+  - Unicode property patterns still stay off the byte planner
+  - the general raw-byte VM remains the only byte-path execution route for
+    property patterns in the current implementation
 
 ## Recommended Order
 
 - [x] 1. Lock Unicode semantics first.
 - [x] 2. Choose and pin the Unicode data source/version.
-- [ ] 3. Implement a very small property set with explicit errors for the rest.
-- [ ] 4. Validate UTF-8 and raw-byte behavior carefully before broadening the
+- [x] 3. Implement a very small property set with explicit errors for the rest.
+- [x] 4. Validate UTF-8 and raw-byte behavior carefully before broadening the
   property surface.
 
 ## Explicit Non-Goals
