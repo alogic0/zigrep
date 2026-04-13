@@ -18,6 +18,10 @@ pub const Property = enum {
     alphabetic,
     lowercase,
     uppercase,
+    mark,
+    punctuation,
+    separator,
+    symbol,
 };
 
 pub const GeneralCategory = enum {
@@ -108,6 +112,10 @@ pub const Strategy = struct {
         if (propertyNameEq(name, "whitespace") or propertyNameEq(name, "space") or propertyNameEq(name, "white_space")) return .whitespace;
         if (propertyNameEq(name, "alphabetic") or propertyNameEq(name, "alpha")) return .alphabetic;
         if (propertyNameEq(name, "lowercase") or propertyNameEq(name, "lower") or propertyNameEq(name, "ll")) return .lowercase;
+        if (propertyNameEq(name, "mark") or propertyNameEq(name, "m")) return .mark;
+        if (propertyNameEq(name, "punctuation") or propertyNameEq(name, "punct") or propertyNameEq(name, "p")) return .punctuation;
+        if (propertyNameEq(name, "separator") or propertyNameEq(name, "z")) return .separator;
+        if (propertyNameEq(name, "symbol") or propertyNameEq(name, "s")) return .symbol;
         if (propertyNameEq(name, "uppercase") or propertyNameEq(name, "upper") or propertyNameEq(name, "lu")) return .uppercase;
         return null;
     }
@@ -119,6 +127,10 @@ pub const Strategy = struct {
             .whitespace => inRanges(cp, &generated.whitespace_ranges),
             .alphabetic => inRanges(cp, &generated.alphabetic_ranges),
             .lowercase => inRanges(cp, &generated.lowercase_ranges),
+            .mark => inRanges(cp, &generated.mark_ranges),
+            .punctuation => inRanges(cp, &generated.punctuation_ranges),
+            .separator => inRanges(cp, &generated.separator_ranges),
+            .symbol => inRanges(cp, &generated.symbol_ranges),
             .uppercase => inRanges(cp, &generated.uppercase_ranges),
         };
     }
@@ -350,6 +362,10 @@ test "Unicode strategy looks up named properties and aliases" {
     try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("Alphabetic"));
     try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("alpha"));
     try testing.expectEqual(@as(?Property, .lowercase), Strategy.lookupProperty("Ll"));
+    try testing.expectEqual(@as(?Property, .mark), Strategy.lookupProperty("M"));
+    try testing.expectEqual(@as(?Property, .punctuation), Strategy.lookupProperty("P"));
+    try testing.expectEqual(@as(?Property, .separator), Strategy.lookupProperty("Z"));
+    try testing.expectEqual(@as(?Property, .symbol), Strategy.lookupProperty("S"));
     try testing.expectEqual(@as(?Property, .uppercase), Strategy.lookupProperty("Uppercase"));
     try testing.expectEqual(@as(?Property, null), Strategy.lookupProperty("Emoji"));
 }
@@ -363,6 +379,10 @@ test "Unicode strategy evaluates property membership" {
     try testing.expect(Strategy.hasProperty(' ', .whitespace));
     try testing.expect(Strategy.hasProperty(0x0345, .alphabetic));
     try testing.expect(Strategy.hasProperty('ß', .lowercase));
+    try testing.expect(Strategy.hasProperty(0x0345, .mark));
+    try testing.expect(Strategy.hasProperty('-', .punctuation));
+    try testing.expect(Strategy.hasProperty(' ', .separator));
+    try testing.expect(Strategy.hasProperty('+', .symbol));
     try testing.expect(Strategy.hasProperty('Σ', .uppercase));
     try testing.expect(!Strategy.hasProperty('-', .letter));
 }

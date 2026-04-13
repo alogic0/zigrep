@@ -5910,6 +5910,45 @@ test "runCli supports Lowercase and Uppercase Unicode properties" {
     try testing.expect(std.mem.containsAtLeast(u8, upper_run.stdout, 1, "sample.txt:2:1:Σ"));
 }
 
+test "runCli supports Mark, Punctuation, Separator, and Symbol Unicode properties" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "\xCD\x85\n" ++
+            "!\n" ++
+            " \n" ++
+            "+\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const mark_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Mark}+", root_path });
+    defer mark_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), mark_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, mark_run.stdout, 1, "sample.txt:1:1:"));
+
+    const punctuation_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Punctuation}+", root_path });
+    defer punctuation_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), punctuation_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, punctuation_run.stdout, 1, "sample.txt:2:1:!"));
+
+    const separator_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Separator}+", root_path });
+    defer separator_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), separator_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, separator_run.stdout, 1, "sample.txt:3:1: "));
+
+    const symbol_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Symbol}+", root_path });
+    defer symbol_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), symbol_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, symbol_run.stdout, 1, "sample.txt:4:1:+"));
+}
+
 test "runCli supports Unicode property items inside character classes" {
     const testing = std.testing;
 

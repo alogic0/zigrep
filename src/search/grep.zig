@@ -2109,6 +2109,23 @@ test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     var uppercase = try Searcher.init(testing.allocator, "\\p{Uppercase}+", .{});
     defer uppercase.deinit();
     try testing.expect((try uppercase.reportFirstMatch("sample.txt", "Σ")) != null);
+
+    var mark = try Searcher.init(testing.allocator, "\\p{Mark}+", .{});
+    defer mark.deinit();
+    try testing.expect((try mark.reportFirstMatch("sample.txt", "\xCD\x85")) != null);
+
+    var punctuation = try Searcher.init(testing.allocator, "\\p{Punctuation}+", .{});
+    defer punctuation.deinit();
+    try testing.expect((try punctuation.reportFirstMatch("sample.txt", "!")) != null);
+
+    var separator = try Searcher.init(testing.allocator, "\\p{Separator}+", .{});
+    defer separator.deinit();
+    try testing.expect((try separator.reportFirstMatch("sample.txt", " ")) != null);
+
+    var symbol = try Searcher.init(testing.allocator, "\\p{Symbol}+", .{});
+    defer symbol.deinit();
+    try testing.expect((try symbol.reportFirstMatch("sample.txt", "+")) != null);
+
 }
 
 test "Searcher handles Unicode property items inside character classes" {

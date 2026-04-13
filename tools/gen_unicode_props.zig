@@ -10,6 +10,10 @@ const CategoryKind = enum {
     number,
     lowercase,
     uppercase,
+    mark,
+    punctuation,
+    symbol,
+    separator,
 };
 
 const Config = struct {
@@ -45,7 +49,30 @@ pub fn main() !void {
     var uppercase_ranges: std.ArrayList(Range) = .empty;
     defer uppercase_ranges.deinit(arena);
 
-    try loadUnicodeData(arena, config.unicode_data, &letter_ranges, &number_ranges, &lowercase_ranges, &uppercase_ranges);
+    var mark_ranges: std.ArrayList(Range) = .empty;
+    defer mark_ranges.deinit(arena);
+
+    var punctuation_ranges: std.ArrayList(Range) = .empty;
+    defer punctuation_ranges.deinit(arena);
+
+    var symbol_ranges: std.ArrayList(Range) = .empty;
+    defer symbol_ranges.deinit(arena);
+
+    var separator_ranges: std.ArrayList(Range) = .empty;
+    defer separator_ranges.deinit(arena);
+
+    try loadUnicodeData(
+        arena,
+        config.unicode_data,
+        &letter_ranges,
+        &number_ranges,
+        &lowercase_ranges,
+        &uppercase_ranges,
+        &mark_ranges,
+        &punctuation_ranges,
+        &symbol_ranges,
+        &separator_ranges,
+    );
     try loadWhitespaceData(arena, config.prop_list, &whitespace_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "Alphabetic", &alphabetic_ranges);
 
@@ -57,6 +84,10 @@ pub fn main() !void {
         alphabetic_ranges.items,
         lowercase_ranges.items,
         uppercase_ranges.items,
+        mark_ranges.items,
+        punctuation_ranges.items,
+        symbol_ranges.items,
+        separator_ranges.items,
     );
 }
 
@@ -152,6 +183,10 @@ fn loadUnicodeData(
     number_ranges: *std.ArrayList(Range),
     lowercase_ranges: *std.ArrayList(Range),
     uppercase_ranges: *std.ArrayList(Range),
+    mark_ranges: *std.ArrayList(Range),
+    punctuation_ranges: *std.ArrayList(Range),
+    symbol_ranges: *std.ArrayList(Range),
+    separator_ranges: *std.ArrayList(Range),
 ) !void {
     const bytes = try std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024);
 
@@ -177,7 +212,20 @@ fn loadUnicodeData(
         if (std.mem.endsWith(u8, name_field, ", Last>")) {
             if (range_start) |start| {
                 if (range_kind) |kind| {
-                    try appendCategoryRange(allocator, kind, start, cp, letter_ranges, number_ranges, lowercase_ranges, uppercase_ranges);
+                    try appendCategoryRange(
+                        allocator,
+                        kind,
+                        start,
+                        cp,
+                        letter_ranges,
+                        number_ranges,
+                        lowercase_ranges,
+                        uppercase_ranges,
+                        mark_ranges,
+                        punctuation_ranges,
+                        symbol_ranges,
+                        separator_ranges,
+                    );
                 }
             }
             range_start = null;
@@ -186,7 +234,20 @@ fn loadUnicodeData(
         }
 
         if (categoryKind(category_field)) |kind| {
-            try appendCategoryRange(allocator, kind, cp, cp, letter_ranges, number_ranges, lowercase_ranges, uppercase_ranges);
+            try appendCategoryRange(
+                allocator,
+                kind,
+                cp,
+                cp,
+                letter_ranges,
+                number_ranges,
+                lowercase_ranges,
+                uppercase_ranges,
+                mark_ranges,
+                punctuation_ranges,
+                symbol_ranges,
+                separator_ranges,
+            );
         }
     }
 }
@@ -197,7 +258,11 @@ fn categoryKind(category: []const u8) ?CategoryKind {
     if (std.mem.eql(u8, category, "Lu")) return .uppercase;
     return switch (category[0]) {
         'L' => .letter,
+        'M' => .mark,
         'N' => .number,
+        'P' => .punctuation,
+        'S' => .symbol,
+        'Z' => .separator,
         else => null,
     };
 }
@@ -211,14 +276,22 @@ fn appendCategoryRange(
     number_ranges: *std.ArrayList(Range),
     lowercase_ranges: *std.ArrayList(Range),
     uppercase_ranges: *std.ArrayList(Range),
+    mark_ranges: *std.ArrayList(Range),
+    punctuation_ranges: *std.ArrayList(Range),
+    symbol_ranges: *std.ArrayList(Range),
+    separator_ranges: *std.ArrayList(Range),
 ) !void {
     switch (kind) {
         .letter => try appendMergedRange(allocator, letter_ranges, .{ .start = start, .end = end }),
+        .mark => try appendMergedRange(allocator, mark_ranges, .{ .start = start, .end = end }),
         .number => try appendMergedRange(allocator, number_ranges, .{ .start = start, .end = end }),
+        .punctuation => try appendMergedRange(allocator, punctuation_ranges, .{ .start = start, .end = end }),
+        .separator => try appendMergedRange(allocator, separator_ranges, .{ .start = start, .end = end }),
         .lowercase => {
             try appendMergedRange(allocator, letter_ranges, .{ .start = start, .end = end });
             try appendMergedRange(allocator, lowercase_ranges, .{ .start = start, .end = end });
         },
+        .symbol => try appendMergedRange(allocator, symbol_ranges, .{ .start = start, .end = end }),
         .uppercase => {
             try appendMergedRange(allocator, letter_ranges, .{ .start = start, .end = end });
             try appendMergedRange(allocator, uppercase_ranges, .{ .start = start, .end = end });
@@ -328,6 +401,10 @@ fn writeOutput(
     alphabetic_ranges: []const Range,
     lowercase_ranges: []const Range,
     uppercase_ranges: []const Range,
+    mark_ranges: []const Range,
+    punctuation_ranges: []const Range,
+    symbol_ranges: []const Range,
+    separator_ranges: []const Range,
 ) !void {
     const output_path = config.output;
     if (std.fs.path.dirname(output_path)) |dir_path| {
@@ -364,6 +441,14 @@ fn writeOutput(
     try writeRangeList(&writer.interface, "lowercase_ranges", lowercase_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "uppercase_ranges", uppercase_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "mark_ranges", mark_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "punctuation_ranges", punctuation_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "symbol_ranges", symbol_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "separator_ranges", separator_ranges);
     try writer.interface.flush();
 }
 
