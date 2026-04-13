@@ -61,6 +61,8 @@ Current escape boundary:
   - `\p{Letter}` and `\P{Letter}`
   - `\p{Number}` and `\P{Number}`
   - `\p{Whitespace}` and `\P{Whitespace}`
+  - the same property items may also appear inside bracket classes
+    - for example `[\p{Letter}\P{Whitespace}]`
   - accepted aliases currently include `L`, `N`, and `White_Space`
   - invalid raw bytes do not match positive Unicode properties and do match
     negated Unicode properties

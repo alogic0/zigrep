@@ -173,6 +173,10 @@ fn classContainsCodePoint(items: []const hir_mod.ClassItem, cp: u32) bool {
         switch (item) {
             .literal => |literal| if (literal == cp) return true,
             .range => |range| if (range.start <= cp and cp <= range.end) return true,
+            .unicode_property => |property| {
+                const matched = unicode.Strategy.hasProperty(cp, property.property);
+                if (property.negated != matched) return true;
+            },
         }
     }
     return false;
@@ -188,6 +192,7 @@ fn isAsciiOnly(instructions: []const Inst) bool {
                     switch (item) {
                         .literal => |literal| if (literal > 0x7f) return false,
                         .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
+                        .unicode_property => return false,
                     }
                 }
             },

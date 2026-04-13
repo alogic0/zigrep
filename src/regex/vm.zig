@@ -381,6 +381,13 @@ fn classMatches(class: anytype, cp: u32) bool {
                     break;
                 }
             },
+            .unicode_property => |property| {
+                const property_matched = unicode.Strategy.hasProperty(cp, property.property);
+                if (property.negated != property_matched) {
+                    matched = true;
+                    break;
+                }
+            },
         }
     }
     return if (class.negated) !matched else matched;
@@ -407,6 +414,7 @@ fn isAsciiClass(class: anytype) bool {
         switch (item) {
             .literal => |literal| if (literal > 0x7f) return false,
             .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
+            .unicode_property => return false,
         }
     }
     return true;

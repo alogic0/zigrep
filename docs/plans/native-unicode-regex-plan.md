@@ -166,10 +166,10 @@ The goal is:
   the first implementation or only as top-level escapes.
 
   Decision:
-  - keep the first implementation top-level only
-  - do not allow property items inside bracket classes yet
+  - bracket-class property items are native-core work
+  - implement them as a follow-up once top-level property escapes are stable
 
-- [ ] If bracket integration is included, support property items inside classes
+- [x] If bracket integration is included, support property items inside classes
   without creating ambiguous parser behavior.
 
 - [x] Keep non-Unicode class behavior stable:

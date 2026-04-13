@@ -321,6 +321,7 @@ fn foldedCharacterClass(allocator: std.mem.Allocator, class: CharacterClass) Cas
                     try appendFoldedCodePointItems(allocator, &items, cp);
                 }
             },
+            .unicode_property => |property| try items.append(allocator, .{ .unicode_property = property }),
         }
     }
 
@@ -352,6 +353,7 @@ fn appendUniqueLiteralItem(
         switch (item) {
             .literal => |existing| if (existing == cp) return,
             .range => |range| if (range.start <= cp and cp <= range.end) return,
+            .unicode_property => {},
         }
     }
     try items.append(allocator, .{ .literal = cp });

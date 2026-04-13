@@ -20,6 +20,10 @@ pub const ClassRange = struct {
 pub const ClassItem = union(enum) {
     literal: u32,
     range: ClassRange,
+    unicode_property: struct {
+        property: unicode.Property,
+        negated: bool,
+    },
 };
 
 pub const CharacterClass = struct {
@@ -362,18 +366,20 @@ pub const Parser = struct {
             if (self.lookahead.token == .hyphen) {
                 try self.advance();
                 if (self.lookahead.token == .r_bracket) {
-                    try items.append(self.allocator, .{ .literal = start });
+                    try items.append(self.allocator, start);
                     try items.append(self.allocator, .{ .literal = '-' });
                     break;
                 }
 
                 const range_end = try self.parseClassAtom(false);
-                if (range_end < start) return error.InvalidClassRange;
-                try items.append(self.allocator, .{ .range = .{ .start = start, .end = range_end } });
+                const start_literal = classItemToLiteral(start) orelse return error.InvalidClassRange;
+                const end_literal = classItemToLiteral(range_end) orelse return error.InvalidClassRange;
+                if (end_literal < start_literal) return error.InvalidClassRange;
+                try items.append(self.allocator, .{ .range = .{ .start = start_literal, .end = end_literal } });
                 continue;
             }
 
-            try items.append(self.allocator, .{ .literal = start });
+            try items.append(self.allocator, start);
         }
 
         if (self.lookahead.token != .r_bracket) return error.UnterminatedClass;
@@ -386,26 +392,40 @@ pub const Parser = struct {
         } });
     }
 
-    fn parseClassAtom(self: *Parser, first: bool) ParseError!u32 {
+    fn parseClassAtom(self: *Parser, first: bool) ParseError!ClassItem {
         switch (self.lookahead.token) {
             .literal => |cp| {
                 try self.advance();
-                return cp;
+                return .{ .literal = cp };
             },
             .hyphen => {
                 try self.advance();
-                return '-';
+                return .{ .literal = '-' };
             },
             .r_bracket => if (first) {
                 try self.advance();
-                return ']';
+                return .{ .literal = ']' };
             } else return error.UnterminatedClass,
             .anchor_start => {
                 try self.advance();
-                return '^';
+                return .{ .literal = '^' };
+            },
+            .unicode_property => |property| {
+                try self.advance();
+                return .{ .unicode_property = .{
+                    .property = property.property,
+                    .negated = property.negated,
+                } };
             },
             else => return error.UnexpectedToken,
         }
+    }
+
+    fn classItemToLiteral(item: ClassItem) ?u32 {
+        return switch (item) {
+            .literal => |cp| cp,
+            else => null,
+        };
     }
 
     fn canStartPrimary(self: *const Parser) bool {
@@ -780,4 +800,23 @@ test "Parser supports Unicode property escapes" {
         .property = .number,
         .negated = true,
     } }, ast.nodes[@intFromEnum(root[1])]);
+}
+
+test "Parser supports Unicode property items inside character classes" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "[\\p{Letter}\\P{Whitespace}]");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const class = ast.nodes[@intFromEnum(ast.root)].char_class;
+    try testing.expectEqual(@as(usize, 2), class.items.len);
+    try testing.expectEqualDeep(ClassItem{ .unicode_property = .{
+        .property = .letter,
+        .negated = false,
+    } }, class.items[0]);
+    try testing.expectEqualDeep(ClassItem{ .unicode_property = .{
+        .property = .whitespace,
+        .negated = true,
+    } }, class.items[1]);
 }

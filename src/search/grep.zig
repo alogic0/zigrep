@@ -877,6 +877,7 @@ fn classToByteTerm(
                     try patterns.append(allocator, try bytePatternForLiteralCodePoint(allocator, cp));
                 }
             },
+            .unicode_property => return null,
         }
     }
 
@@ -901,6 +902,7 @@ fn classToUtf8Atom(
             .range => |range| {
                 if (range.start > 0x7f or range.end > 0x7f) saw_non_ascii = true;
             },
+            .unicode_property => return null,
         }
     }
     if (!saw_non_ascii) return null;
@@ -1424,6 +1426,7 @@ fn isAsciiClass(class: regex.hir.CharacterClass) bool {
         switch (item) {
             .literal => |literal| if (literal > 0x7f) return false,
             .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
+            .unicode_property => return false,
         }
     }
     return true;
@@ -1444,6 +1447,13 @@ fn classMatchesCodePoint(class: regex.hir.CharacterClass, cp: u32) bool {
             .range => |range| if (range.start <= cp and cp <= range.end) {
                 matched = true;
                 break;
+            },
+            .unicode_property => |property| {
+                const property_matched = regex.unicode.Strategy.hasProperty(cp, property.property);
+                if (property.negated != property_matched) {
+                    matched = true;
+                    break;
+                }
             },
         }
     }
@@ -2087,6 +2097,20 @@ test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     const raw_not_letter = (try not_letter.reportFirstByteMatch("raw.bin", "\xff")).?;
     defer raw_not_letter.deinit(testing.allocator);
     try testing.expectEqual(Span{ .start = 0, .end = 1 }, raw_not_letter.match_span);
+}
+
+test "Searcher handles Unicode property items inside character classes" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "[\\p{Letter}\\P{Whitespace}]+", .{});
+    defer searcher.deinit();
+
+    try testing.expect(!searcher.hasBytePlan());
+    try testing.expect((try searcher.reportFirstMatch("sample.txt", "ж7")) != null);
+
+    const raw_report = (try searcher.reportFirstByteMatch("raw.bin", "\xffж7")).?;
+    defer raw_report.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 0, .end = 4 }, raw_report.match_span);
 }
 
 test "Searcher forEachMatchReport advances across repeated multiline matches" {
