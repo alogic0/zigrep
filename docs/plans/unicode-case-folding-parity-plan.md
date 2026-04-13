@@ -201,7 +201,7 @@ Non-goal for this plan:
   - current result: literals, classes, case-related property folding, and
     smart-case titlecase behavior now match the checked local `ripgrep`
     samples; the deliberate remaining divergence is broad folded ranges like
-    `[\u{0000}-\u{10FFFF}]` under `-i`, which `ripgrep` accepts and `zigrep`
+    `[\u{0000}-\u{FFFF}]` under `-i`, which `ripgrep` accepts and `zigrep`
     still rejects explicitly
 
 ## Recommended Order
@@ -224,11 +224,13 @@ Implemented outcome:
 - case-related Unicode properties fold under `-i`
 - smart-case uses Unicode-aware uppercase detection and treats titlecase
   patterns as ignore-case, matching the checked local `ripgrep` behavior
-- broad folded ranges still keep the explicit native-core rejection boundary
+- the universal scalar range `[\u{0000}-\u{10FFFF}]` is now accepted under
+  `-i`, while broader folded ranges still keep the explicit native-core
+  rejection boundary
 
 Remaining divergence from local `ripgrep`:
 
-- `ripgrep` accepts broad folded ranges such as `[\u{0000}-\u{10FFFF}]` under
+- `ripgrep` accepts broad folded ranges such as `[\u{0000}-\u{FFFF}]` under
   `-i`
 - `zigrep` still rejects those patterns explicitly with
   `UnsupportedCaseInsensitivePattern`

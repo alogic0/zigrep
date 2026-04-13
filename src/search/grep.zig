@@ -1790,14 +1790,21 @@ test "reportFirstMatch rejects oversized case-insensitive ranges" {
         "abc",
         .{ .case_mode = .insensitive },
     ));
+}
 
-    try testing.expectError(error.UnsupportedCaseInsensitivePattern, reportFirstMatch(
+test "reportFirstMatch accepts universal Unicode case-insensitive range" {
+    const testing = std.testing;
+
+    const report = (try reportFirstMatch(
         testing.allocator,
         "[\u{0000}-\u{10FFFF}]",
         "sample.txt",
         "abc",
         .{ .case_mode = .insensitive },
-    ));
+    )).?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("a", report.match_text);
 }
 
 test "Searcher can report exact literal matches on invalid UTF-8 through byte fallback" {

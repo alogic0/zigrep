@@ -306,7 +306,7 @@ Case-mode note:
   general VM path
 - broad case-insensitive class ranges are still explicitly rejected when the
   rewrite would exceed the current bounded expansion model, for example a range
-  like `[\u{0000}-\u{10FFFF}]` under `-i`
+  like `[\u{0000}-\u{FFFF}]` under `-i`
 - if a case-insensitive character class range is too large to rewrite safely, `zigrep` fails explicitly instead of silently under-matching
 
 Current `--text` note:

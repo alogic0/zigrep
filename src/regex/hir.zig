@@ -130,6 +130,15 @@ pub fn applySimpleCaseFold(allocator: std.mem.Allocator, hir: *Hir) CaseFoldErro
                 } };
             },
             .char_class => |class| {
+                if (classIsUniversalScalarClass(class)) {
+                    allocator.free(class.items);
+                    node.* = .{ .unicode_property = .{
+                        .property = .any,
+                        .negated = false,
+                    } };
+                    continue;
+                }
+
                 const folded = try foldedCharacterClass(allocator, class);
                 allocator.free(class.items);
                 node.* = .{ .char_class = folded };
@@ -339,6 +348,14 @@ fn foldedCharacterClass(allocator: std.mem.Allocator, class: CharacterClass) Cas
     return .{
         .negated = class.negated,
         .items = try items.toOwnedSlice(allocator),
+    };
+}
+
+fn classIsUniversalScalarClass(class: CharacterClass) bool {
+    if (class.negated or class.items.len != 1) return false;
+    return switch (class.items[0]) {
+        .range => |range| range.start == 0 and range.end == 0x10FFFF,
+        else => false,
     };
 }
 
