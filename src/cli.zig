@@ -35,6 +35,35 @@ pub const ParseResult = union(enum) {
     run: CliOptions,
 };
 
+const ParseState = struct {
+    include_hidden: bool = false,
+    follow_symlinks: bool = false,
+    invert_match: bool = false,
+    no_ignore: bool = false,
+    no_ignore_vcs: bool = false,
+    no_ignore_parent: bool = false,
+    binary_mode: BinaryMode = .skip,
+    search_compressed: bool = false,
+    preprocessor: ?[]const u8 = null,
+    unrestricted_level: u8 = 0,
+    case_mode: search.grep.CaseMode = .sensitive,
+    read_strategy: search.io.ReadStrategy = .mmap,
+    encoding: search.io.InputEncoding = .auto,
+    multiline: bool = false,
+    multiline_dotall: bool = false,
+    parallel_jobs: ?usize = null,
+    max_depth: ?usize = null,
+    max_count: ?usize = null,
+    context_before: usize = 0,
+    context_after: usize = 0,
+    show_stats: bool = false,
+    output: OutputOptions = .{},
+    output_format: OutputFormat = .text,
+    report_mode: ReportMode = .lines,
+    pattern: ?[]const u8 = null,
+    show_type_list: bool = false,
+};
+
 pub fn writeFatalError(writer: *std.Io.Writer, argv0: []const u8, err: anyerror) !void {
     try writer.print("error: {s}\n", .{@errorName(err)});
     if (isUsageError(err)) {
@@ -82,32 +111,7 @@ pub fn runCli(
 pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResult {
     if (argv.len <= 1) return error.MissingPattern;
 
-    var include_hidden = false;
-    var follow_symlinks = false;
-    var invert_match = false;
-    var no_ignore = false;
-    var no_ignore_vcs = false;
-    var no_ignore_parent = false;
-    var binary_mode: BinaryMode = .skip;
-    var search_compressed = false;
-    var preprocessor: ?[]const u8 = null;
-    var unrestricted_level: u8 = 0;
-    var case_mode: search.grep.CaseMode = .sensitive;
-    var read_strategy: search.io.ReadStrategy = .mmap;
-    var encoding: search.io.InputEncoding = .auto;
-    var multiline = false;
-    var multiline_dotall = false;
-    var parallel_jobs: ?usize = null;
-    var max_depth: ?usize = null;
-    var max_count: ?usize = null;
-    var context_before: usize = 0;
-    var context_after: usize = 0;
-    var show_stats = false;
-    var output: OutputOptions = .{};
-    var output_format: OutputFormat = .text;
-    var report_mode: ReportMode = .lines;
-    var pattern: ?[]const u8 = null;
-    var show_type_list = false;
+    var state: ParseState = .{};
     var paths = std.ArrayList([]const u8).empty;
     var globs = std.ArrayList([]const u8).empty;
     var pre_globs = std.ArrayList([]const u8).empty;
@@ -127,12 +131,12 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
     var index: usize = 1;
     while (index < argv.len) : (index += 1) {
         const arg = argv[index];
-        if (!stop_parsing_flags and pattern == null and std.mem.eql(u8, arg, "--")) {
+        if (!stop_parsing_flags and state.pattern == null and std.mem.eql(u8, arg, "--")) {
             stop_parsing_flags = true;
             continue;
         }
 
-        if (!stop_parsing_flags and pattern == null and arg.len > 0 and arg[0] == '-') {
+        if (!stop_parsing_flags and state.pattern == null and arg.len > 0 and arg[0] == '-') {
             if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
                 return .help;
             }
@@ -140,19 +144,19 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
                 return .version;
             }
             if (std.mem.eql(u8, arg, "--unrestricted")) {
-                unrestricted_level = @min(unrestricted_level + 1, 3);
+                state.unrestricted_level = @min(state.unrestricted_level + 1, 3);
                 continue;
             }
             if (shortUnrestrictedCount(arg)) |count| {
-                unrestricted_level = @min(unrestricted_level + count, 3);
+                state.unrestricted_level = @min(state.unrestricted_level + count, 3);
                 continue;
             }
             if (std.mem.eql(u8, arg, "--hidden")) {
-                include_hidden = true;
+                state.include_hidden = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--invert-match")) {
-                invert_match = true;
+                state.invert_match = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--ignore-file")) {
@@ -162,23 +166,23 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
                 continue;
             }
             if (std.mem.eql(u8, arg, "--type-list")) {
-                show_type_list = true;
+                state.show_type_list = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--json")) {
-                output_format = .json;
+                state.output_format = .json;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--stats")) {
-                show_stats = true;
+                state.show_stats = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--null")) {
-                output.null_path_terminator = true;
+                state.output.null_path_terminator = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--heading")) {
-                output.heading = true;
+                state.output.heading = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--type-add")) {
@@ -200,45 +204,45 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
                 continue;
             }
             if (std.mem.eql(u8, arg, "--no-ignore")) {
-                no_ignore = true;
+                state.no_ignore = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--no-ignore-vcs")) {
-                no_ignore_vcs = true;
+                state.no_ignore_vcs = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--no-ignore-parent")) {
-                no_ignore_parent = true;
+                state.no_ignore_parent = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--follow")) {
-                follow_symlinks = true;
+                state.follow_symlinks = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--ignore-case")) {
-                case_mode = .insensitive;
+                state.case_mode = .insensitive;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-S") or std.mem.eql(u8, arg, "--smart-case")) {
-                case_mode = .smart;
+                state.case_mode = .smart;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--text")) {
-                binary_mode = .text;
+                state.binary_mode = .text;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--binary")) {
-                binary_mode = .suppress;
+                state.binary_mode = .suppress;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-z") or std.mem.eql(u8, arg, "--search-zip")) {
-                search_compressed = true;
+                state.search_compressed = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--pre")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
-                preprocessor = argv[index];
+                state.preprocessor = argv[index];
                 continue;
             }
             if (std.mem.eql(u8, arg, "--pre-glob")) {
@@ -254,110 +258,110 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
                 continue;
             }
             if (std.mem.eql(u8, arg, "--buffered")) {
-                read_strategy = .buffered;
+                state.read_strategy = .buffered;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--mmap")) {
-                read_strategy = .mmap;
+                state.read_strategy = .mmap;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-E") or std.mem.eql(u8, arg, "--encoding")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
-                encoding = try parseEncoding(argv[index]);
+                state.encoding = try parseEncoding(argv[index]);
                 continue;
             }
             if (std.mem.eql(u8, arg, "-U") or std.mem.eql(u8, arg, "--multiline")) {
-                multiline = true;
+                state.multiline = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--multiline-dotall")) {
-                multiline_dotall = true;
+                state.multiline_dotall = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-j") or std.mem.eql(u8, arg, "--threads")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
-                parallel_jobs = try parsePositiveUsize(argv[index]);
+                state.parallel_jobs = try parsePositiveUsize(argv[index]);
                 continue;
             }
             if (std.mem.eql(u8, arg, "--max-depth")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
-                max_depth = try parseNonNegativeUsize(argv[index]);
+                state.max_depth = try parseNonNegativeUsize(argv[index]);
                 continue;
             }
             if (std.mem.eql(u8, arg, "-A") or std.mem.eql(u8, arg, "--after-context")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
-                context_after = try parseNonNegativeUsize(argv[index]);
+                state.context_after = try parseNonNegativeUsize(argv[index]);
                 continue;
             }
             if (std.mem.eql(u8, arg, "-B") or std.mem.eql(u8, arg, "--before-context")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
-                context_before = try parseNonNegativeUsize(argv[index]);
+                state.context_before = try parseNonNegativeUsize(argv[index]);
                 continue;
             }
             if (std.mem.eql(u8, arg, "-C") or std.mem.eql(u8, arg, "--context")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
                 const context = try parseNonNegativeUsize(argv[index]);
-                context_before = context;
-                context_after = context;
+                state.context_before = context;
+                state.context_after = context;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--max-count")) {
                 index += 1;
                 if (index >= argv.len) return error.MissingFlagValue;
-                max_count = try parsePositiveUsize(argv[index]);
+                state.max_count = try parsePositiveUsize(argv[index]);
                 continue;
             }
             if (std.mem.eql(u8, arg, "-H") or std.mem.eql(u8, arg, "--with-filename")) {
-                output.with_filename = true;
+                state.output.with_filename = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--count")) {
-                report_mode = .count;
+                state.report_mode = .count;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--files-with-matches")) {
-                report_mode = .files_with_matches;
+                state.report_mode = .files_with_matches;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-L") or std.mem.eql(u8, arg, "--files-without-match")) {
-                report_mode = .files_without_match;
+                state.report_mode = .files_without_match;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--only-matching")) {
-                output.only_matching = true;
+                state.output.only_matching = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--no-filename")) {
-                output.with_filename = false;
+                state.output.with_filename = false;
                 continue;
             }
             if (std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "--line-number")) {
-                output.line_number = true;
+                state.output.line_number = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--no-line-number")) {
-                output.line_number = false;
+                state.output.line_number = false;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--column")) {
-                output.column_number = true;
+                state.output.column_number = true;
                 continue;
             }
             if (std.mem.eql(u8, arg, "--no-column")) {
-                output.column_number = false;
+                state.output.column_number = false;
                 continue;
             }
             return error.UnknownFlag;
         }
 
-        if (pattern == null) {
-            pattern = arg;
+        if (state.pattern == null) {
+            state.pattern = arg;
         } else {
             try paths.append(allocator, arg);
         }
@@ -366,39 +370,66 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
     const owned_type_adds = try type_adds.toOwnedSlice(allocator);
     errdefer allocator.free(owned_type_adds);
 
-    if (show_type_list) {
+    if (state.show_type_list) {
         return .{ .type_list = .{ .type_adds = owned_type_adds } };
     }
+    return finalizeRunParse(
+        allocator,
+        &state,
+        &paths,
+        &globs,
+        &pre_globs,
+        &ignore_files,
+        &include_types,
+        &exclude_types,
+        owned_type_adds,
+    );
+}
 
-    if (pattern == null) return error.MissingPattern;
-    if (preprocessor == null and pre_globs.items.len != 0) return error.InvalidFlagCombination;
-    if (multiline_dotall and !multiline) return error.InvalidFlagCombination;
-    if (unrestricted_level >= 1) no_ignore = true;
-    if (unrestricted_level >= 2) include_hidden = true;
-    if (unrestricted_level >= 3) binary_mode = .text;
+fn finalizeRunParse(
+    allocator: std.mem.Allocator,
+    state: *ParseState,
+    paths: *std.ArrayList([]const u8),
+    globs: *std.ArrayList([]const u8),
+    pre_globs: *std.ArrayList([]const u8),
+    ignore_files: *std.ArrayList([]const u8),
+    include_types: *std.ArrayList([]const u8),
+    exclude_types: *std.ArrayList([]const u8),
+    owned_type_adds: []const []const u8,
+) !ParseResult {
+    errdefer allocator.free(owned_type_adds);
+
+    if (state.pattern == null) return error.MissingPattern;
+    if (state.preprocessor == null and pre_globs.items.len != 0) return error.InvalidFlagCombination;
+    if (state.multiline_dotall and !state.multiline) return error.InvalidFlagCombination;
+    if (state.unrestricted_level >= 1) state.no_ignore = true;
+    if (state.unrestricted_level >= 2) state.include_hidden = true;
+    if (state.unrestricted_level >= 3) state.binary_mode = .text;
     if (paths.items.len == 0) try paths.append(allocator, ".");
-    if ((context_before != 0 or context_after != 0) and (report_mode != .lines or output.only_matching or invert_match)) {
-        return error.InvalidFlagCombination;
-    }
-    if (invert_match and output.only_matching) return error.InvalidFlagCombination;
-    if (output_format == .json and (context_before != 0 or context_after != 0)) {
-        return error.InvalidFlagCombination;
-    }
-    if (output.null_path_terminator and (output_format == .json or
-        (report_mode != .files_with_matches and report_mode != .files_without_match)))
+    if ((state.context_before != 0 or state.context_after != 0) and
+        (state.report_mode != .lines or state.output.only_matching or state.invert_match))
     {
         return error.InvalidFlagCombination;
     }
-    if (output.heading and (output_format != .text or report_mode != .lines)) {
+    if (state.invert_match and state.output.only_matching) return error.InvalidFlagCombination;
+    if (state.output_format == .json and (state.context_before != 0 or state.context_after != 0)) {
         return error.InvalidFlagCombination;
     }
-    if (binary_mode == .suppress and (output_format != .text or output.only_matching or
-        report_mode == .count or output.heading))
+    if (state.output.null_path_terminator and (state.output_format == .json or
+        (state.report_mode != .files_with_matches and state.report_mode != .files_without_match)))
     {
         return error.InvalidFlagCombination;
     }
-    if (output.heading) {
-        output.with_filename = false;
+    if (state.output.heading and (state.output_format != .text or state.report_mode != .lines)) {
+        return error.InvalidFlagCombination;
+    }
+    if (state.binary_mode == .suppress and (state.output_format != .text or state.output.only_matching or
+        state.report_mode == .count or state.output.heading))
+    {
+        return error.InvalidFlagCombination;
+    }
+    if (state.output.heading) {
+        state.output.with_filename = false;
     }
 
     const owned_paths = try paths.toOwnedSlice(allocator);
@@ -415,7 +446,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
     errdefer allocator.free(owned_exclude_types);
 
     return .{ .run = .{
-        .pattern = pattern.?,
+        .pattern = state.pattern.?,
         .paths = owned_paths,
         .globs = owned_globs,
         .pre_globs = owned_pre_globs,
@@ -423,29 +454,29 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
         .include_types = owned_include_types,
         .exclude_types = owned_exclude_types,
         .type_adds = owned_type_adds,
-        .include_hidden = include_hidden,
-        .follow_symlinks = follow_symlinks,
-        .invert_match = invert_match,
-        .no_ignore = no_ignore,
-        .no_ignore_vcs = no_ignore_vcs,
-        .no_ignore_parent = no_ignore_parent,
-        .binary_mode = binary_mode,
-        .search_compressed = search_compressed,
-        .preprocessor = preprocessor,
-        .case_mode = case_mode,
-        .read_strategy = read_strategy,
-        .encoding = encoding,
-        .multiline = multiline,
-        .multiline_dotall = multiline_dotall,
-        .parallel_jobs = parallel_jobs,
-        .max_depth = max_depth,
-        .max_count = max_count,
-        .context_before = context_before,
-        .context_after = context_after,
-        .show_stats = show_stats,
-        .output = output,
-        .output_format = output_format,
-        .report_mode = report_mode,
+        .include_hidden = state.include_hidden,
+        .follow_symlinks = state.follow_symlinks,
+        .invert_match = state.invert_match,
+        .no_ignore = state.no_ignore,
+        .no_ignore_vcs = state.no_ignore_vcs,
+        .no_ignore_parent = state.no_ignore_parent,
+        .binary_mode = state.binary_mode,
+        .search_compressed = state.search_compressed,
+        .preprocessor = state.preprocessor,
+        .case_mode = state.case_mode,
+        .read_strategy = state.read_strategy,
+        .encoding = state.encoding,
+        .multiline = state.multiline,
+        .multiline_dotall = state.multiline_dotall,
+        .parallel_jobs = state.parallel_jobs,
+        .max_depth = state.max_depth,
+        .max_count = state.max_count,
+        .context_before = state.context_before,
+        .context_after = state.context_after,
+        .show_stats = state.show_stats,
+        .output = state.output,
+        .output_format = state.output_format,
+        .report_mode = state.report_mode,
     } };
 }
 
