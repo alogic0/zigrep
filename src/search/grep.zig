@@ -2356,6 +2356,18 @@ test "Searcher supports basic class-set operators" {
     try testing.expect((try intersection.reportFirstMatch("sample.txt", "ω")) == null);
 }
 
+test "Searcher supports nested class-set expressions" {
+    const testing = std.testing;
+
+    var nested = try Searcher.init(testing.allocator, "[\\w--[\\p{ASCII}&&[^_]]]+", .{});
+    defer nested.deinit();
+    try testing.expect(!nested.hasBytePlan());
+    try testing.expect((try nested.reportFirstMatch("sample.txt", "_")) != null);
+    try testing.expect((try nested.reportFirstMatch("sample.txt", "Ж")) != null);
+    try testing.expect((try nested.reportFirstMatch("sample.txt", "Ω")) != null);
+    try testing.expect((try nested.reportFirstMatch("sample.txt", "A")) == null);
+}
+
 test "Searcher supports inline case-fold groups" {
     const testing = std.testing;
 

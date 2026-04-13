@@ -76,25 +76,25 @@ Implementation order for this plan:
 
 ## Phase 2: Nested Class-Set Expressions
 
-- [ ] Confirm the exact local `ripgrep` nested class-set surface to target:
+- [x] Confirm the exact local `ripgrep` nested class-set surface to target:
   - nested subtraction
   - nested intersection
   - whether union forms like `||` must be supported in the first slice
 
-- [ ] Decide the smallest native representation that can express nested class
+- [x] Decide the smallest native representation that can express nested class
   algebra without duplicating evaluation logic
 
-- [ ] Extend the parser from the current one-operator class-set node to a
+- [x] Extend the parser from the current one-operator class-set node to a
   recursive class-set expression tree
 
-- [ ] Lower nested class-set expressions into native matcher nodes that preserve:
+- [x] Lower nested class-set expressions into native matcher nodes that preserve:
   - Unicode property items
   - folded ranges
   - existing negated-class semantics
 
-- [ ] Keep planner support out of scope until VM semantics are proven
+- [x] Keep planner support out of scope until VM semantics are proven
 
-- [ ] Add VM, search-layer, and CLI regressions for representative nested set
+- [x] Add VM, search-layer, and CLI regressions for representative nested set
   expressions
 
 ## Phase 3: Remaining Property-Surface Re-Check
@@ -119,7 +119,7 @@ Implementation order for this plan:
 ## Recommended Order
 
 - [x] 1. Land the smallest useful inline-flag group subset
-- [ ] 2. Land nested class-set expressions
+- [x] 2. Land nested class-set expressions
 - [ ] 3. Re-evaluate any remaining property-surface follow-up
 
 ## Explicit Non-Goals

@@ -30,11 +30,7 @@ pub const Inst = union(enum) {
         out: ?InstPtr = null,
     },
     char_class_set: struct {
-        lhs_negated: bool,
-        lhs_items: []const hir_mod.ClassItem,
-        rhs_negated: bool,
-        rhs_items: []const hir_mod.ClassItem,
-        op: hir_mod.ClassSetOp,
+        expr: *CompiledClassExpr,
         out: ?InstPtr = null,
     },
     any: struct {
@@ -74,9 +70,28 @@ pub const Inst = union(enum) {
     match,
 };
 
-const RuntimeClass = struct {
-    negated: bool,
-    items: []const hir_mod.ClassItem,
+pub const CompiledClassExpr = union(enum) {
+    class: struct {
+        negated: bool,
+        items: []const hir_mod.ClassItem,
+    },
+    set: struct {
+        lhs: *CompiledClassExpr,
+        rhs: *CompiledClassExpr,
+        op: hir_mod.ClassSetOp,
+    },
+
+    pub fn deinit(self: *CompiledClassExpr, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .class => |class| allocator.free(class.items),
+            .set => |set| {
+                set.lhs.deinit(allocator);
+                allocator.destroy(set.lhs);
+                set.rhs.deinit(allocator);
+                allocator.destroy(set.rhs);
+            },
+        }
+    }
 };
 
 pub const Program = struct {
@@ -96,8 +111,8 @@ pub const Program = struct {
             switch (inst) {
                 .char_class => |class| allocator.free(class.items),
                 .char_class_set => |class_set| {
-                    allocator.free(class_set.lhs_items);
-                    allocator.free(class_set.rhs_items);
+                    class_set.expr.deinit(allocator);
+                    allocator.destroy(class_set.expr);
                 },
                 else => {},
             }
@@ -175,7 +190,7 @@ fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, multil
         .literal => |cp| cp == '\n',
         .dot => dotall,
         .char_class => |class| classCanMatchNewline(class, multiline),
-        .char_class_set => |class_set| classSetCanMatchNewline(class_set, multiline),
+        .char_class_set => |class_set| classSetCanMatchNewline(compiled_hir, class_set, multiline),
         .case_fold_group => |group| hirCanMatchNewline(compiled_hir, group.child, multiline, dotall),
         .group => |group| hirCanMatchNewline(compiled_hir, group.child, multiline, dotall),
         .concat => |children| blk: {
@@ -202,11 +217,13 @@ fn classCanMatchNewline(class: hir_mod.CharacterClass, multiline: bool) bool {
     return classContainsCodePoint(class.items, '\n', multiline);
 }
 
-fn classSetCanMatchNewline(class_set: hir_mod.CharacterClassSet, multiline: bool) bool {
-    const lhs = hir_mod.CharacterClass{ .negated = class_set.lhs.negated, .items = class_set.lhs.items };
-    const rhs = hir_mod.CharacterClass{ .negated = class_set.rhs.negated, .items = class_set.rhs.items };
-    const lhs_matches = classCanMatchNewline(lhs, multiline);
-    const rhs_matches = classCanMatchNewline(rhs, multiline);
+fn classSetCanMatchNewline(
+    compiled_hir: hir_mod.Hir,
+    class_set: @FieldType(hir_mod.Node, "char_class_set"),
+    multiline: bool,
+) bool {
+    const lhs_matches = hirCanMatchNewline(compiled_hir, class_set.lhs, multiline, false);
+    const rhs_matches = hirCanMatchNewline(compiled_hir, class_set.rhs, multiline, false);
     return switch (class_set.op) {
         .intersection => lhs_matches and rhs_matches,
         .subtraction => lhs_matches and !rhs_matches,
@@ -293,7 +310,7 @@ const Compiler = struct {
             .word_boundary_end_half => |boundary| self.compileWordBoundaryEndHalf(boundary.ascii_only),
             .unicode_property => |property| self.compileUnicodeProperty(property.property, property.negated),
             .char_class => |class| self.compileClass(class),
-            .char_class_set => |class_set| self.compileClassSet(class_set),
+            .char_class_set => |class_set| self.compileClassSet(compiled_hir, class_set),
             .case_fold_group => |group| self.compileNode(compiled_hir, group.child),
             .group => |group| self.compileGroup(compiled_hir, group.index, group.child),
             .concat => |children| self.compileConcat(compiled_hir, children),
@@ -392,25 +409,70 @@ const Compiler = struct {
         return .{ .start = index, .outs = outs };
     }
 
-    fn compileClassSet(self: *Compiler, class_set: hir_mod.CharacterClassSet) CompileError!Fragment {
-        const lhs_items = try self.allocator.alloc(hir_mod.ClassItem, class_set.lhs.items.len);
-        errdefer self.allocator.free(lhs_items);
-        @memcpy(lhs_items, class_set.lhs.items);
-
-        const rhs_items = try self.allocator.alloc(hir_mod.ClassItem, class_set.rhs.items.len);
-        errdefer self.allocator.free(rhs_items);
-        @memcpy(rhs_items, class_set.rhs.items);
+    fn compileClassSet(
+        self: *Compiler,
+        compiled_hir: hir_mod.Hir,
+        class_set: @FieldType(hir_mod.Node, "char_class_set"),
+    ) CompileError!Fragment {
+        const expr = try self.compileClassExpr(compiled_hir, class_set.lhs, class_set.rhs, class_set.op);
+        errdefer {
+            expr.deinit(self.allocator);
+            self.allocator.destroy(expr);
+        }
 
         const index = try self.emit(.{ .char_class_set = .{
-            .lhs_negated = class_set.lhs.negated,
-            .lhs_items = lhs_items,
-            .rhs_negated = class_set.rhs.negated,
-            .rhs_items = rhs_items,
-            .op = class_set.op,
+            .expr = expr,
         } });
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
         return .{ .start = index, .outs = outs };
+    }
+
+    fn compileClassExpr(
+        self: *Compiler,
+        compiled_hir: hir_mod.Hir,
+        lhs_id: hir_mod.NodeId,
+        rhs_id: hir_mod.NodeId,
+        op: hir_mod.ClassSetOp,
+    ) CompileError!*CompiledClassExpr {
+        const expr = try self.allocator.create(CompiledClassExpr);
+        errdefer self.allocator.destroy(expr);
+        expr.* = .{ .set = .{
+            .lhs = try self.compileClassExprNode(compiled_hir, lhs_id),
+            .rhs = try self.compileClassExprNode(compiled_hir, rhs_id),
+            .op = op,
+        } };
+        return expr;
+    }
+
+    fn compileClassExprNode(
+        self: *Compiler,
+        compiled_hir: hir_mod.Hir,
+        node_id: hir_mod.NodeId,
+    ) CompileError!*CompiledClassExpr {
+        const expr = try self.allocator.create(CompiledClassExpr);
+        errdefer self.allocator.destroy(expr);
+
+        switch (compiled_hir.nodes[@intFromEnum(node_id)]) {
+            .char_class => |class| {
+                const items = try self.allocator.alloc(hir_mod.ClassItem, class.items.len);
+                @memcpy(items, class.items);
+                expr.* = .{ .class = .{
+                    .negated = class.negated,
+                    .items = items,
+                } };
+            },
+            .char_class_set => |class_set| {
+                expr.* = .{ .set = .{
+                    .lhs = try self.compileClassExprNode(compiled_hir, class_set.lhs),
+                    .rhs = try self.compileClassExprNode(compiled_hir, class_set.rhs),
+                    .op = class_set.op,
+                } };
+            },
+            else => unreachable,
+        }
+
+        return expr;
     }
 
     fn compileGroup(

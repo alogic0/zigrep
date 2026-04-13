@@ -60,8 +60,8 @@ pub const Node = union(enum) {
     },
     char_class: CharacterClass,
     char_class_set: struct {
-        lhs: CharacterClass,
-        rhs: CharacterClass,
+        lhs: NodeId,
+        rhs: NodeId,
         op: ClassSetOp,
     },
     case_fold_group: struct {
@@ -91,10 +91,6 @@ pub const Ast = struct {
                 .concat => |children| allocator.free(children),
                 .alternation => |branches| allocator.free(branches),
                 .char_class => |class| allocator.free(class.items),
-                .char_class_set => |class_set| {
-                    allocator.free(class_set.lhs.items);
-                    allocator.free(class_set.rhs.items);
-                },
                 else => {},
             }
         }
@@ -495,33 +491,23 @@ pub const Parser = struct {
             try self.advance();
         }
 
-        const lhs_items = try self.parseClassItems();
-        errdefer self.allocator.free(lhs_items);
-
-        if (lhs_items.len == 0) return error.EmptyClass;
+        const lhs = try self.parseClassOperand(negated);
 
         if (classSetOperatorAhead(self)) {
-            if (negated) return error.UnexpectedToken;
             const op = try self.parseClassSetOperator();
-            const rhs_items = try self.parseClassItems();
-            errdefer self.allocator.free(rhs_items);
-            if (rhs_items.len == 0) return error.EmptyClass;
+            const rhs = try self.parseClassOperand(false);
             if (self.lookahead.token != .r_bracket) return error.UnterminatedClass;
             try self.advance();
             return self.push(.{ .char_class_set = .{
-                .lhs = .{ .negated = false, .items = lhs_items },
-                .rhs = .{ .negated = false, .items = rhs_items },
+                .lhs = lhs,
+                .rhs = rhs,
                 .op = op,
             } });
         }
 
         if (self.lookahead.token != .r_bracket) return error.UnterminatedClass;
         try self.advance();
-
-        return self.push(.{ .char_class = .{
-            .negated = negated,
-            .items = lhs_items,
-        } });
+        return lhs;
     }
 
     fn parseClassAtom(self: *Parser, first: bool) ParseError!ClassItem {
@@ -640,6 +626,20 @@ pub const Parser = struct {
         }
 
         return try items.toOwnedSlice(self.allocator);
+    }
+
+    fn parseClassOperand(self: *Parser, negated: bool) ParseError!NodeId {
+        if (self.lookahead.token == .l_bracket) {
+            if (negated) return error.UnexpectedToken;
+            return self.parseClass();
+        }
+
+        const items = try self.parseClassItems();
+        if (items.len == 0) return error.EmptyClass;
+        return self.push(.{ .char_class = .{
+            .negated = negated,
+            .items = items,
+        } });
     }
 
     fn canStartPrimary(self: *const Parser) bool {
@@ -1113,6 +1113,24 @@ test "Parser supports basic class-set operators" {
     defer intersection_ast.deinit(testing.allocator);
     try testing.expectEqual(.char_class_set, std.meta.activeTag(intersection_ast.nodes[@intFromEnum(intersection_ast.root)]));
     try testing.expectEqual(.intersection, intersection_ast.nodes[@intFromEnum(intersection_ast.root)].char_class_set.op);
+}
+
+test "Parser supports nested class-set expressions" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "[\\w--[\\p{ASCII}&&[^_]]]");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].char_class_set;
+    try testing.expectEqual(.subtraction, root.op);
+    try testing.expectEqual(.char_class, std.meta.activeTag(ast.nodes[@intFromEnum(root.lhs)]));
+    try testing.expectEqual(.char_class_set, std.meta.activeTag(ast.nodes[@intFromEnum(root.rhs)]));
+
+    const rhs = ast.nodes[@intFromEnum(root.rhs)].char_class_set;
+    try testing.expectEqual(.intersection, rhs.op);
+    try testing.expectEqual(.char_class, std.meta.activeTag(ast.nodes[@intFromEnum(rhs.lhs)]));
+    try testing.expectEqual(.char_class, std.meta.activeTag(ast.nodes[@intFromEnum(rhs.rhs)]));
 }
 
 test "Parser supports inline case-fold groups" {

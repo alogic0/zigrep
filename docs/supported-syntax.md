@@ -39,14 +39,15 @@ Character classes support:
 - Ranges: `[a-zA-Z0-9]`
 - Negation in the leading position: `[^0-9]`
 - Literal `]`, `-`, and `^` when used in non-special positions or escaped
-- A single top-level class-set operator inside one bracket class:
+- Class-set operators inside bracket classes:
   - subtraction like `[\w--\p{ASCII}]`
   - intersection like `[\p{Greek}&&\p{Uppercase}]`
+  - nested forms like `[\w--[\p{ASCII}&&[^_]]]`
 
 Current class-set boundary:
 
-- one top-level subtraction or intersection is supported
-- nested class-set expressions are not supported yet
+- nested class-set expressions are supported through nested bracketed operands
+- each class-set node still uses one explicit operator (`--` or `&&`)
 - class-set patterns stay off the raw-byte planner and run on the general VM path
 
 The current engine exposes a growing native Unicode property surface.

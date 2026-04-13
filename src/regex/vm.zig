@@ -37,11 +37,6 @@ const TextUnit = struct {
     }
 };
 
-const RuntimeClass = struct {
-    negated: bool,
-    items: []const @import("hir.zig").ClassItem,
-};
-
 pub const MatchEngine = struct {
     allocator: std.mem.Allocator,
 
@@ -428,25 +423,51 @@ fn textUnitMatchesClass(class: anytype, unit: TextUnit, program: nfa.Program) bo
 }
 
 fn classSetMatches(class_set: anytype, cp: u32, program: nfa.Program) bool {
-    const lhs = RuntimeClass{ .negated = class_set.lhs_negated, .items = class_set.lhs_items };
-    const rhs = RuntimeClass{ .negated = class_set.rhs_negated, .items = class_set.rhs_items };
-    const lhs_matched = classMatches(lhs, cp, program);
-    const rhs_matched = classMatches(rhs, cp, program);
-    return switch (class_set.op) {
-        .intersection => lhs_matched and rhs_matched,
-        .subtraction => lhs_matched and !rhs_matched,
+    return classExprMatches(class_set.expr, cp, program);
+}
+
+fn classExprMatches(expr: *const nfa.CompiledClassExpr, cp: u32, program: nfa.Program) bool {
+    return switch (expr.*) {
+        .class => |class| classMatches(class, cp, program),
+        .set => |set| {
+            const lhs_matched = classExprMatches(set.lhs, cp, program);
+            const rhs_matched = classExprMatches(set.rhs, cp, program);
+            return switch (set.op) {
+                .intersection => lhs_matched and rhs_matched,
+                .subtraction => lhs_matched and !rhs_matched,
+            };
+        },
     };
 }
 
 fn textUnitMatchesClassSet(class_set: anytype, unit: TextUnit, program: nfa.Program) bool {
-    const lhs = RuntimeClass{ .negated = class_set.lhs_negated, .items = class_set.lhs_items };
-    const rhs = RuntimeClass{ .negated = class_set.rhs_negated, .items = class_set.rhs_items };
-    const lhs_matched = textUnitMatchesClass(lhs, unit, program);
-    const rhs_matched = textUnitMatchesClass(rhs, unit, program);
-    return switch (class_set.op) {
-        .intersection => lhs_matched and rhs_matched,
-        .subtraction => lhs_matched and !rhs_matched,
+    return textUnitMatchesClassExpr(class_set.expr, unit, program);
+}
+
+fn textUnitMatchesClassExpr(expr: *const nfa.CompiledClassExpr, unit: TextUnit, program: nfa.Program) bool {
+    return switch (expr.*) {
+        .class => |class| textUnitMatchesClass(class, unit, program),
+        .set => |set| {
+            const lhs_matched = textUnitMatchesClassExpr(set.lhs, unit, program);
+            const rhs_matched = textUnitMatchesClassExpr(set.rhs, unit, program);
+            return switch (set.op) {
+                .intersection => lhs_matched and rhs_matched,
+                .subtraction => lhs_matched and !rhs_matched,
+            };
+        },
     };
+}
+
+fn isAsciiClass(class: anytype) bool {
+    for (class.items) |item| {
+        switch (item) {
+            .literal => |literal| if (literal > 0x7f) return false,
+            .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
+            .folded_range => return false,
+            .unicode_property => return false,
+        }
+    }
+    return true;
 }
 
 fn textUnitMatchesUnicodeProperty(property: unicode.Property, negated: bool, unit: TextUnit, program: nfa.Program) bool {
@@ -460,18 +481,6 @@ fn textUnitMatchesUnicodeProperty(property: unicode.Property, negated: bool, uni
 fn unicodePropertyMatches(program: nfa.Program, property: unicode.Property, cp: u32) bool {
     if ((property == .shorthand_whitespace or property == .ascii_shorthand_whitespace) and cp == '\n' and !program.can_match_newline) return false;
     return unicode.Strategy.hasProperty(cp, property);
-}
-
-fn isAsciiClass(class: anytype) bool {
-    for (class.items) |item| {
-        switch (item) {
-            .literal => |literal| if (literal > 0x7f) return false,
-            .range => |range| if (range.start > 0x7f or range.end > 0x7f) return false,
-            .folded_range => return false,
-            .unicode_property => return false,
-        }
-    }
-    return true;
 }
 
 fn nextTextUnit(haystack: []const u8, pos: *usize) ?TextUnit {

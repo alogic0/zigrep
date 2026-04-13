@@ -278,25 +278,20 @@ fn classMatches(class: anytype, cp: u32, program: nfa.Program) bool {
 }
 
 fn classSetMatches(class_set: anytype, cp: u32, program: nfa.Program) bool {
-    const lhs = struct {
-        negated: bool,
-        items: []const @import("hir.zig").ClassItem,
-    }{
-        .negated = class_set.lhs_negated,
-        .items = class_set.lhs_items,
-    };
-    const rhs = struct {
-        negated: bool,
-        items: []const @import("hir.zig").ClassItem,
-    }{
-        .negated = class_set.rhs_negated,
-        .items = class_set.rhs_items,
-    };
-    const lhs_matched = classMatches(lhs, cp, program);
-    const rhs_matched = classMatches(rhs, cp, program);
-    return switch (class_set.op) {
-        .intersection => lhs_matched and rhs_matched,
-        .subtraction => lhs_matched and !rhs_matched,
+    return classExprMatches(class_set.expr, cp, program);
+}
+
+fn classExprMatches(expr: *const nfa.CompiledClassExpr, cp: u32, program: nfa.Program) bool {
+    return switch (expr.*) {
+        .class => |class| classMatches(class, cp, program),
+        .set => |set| {
+            const lhs_matched = classExprMatches(set.lhs, cp, program);
+            const rhs_matched = classExprMatches(set.rhs, cp, program);
+            return switch (set.op) {
+                .intersection => lhs_matched and rhs_matched,
+                .subtraction => lhs_matched and !rhs_matched,
+            };
+        },
     };
 }
 

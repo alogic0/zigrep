@@ -21,11 +21,6 @@ pub const CharacterClass = struct {
     negated: bool,
     items: []const ClassItem,
 };
-pub const CharacterClassSet = struct {
-    lhs: CharacterClass,
-    rhs: CharacterClass,
-    op: ClassSetOp,
-};
 pub const Quantifier = parser.Quantifier;
 pub const ClassSetOp = parser.ClassSetOp;
 
@@ -52,7 +47,11 @@ pub const Node = union(enum) {
         negated: bool,
     },
     char_class: CharacterClass,
-    char_class_set: CharacterClassSet,
+    char_class_set: struct {
+        lhs: NodeId,
+        rhs: NodeId,
+        op: ClassSetOp,
+    },
     case_fold_group: struct {
         enabled: bool,
         child: NodeId,
@@ -94,10 +93,6 @@ pub const Hir = struct {
                 .concat => |children| allocator.free(children),
                 .alternation => |branches| allocator.free(branches),
                 .char_class => |class| allocator.free(class.items),
-                .char_class_set => |class_set| {
-                    allocator.free(class_set.lhs.items);
-                    allocator.free(class_set.rhs.items);
-                },
                 else => {},
             }
         }
@@ -127,10 +122,6 @@ pub fn lower(allocator: std.mem.Allocator, ast: parser.Ast) LowerError!Hir {
                 .concat => |children| allocator.free(children),
                 .alternation => |branches| allocator.free(branches),
                 .char_class => |class| allocator.free(class.items),
-                .char_class_set => |class_set| {
-                    allocator.free(class_set.lhs.items);
-                    allocator.free(class_set.rhs.items);
-                },
                 else => {},
             }
         }
@@ -217,17 +208,6 @@ fn applyScopedCaseFoldNode(
             allocator.free(class.items);
             node.* = .{ .char_class = folded };
         },
-        .char_class_set => |class_set| {
-            const folded_lhs = try foldedCharacterClass(allocator, class_set.lhs);
-            const folded_rhs = try foldedCharacterClass(allocator, class_set.rhs);
-            allocator.free(class_set.lhs.items);
-            allocator.free(class_set.rhs.items);
-            node.* = .{ .char_class_set = .{
-                .lhs = folded_lhs,
-                .rhs = folded_rhs,
-                .op = class_set.op,
-            } };
-        },
         else => {},
     }
 }
@@ -258,14 +238,8 @@ fn lowerNode(
             .items = try lowerClassItems(allocator, class.items),
         } },
         .char_class_set => |class_set| .{ .char_class_set = .{
-            .lhs = .{
-                .negated = class_set.lhs.negated,
-                .items = try lowerClassItems(allocator, class_set.lhs.items),
-            },
-            .rhs = .{
-                .negated = class_set.rhs.negated,
-                .items = try lowerClassItems(allocator, class_set.rhs.items),
-            },
+            .lhs = try lowerNode(allocator, ast, class_set.lhs, out),
+            .rhs = try lowerNode(allocator, ast, class_set.rhs, out),
             .op = class_set.op,
         } },
         .case_fold_group => |group| .{ .case_fold_group = .{
