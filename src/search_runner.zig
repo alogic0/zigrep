@@ -3,6 +3,7 @@ const zigrep = struct {
     pub const search = @import("search/root.zig");
 };
 const command = @import("command.zig");
+const search_execution = @import("search_execution.zig");
 const search_filtering = @import("search_filtering.zig");
 const search_output = @import("search_output.zig");
 
@@ -87,7 +88,7 @@ fn searchPath(
         count: *usize,
 
         pub fn warn(self: @This(), path: []const u8, err: anyerror) void {
-            self.writer.print("warning: skipping directory {s}: {s}\n", .{ path, warningMessage(err) }) catch {};
+            self.writer.print("warning: skipping directory {s}: {s}\n", .{ path, search_execution.warningMessage(err) }) catch {};
             self.count.* += 1;
         }
     };
@@ -157,7 +158,7 @@ pub fn searchEntriesSequential(
                 .text => break :blk false,
                 .skip, .suppress => {
                     const decision = zigrep.search.io.detectBinaryFile(entry.path, .{}) catch |err| {
-                        if (try warnAndSkipFileError(stderr, entry.path, err)) {
+                        if (try search_execution.warnAndSkipFileError(stderr, entry.path, err)) {
                             result.stats.warnings_emitted += 1;
                             continue;
                         }
@@ -178,22 +179,22 @@ pub fn searchEntriesSequential(
         const buffer = zigrep.search.io.readFile(file_allocator, entry.path, .{
             .strategy = options.read_strategy,
         }) catch |err| {
-            if (try warnAndSkipFileError(stderr, entry.path, err)) {
+            if (try search_execution.warnAndSkipFileError(stderr, entry.path, err)) {
                 result.stats.warnings_emitted += 1;
                 continue;
             }
             return err;
         };
         defer buffer.deinit(file_allocator);
-        const search_bytes = prepareSearchBytes(file_allocator, entry.path, buffer.bytes(), options) catch |err| {
-            if (try warnAndSkipFileError(stderr, entry.path, err)) {
+        const search_bytes = search_execution.prepareSearchBytes(file_allocator, entry.path, buffer.bytes(), options) catch |err| {
+            if (try search_execution.warnAndSkipFileError(stderr, entry.path, err)) {
                 result.stats.warnings_emitted += 1;
                 continue;
             }
             return err;
         };
         const effective_binary_output = if (options.search_compressed or options.preprocessor != null)
-            decideBinaryBehavior(search_bytes, options.encoding, options.binary_mode) orelse {
+            search_execution.decideBinaryBehavior(search_bytes, options.encoding, options.binary_mode) orelse {
                 result.stats.skipped_binary_files += 1;
                 continue;
             }
@@ -351,12 +352,12 @@ fn searchEntriesParallel(
                 return err;
             };
             defer buffer.deinit(file_allocator);
-            const search_bytes = prepareSearchBytes(file_allocator, entry.path, buffer.bytes(), self.options) catch |err| {
+            const search_bytes = search_execution.prepareSearchBytes(file_allocator, entry.path, buffer.bytes(), self.options) catch |err| {
                 if (try self.warnAndSkip(entry.path, err)) return;
                 return err;
             };
             const effective_binary_output = if (self.options.search_compressed or self.options.preprocessor != null)
-                decideBinaryBehavior(search_bytes, self.options.encoding, self.options.binary_mode) orelse {
+                search_execution.decideBinaryBehavior(search_bytes, self.options.encoding, self.options.binary_mode) orelse {
                     self.result_reports[index] = .{
                         .bytes = .empty,
                         .searched_bytes = 0,
@@ -400,7 +401,7 @@ fn searchEntriesParallel(
         fn warnAndSkip(self: *@This(), path: []const u8, err: anyerror) !bool {
             self.warning_mutex.lock();
             defer self.warning_mutex.unlock();
-            const skipped = try warnAndSkipFileError(self.stderr, path, err);
+            const skipped = try search_execution.warnAndSkipFileError(self.stderr, path, err);
             if (skipped) self.warning_count += 1;
             return skipped;
         }
@@ -477,72 +478,6 @@ fn writeStats(writer: *std.Io.Writer, stats: SearchStats) !void {
         "stats: searched_files={d} matched_files={d} searched_bytes={d} skipped_binary_files={d} warnings_emitted={d}\n",
         .{ stats.searched_files, stats.matched_files, stats.searched_bytes, stats.skipped_binary_files, stats.warnings_emitted },
     );
-}
-
-
-fn warnAndSkipFileError(writer: *std.Io.Writer, path: []const u8, err: anyerror) !bool {
-    if (!shouldWarnAndSkipFileError(err)) return false;
-    try writer.print("warning: skipping {s}: {s}\n", .{ path, warningMessage(err) });
-    return true;
-}
-
-fn warningMessage(err: anyerror) []const u8 {
-    return switch (err) {
-        error.FileNotFound => "file not found",
-        error.AccessDenied => "access denied",
-        error.NotDir => "not a directory",
-        error.NameTooLong => "name too long",
-        error.SymLinkLoop => "symlink loop",
-        error.InvalidCompressedInput => "invalid compressed input",
-        error.PreprocessorFailed => "preprocessor exited with non-zero status",
-        error.PreprocessorSignaled => "preprocessor terminated by signal",
-        error.PreprocessorTooMuchOutput => "preprocessor output exceeded limit",
-        else => @errorName(err),
-    };
-}
-
-fn shouldWarnAndSkipFileError(err: anyerror) bool {
-    return switch (err) {
-        error.FileNotFound,
-        error.AccessDenied,
-        error.NotDir,
-        error.NameTooLong,
-        error.SymLinkLoop,
-        error.InvalidCompressedInput,
-        error.PreprocessorFailed,
-        error.PreprocessorSignaled,
-        error.PreprocessorTooMuchOutput,
-        => true,
-        else => false,
-    };
-}
-
-fn prepareSearchBytes(
-    allocator: std.mem.Allocator,
-    path: []const u8,
-    bytes: []const u8,
-    options: CliOptions,
-) ![]const u8 {
-    if (zigrep.search.preprocess.shouldApply(options.preprocessor, options.pre_globs, path)) {
-        return try zigrep.search.preprocess.runAlloc(allocator, options.preprocessor.?, path);
-    }
-    if (!options.search_compressed) return bytes;
-    return if (try zigrep.search.io.decompressAlloc(allocator, bytes)) |decoded| decoded else bytes;
-}
-
-fn decideBinaryBehavior(
-    bytes: []const u8,
-    encoding: zigrep.search.io.InputEncoding,
-    binary_mode: BinaryMode,
-) ?bool {
-    if (encoding != .auto) return false;
-    return switch (binary_mode) {
-        .text => false,
-        .skip, .suppress => switch (zigrep.search.io.detectBinary(bytes, .{})) {
-            .text => false,
-            .binary => if (binary_mode == .skip) null else true,
-        },
-    };
 }
 
 pub fn writeFileReports(
