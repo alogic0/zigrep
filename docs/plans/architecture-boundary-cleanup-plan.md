@@ -43,13 +43,13 @@ The main issues to address are:
 
 ## Phase 2: Main Entrypoint Cleanup
 
-- [ ] Remove the remaining pass-through helper surface from `src/main.zig`
-- [ ] Move test wrappers out of `src/main.zig`
-- [ ] Update tests to import the real owning modules directly where practical:
+- [x] Remove the remaining pass-through helper surface from `src/main.zig`
+- [x] Move test wrappers out of `src/main.zig`
+- [x] Update tests to import the real owning modules directly where practical:
   - `src/cli.zig`
   - `src/search_runner.zig`
   - `src/cli_test_support.zig`
-- [ ] Keep `src/main.zig` focused on:
+- [x] Keep `src/main.zig` focused on:
   - process setup
   - stdio wiring
   - process exit behavior
@@ -57,7 +57,7 @@ The main issues to address are:
 ## Phase 3: Search Runner Split
 
 - [ ] Split `src/search_runner.zig` by responsibility
-- [ ] First extract output/report formatting into a dedicated module
+- [x] First extract output/report formatting into a dedicated module
 - [ ] Then extract ignore-loading and filtering helpers into a dedicated module
 - [ ] Keep execution orchestration in the runner layer
 - [ ] Preserve current end-to-end behavior and benchmark smoke coverage
@@ -82,7 +82,7 @@ The main issues to address are:
 ## Recommended Order
 
 - [x] 1. Extract the shared command model
-- [ ] 2. Move test wrappers out of `src/main.zig`
+- [x] 2. Move test wrappers out of `src/main.zig`
 - [ ] 3. Split `src/search_runner.zig` by responsibility
 - [ ] 4. Fix the public compile boundary in `src/root.zig`
 
