@@ -122,6 +122,7 @@ pub const Searcher = struct {
 
         const fold_case = shouldFoldCase(pattern, options.case_mode);
         const has_local_case_groups = hirHasCaseFoldGroups(hir.nodes, hir.root);
+        const has_scoped_line_modes = hirHasScopedLineModes(hir.nodes, hir.root);
 
         if (fold_case or has_local_case_groups) {
             regex.hir.applyScopedCaseFold(allocator, &hir, fold_case) catch |err| switch (err) {
@@ -140,7 +141,7 @@ pub const Searcher = struct {
             // Case-folded patterns stay on the general VM path until planner
             // equivalence is proven for folded classes and Unicode-aware case
             // semantics.
-            .byte_plan = if (fold_case or has_local_case_groups)
+            .byte_plan = if (fold_case or has_local_case_groups or has_scoped_line_modes)
                 .none
             else
                 try extractByteSearchPlan(allocator, hir),
@@ -318,6 +319,30 @@ fn hirHasCaseFoldGroups(nodes: []const regex.hir.Node, node_id: regex.hir.NodeId
             break :blk false;
         },
         .repetition => |rep| hirHasCaseFoldGroups(nodes, rep.child),
+        else => false,
+    };
+}
+
+fn hirHasScopedLineModes(nodes: []const regex.hir.Node, node_id: regex.hir.NodeId) bool {
+    return switch (nodes[@intFromEnum(node_id)]) {
+        .dot => |dot| dot.matches_newline != null,
+        .anchor_start => |anchor| anchor.multiline,
+        .anchor_end => |anchor| anchor.multiline,
+        .group => |group| hirHasScopedLineModes(nodes, group.child),
+        .case_fold_group => |group| hirHasScopedLineModes(nodes, group.child),
+        .concat => |children| blk: {
+            for (children) |child| {
+                if (hirHasScopedLineModes(nodes, child)) break :blk true;
+            }
+            break :blk false;
+        },
+        .alternation => |branches| blk: {
+            for (branches) |branch| {
+                if (hirHasScopedLineModes(nodes, branch)) break :blk true;
+            }
+            break :blk false;
+        },
+        .repetition => |rep| hirHasScopedLineModes(nodes, rep.child),
         else => false,
     };
 }
@@ -559,14 +584,20 @@ fn extractBytePattern(
                 .terms = terms,
             };
         },
-        .anchor_start => .{
-            .mode = .start,
-            .terms = try allocator.alloc(ByteTerm, 0),
-        },
-        .anchor_end => .{
-            .mode = .end,
-            .terms = try allocator.alloc(ByteTerm, 0),
-        },
+        .anchor_start => |anchor| if (anchor.multiline)
+            null
+        else
+            .{
+                .mode = .start,
+                .terms = try allocator.alloc(ByteTerm, 0),
+            },
+        .anchor_end => |anchor| if (anchor.multiline)
+            null
+        else
+            .{
+                .mode = .end,
+                .terms = try allocator.alloc(ByteTerm, 0),
+            },
         .group => |group| blk: {
             var pattern = (try extractBytePattern(allocator, nodes, group.child)) orelse break :blk null;
             pattern = try wrapPatternWithCapture(allocator, pattern, group.index);
@@ -601,11 +632,11 @@ fn extractBytePattern(
             var start_index: usize = 0;
             var end_index: usize = children.len;
 
-            if (children.len > 0 and std.meta.activeTag(nodes[@intFromEnum(children[0])]) == .anchor_start) {
+            if (children.len > 0 and std.meta.activeTag(nodes[@intFromEnum(children[0])]) == .anchor_start and !nodes[@intFromEnum(children[0])].anchor_start.multiline) {
                 prefix_anchor = true;
                 start_index = 1;
             }
-            if (end_index > start_index and std.meta.activeTag(nodes[@intFromEnum(children[end_index - 1])]) == .anchor_end) {
+            if (end_index > start_index and std.meta.activeTag(nodes[@intFromEnum(children[end_index - 1])]) == .anchor_end and !nodes[@intFromEnum(children[end_index - 1])].anchor_end.multiline) {
                 suffix_anchor = true;
                 end_index -= 1;
             }
@@ -691,17 +722,20 @@ fn appendNodeToByteTerms(
             try appendCodePointUtf8(allocator, literal_bytes, cp);
             return true;
         },
-        .dot => {
+        .dot => |dot| {
+            if (dot.matches_newline != null) return false;
             try flushLiteralTerm(allocator, terms, literal_bytes);
             try terms.append(allocator, .{ .atom = .any_byte });
             return true;
         },
-        .anchor_start => {
+        .anchor_start => |anchor| {
+            if (anchor.multiline) return false;
             try flushLiteralTerm(allocator, terms, literal_bytes);
             try terms.append(allocator, .{ .atom = .anchor_start });
             return true;
         },
-        .anchor_end => {
+        .anchor_end => |anchor| {
+            if (anchor.multiline) return false;
             try flushLiteralTerm(allocator, terms, literal_bytes);
             try terms.append(allocator, .{ .atom = .anchor_end });
             return true;
@@ -2390,6 +2424,34 @@ test "Searcher supports inline case-fold groups" {
     defer override_global.deinit();
     try testing.expect((try override_global.reportFirstMatch("sample.txt", "A")) != null);
     try testing.expect((try override_global.reportFirstMatch("sample.txt", "a")) == null);
+}
+
+test "Searcher supports inline multiline and dotall groups" {
+    const testing = std.testing;
+
+    var multiline_anchor = try Searcher.init(testing.allocator, "(?m:^b$)", .{});
+    defer multiline_anchor.deinit();
+    try testing.expect(!multiline_anchor.hasBytePlan());
+    try testing.expect((try multiline_anchor.reportFirstMatch("sample.txt", "a\nb\n")) != null);
+
+    var absolute_anchor = try Searcher.init(testing.allocator, "(?-m:^b$)", .{});
+    defer absolute_anchor.deinit();
+    try testing.expect((try absolute_anchor.reportFirstMatch("sample.txt", "a\nb\n")) == null);
+
+    try testing.expectError(error.MultilineRequired, Searcher.init(testing.allocator, "(?s:a.b)", .{}));
+
+    var local_dotall = try Searcher.init(testing.allocator, "(?s:a.b)", .{ .multiline = true });
+    defer local_dotall.deinit();
+    try testing.expect(!local_dotall.hasBytePlan());
+    try testing.expect((try local_dotall.reportFirstMatch("sample.txt", "a\nb")) != null);
+
+    var local_no_dotall = try Searcher.init(testing.allocator, "(?-s:a.b)", .{
+        .multiline = true,
+        .multiline_dotall = true,
+    });
+    defer local_no_dotall.deinit();
+    try testing.expect(!local_no_dotall.hasBytePlan());
+    try testing.expect((try local_no_dotall.reportFirstMatch("sample.txt", "a\nb")) == null);
 }
 
 test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {

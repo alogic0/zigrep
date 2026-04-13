@@ -34,6 +34,7 @@ pub const Inst = union(enum) {
         out: ?InstPtr = null,
     },
     any: struct {
+        matches_newline: bool = false,
         out: ?InstPtr = null,
     },
     split: struct {
@@ -41,9 +42,11 @@ pub const Inst = union(enum) {
         out1: ?InstPtr = null,
     },
     anchor_start: struct {
+        multiline: bool = false,
         out: ?InstPtr = null,
     },
     anchor_end: struct {
+        multiline: bool = false,
         out: ?InstPtr = null,
     },
     word_boundary: struct {
@@ -103,6 +106,7 @@ pub const Program = struct {
     ascii_only: bool,
     has_word_boundary: bool,
     has_unicode_property: bool,
+    has_scoped_line_modes: bool,
     dot_matches_new_line: bool,
     can_match_newline: bool,
 
@@ -147,6 +151,7 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options:
     var compiler = Compiler{
         .allocator = allocator,
         .instructions = .empty,
+        .options = options,
     };
     defer compiler.instructions.deinit(allocator);
 
@@ -173,8 +178,33 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options:
         .ascii_only = isAsciiOnly(compiler.instructions.items),
         .has_word_boundary = hasWordBoundary(compiler.instructions.items),
         .has_unicode_property = hasUnicodeProperty(compiler.instructions.items),
+        .has_scoped_line_modes = hirHasScopedLineModes(compiled_hir, compiled_hir.root),
         .dot_matches_new_line = options.multiline_dotall,
         .can_match_newline = can_match_newline,
+    };
+}
+
+fn hirHasScopedLineModes(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId) bool {
+    return switch (compiled_hir.nodes[@intFromEnum(node_id)]) {
+        .dot => |dot| dot.matches_newline != null,
+        .anchor_start => |anchor| anchor.multiline,
+        .anchor_end => |anchor| anchor.multiline,
+        .case_fold_group => |group| hirHasScopedLineModes(compiled_hir, group.child),
+        .group => |group| hirHasScopedLineModes(compiled_hir, group.child),
+        .concat => |children| blk: {
+            for (children) |child| {
+                if (hirHasScopedLineModes(compiled_hir, child)) break :blk true;
+            }
+            break :blk false;
+        },
+        .alternation => |branches| blk: {
+            for (branches) |branch| {
+                if (hirHasScopedLineModes(compiled_hir, branch)) break :blk true;
+            }
+            break :blk false;
+        },
+        .repetition => |rep| hirHasScopedLineModes(compiled_hir, rep.child),
+        else => false,
     };
 }
 
@@ -188,7 +218,7 @@ fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, multil
             else => false,
         },
         .literal => |cp| cp == '\n',
-        .dot => dotall,
+        .dot => |dot| dot.matches_newline orelse dotall,
         .char_class => |class| classCanMatchNewline(class, multiline),
         .char_class_set => |class_set| classSetCanMatchNewline(compiled_hir, class_set, multiline),
         .case_fold_group => |group| hirCanMatchNewline(compiled_hir, group.child, multiline, dotall),
@@ -296,14 +326,15 @@ fn hasUnicodeProperty(instructions: []const Inst) bool {
 const Compiler = struct {
     allocator: std.mem.Allocator,
     instructions: std.ArrayList(Inst),
+    options: CompileOptions,
 
     fn compileNode(self: *Compiler, compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId) CompileError!Fragment {
         return switch (compiled_hir.nodes[@intFromEnum(node_id)]) {
             .empty => self.compileEmpty(),
             .literal => |cp| self.compileLiteral(cp),
-            .dot => self.compileAny(),
-            .anchor_start => self.compileAnchorStart(),
-            .anchor_end => self.compileAnchorEnd(),
+            .dot => |dot| self.compileAny(dot.matches_newline orelse self.options.multiline_dotall),
+            .anchor_start => |anchor| self.compileAnchorStart(anchor.multiline),
+            .anchor_end => |anchor| self.compileAnchorEnd(anchor.multiline),
             .word_boundary => |boundary| self.compileWordBoundary(boundary.ascii_only),
             .not_word_boundary => |boundary| self.compileNotWordBoundary(boundary.ascii_only),
             .word_boundary_start_half => |boundary| self.compileWordBoundaryStartHalf(boundary.ascii_only),
@@ -333,22 +364,22 @@ const Compiler = struct {
         return .{ .start = index, .outs = outs };
     }
 
-    fn compileAny(self: *Compiler) CompileError!Fragment {
-        const index = try self.emit(.{ .any = .{} });
+    fn compileAny(self: *Compiler, matches_newline: bool) CompileError!Fragment {
+        const index = try self.emit(.{ .any = .{ .matches_newline = matches_newline } });
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
         return .{ .start = index, .outs = outs };
     }
 
-    fn compileAnchorStart(self: *Compiler) CompileError!Fragment {
-        const index = try self.emit(.{ .anchor_start = .{} });
+    fn compileAnchorStart(self: *Compiler, multiline: bool) CompileError!Fragment {
+        const index = try self.emit(.{ .anchor_start = .{ .multiline = multiline } });
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
         return .{ .start = index, .outs = outs };
     }
 
-    fn compileAnchorEnd(self: *Compiler) CompileError!Fragment {
-        const index = try self.emit(.{ .anchor_end = .{} });
+    fn compileAnchorEnd(self: *Compiler, multiline: bool) CompileError!Fragment {
+        const index = try self.emit(.{ .anchor_end = .{ .multiline = multiline } });
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
         return .{ .start = index, .outs = outs };

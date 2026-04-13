@@ -45,7 +45,7 @@ pub const MatchEngine = struct {
     }
 
     pub fn isMatch(self: *const MatchEngine, program: nfa.Program, haystack: []const u8) MatchError!bool {
-        if (program.capture_count == 0 and !program.has_word_boundary and !program.has_unicode_property) {
+        if (program.capture_count == 0 and !program.has_word_boundary and !program.has_unicode_property and !program.has_scoped_line_modes) {
             var cache = dfa.Cache.init(self.allocator, &program);
             defer cache.deinit();
             return cache.isMatch(haystack);
@@ -220,7 +220,7 @@ pub const MatchEngine = struct {
                 return self.addThread(program, haystack, list, visited, property.out.?, thread.slots, next_pos);
             },
             .any => |any| {
-                if (!program.dot_matches_new_line and cp == '\n') return null;
+                if (!any.matches_newline and cp == '\n') return null;
                 return self.addThread(program, haystack, list, visited, any.out.?, thread.slots, next_pos);
             },
             else => return null,
@@ -254,7 +254,7 @@ pub const MatchEngine = struct {
                 return self.addThread(program, haystack, list, visited, property.out.?, thread.slots, unit.end);
             },
             .any => |any| {
-                if (!program.dot_matches_new_line and unit.isNewline()) return null;
+                if (!any.matches_newline and unit.isNewline()) return null;
                 return self.addThread(program, haystack, list, visited, any.out.?, thread.slots, unit.end);
             },
             else => return null,
@@ -291,11 +291,11 @@ pub const MatchEngine = struct {
                 return null;
             },
             .anchor_start => |anchor| {
-                if (pos != 0) return null;
+                if (!anchorStartAt(haystack, pos, anchor.multiline)) return null;
                 return self.addThread(program, haystack, list, visited, anchor.out.?, slots, pos);
             },
             .anchor_end => |anchor| {
-                if (pos != haystack.len) return null;
+                if (!anchorEndAt(haystack, pos, anchor.multiline)) return null;
                 return self.addThread(program, haystack, list, visited, anchor.out.?, slots, pos);
             },
             .word_boundary => |boundary| {
@@ -562,6 +562,16 @@ fn wordBoundaryAt(haystack: []const u8, offset: usize, ascii_only: bool) bool {
         false;
 
     return before_is_word != after_is_word;
+}
+
+fn anchorStartAt(haystack: []const u8, offset: usize, multiline: bool) bool {
+    if (offset == 0) return true;
+    return multiline and offset <= haystack.len and haystack[offset - 1] == '\n';
+}
+
+fn anchorEndAt(haystack: []const u8, offset: usize, multiline: bool) bool {
+    if (offset == haystack.len) return true;
+    return multiline and offset < haystack.len and haystack[offset] == '\n';
 }
 
 fn wordBoundaryStartHalfAt(haystack: []const u8, offset: usize, ascii_only: bool) bool {
@@ -894,6 +904,26 @@ test "VM supports inline Unicode mode toggles" {
     const raw = (try engine.firstMatchBytes(raw_not_word, "\xff")).?;
     defer raw.deinit(testing.allocator);
     try testing.expectEqual(Capture{ .start = 0, .end = 1 }, raw.span);
+}
+
+test "VM supports inline multiline and dotall groups" {
+    const testing = std.testing;
+
+    try expectMatch("(?m:^b$)", "a\nb\n");
+    try expectNoMatch("(?-m:^b$)", "a\nb\n");
+
+    const multiline_dot = try compileProgram(testing.allocator, "(?s:a.b)", .{ .multiline = true });
+    defer multiline_dot.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect(try engine.isMatch(multiline_dot, "a\nb"));
+
+    const local_no_dotall = try compileProgram(testing.allocator, "(?-s:a.b)", .{
+        .multiline = true,
+        .multiline_dotall = true,
+    });
+    defer local_no_dotall.deinit(testing.allocator);
+    try testing.expect(!(try engine.isMatch(local_no_dotall, "a\nb")));
 }
 
 test "VM handles word boundaries on UTF-8 and raw-byte haystacks" {

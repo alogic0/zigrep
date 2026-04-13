@@ -4383,6 +4383,45 @@ test "runCli supports inline case-fold groups" {
     try testing.expect(!std.mem.containsAtLeast(u8, override_global_run.stdout, 1, "sample.txt:2:1:a"));
 }
 
+test "runCli supports inline multiline and dotall groups" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "a\n" ++
+            "b\n" ++
+            "a\n" ++
+            "b\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const multiline_anchor = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?m:^b$)", root_path });
+    defer multiline_anchor.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), multiline_anchor.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, multiline_anchor.stdout, 1, "sample.txt:2:1:b"));
+    try testing.expect(std.mem.containsAtLeast(u8, multiline_anchor.stdout, 1, "sample.txt:4:1:b"));
+
+    const absolute_anchor = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?-m:^b$)", root_path });
+    defer absolute_anchor.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), absolute_anchor.exit_code);
+
+    try testing.expectError(error.MultilineRequired, runCliCaptured(testing.allocator, &.{ "zigrep", "(?s:a.b)", root_path }));
+
+    const scoped_dotall = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "(?s:a.b)", root_path });
+    defer scoped_dotall.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), scoped_dotall.exit_code);
+
+    const scoped_no_dotall = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "--multiline-dotall", "(?-s:a.b)", root_path });
+    defer scoped_no_dotall.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), scoped_no_dotall.exit_code);
+}
+
 test "runCli supports non-capturing groups" {
     const testing = std.testing;
 

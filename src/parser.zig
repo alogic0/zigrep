@@ -39,9 +39,15 @@ pub const ClassSetOp = enum {
 pub const Node = union(enum) {
     empty,
     literal: u32,
-    dot,
-    anchor_start,
-    anchor_end,
+    dot: struct {
+        matches_newline: ?bool,
+    },
+    anchor_start: struct {
+        multiline: bool,
+    },
+    anchor_end: struct {
+        multiline: bool,
+    },
     word_boundary: struct {
         ascii_only: bool,
     },
@@ -124,6 +130,8 @@ pub const Parser = struct {
     last_error: ?ParseDiagnostic,
     capture_count: u32,
     unicode_mode: bool,
+    multiline_mode: bool,
+    dotall_mode: ?bool,
 
     pub fn init(allocator: std.mem.Allocator, pattern: []const u8) ParseError!Parser {
         var lex = lexer_mod.Lexer(u8).init(pattern);
@@ -139,6 +147,8 @@ pub const Parser = struct {
             .last_error = null,
             .capture_count = 0,
             .unicode_mode = true,
+            .multiline_mode = false,
+            .dotall_mode = null,
         };
     }
 
@@ -364,15 +374,15 @@ pub const Parser = struct {
             },
             .dot => {
                 try self.advance();
-                return self.push(.dot);
+                return self.push(.{ .dot = .{ .matches_newline = self.dotall_mode } });
             },
             .anchor_start => {
                 try self.advance();
-                return self.push(.anchor_start);
+                return self.push(.{ .anchor_start = .{ .multiline = self.multiline_mode } });
             },
             .anchor_end => {
                 try self.advance();
-                return self.push(.anchor_end);
+                return self.push(.{ .anchor_end = .{ .multiline = self.multiline_mode } });
             },
             .word_boundary => {
                 try self.advance();
@@ -421,6 +431,34 @@ pub const Parser = struct {
                                 .child = expr,
                             } });
                         }
+                        if (self.lookahead.token == .literal and self.lookahead.token.literal == 'm') {
+                            try self.advance();
+                            if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
+                                return self.fail(error.UnsupportedGroup, group_span);
+                            }
+                            try self.advance();
+                            const saved_multiline_mode = self.multiline_mode;
+                            self.multiline_mode = false;
+                            defer self.multiline_mode = saved_multiline_mode;
+                            const expr = try self.parseAlternation();
+                            if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+                            try self.advance();
+                            return expr;
+                        }
+                        if (self.lookahead.token == .literal and self.lookahead.token.literal == 's') {
+                            try self.advance();
+                            if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
+                                return self.fail(error.UnsupportedGroup, group_span);
+                            }
+                            try self.advance();
+                            const saved_dotall_mode = self.dotall_mode;
+                            self.dotall_mode = false;
+                            defer self.dotall_mode = saved_dotall_mode;
+                            const expr = try self.parseAlternation();
+                            if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+                            try self.advance();
+                            return expr;
+                        }
                         if (self.lookahead.token != .literal or self.lookahead.token.literal != 'u') {
                             return self.fail(error.UnsupportedGroup, group_span);
                         }
@@ -450,6 +488,34 @@ pub const Parser = struct {
                             .enabled = true,
                             .child = expr,
                         } });
+                    }
+                    if (self.lookahead.token == .literal and self.lookahead.token.literal == 'm') {
+                        try self.advance();
+                        if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
+                            return self.fail(error.UnsupportedGroup, group_span);
+                        }
+                        try self.advance();
+                        const saved_multiline_mode = self.multiline_mode;
+                        self.multiline_mode = true;
+                        defer self.multiline_mode = saved_multiline_mode;
+                        const expr = try self.parseAlternation();
+                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+                        try self.advance();
+                        return expr;
+                    }
+                    if (self.lookahead.token == .literal and self.lookahead.token.literal == 's') {
+                        try self.advance();
+                        if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
+                            return self.fail(error.UnsupportedGroup, group_span);
+                        }
+                        try self.advance();
+                        const saved_dotall_mode = self.dotall_mode;
+                        self.dotall_mode = true;
+                        defer self.dotall_mode = saved_dotall_mode;
+                        const expr = try self.parseAlternation();
+                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+                        try self.advance();
+                        return expr;
                     }
                     if (self.lookahead.token == .literal and self.lookahead.token.literal == 'u') {
                         try self.advance();
@@ -1146,6 +1212,32 @@ test "Parser supports inline case-fold groups" {
     try testing.expect(ast.nodes[@intFromEnum(root[0])].case_fold_group.enabled);
     try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(root[1])]));
     try testing.expect(!ast.nodes[@intFromEnum(root[1])].case_fold_group.enabled);
+}
+
+test "Parser supports inline multiline and dotall groups" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "(?m:^a$)(?s:.)(?-m:^a$)(?-s:.)");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 4), root.len);
+
+    try testing.expect(ast.nodes[@intFromEnum(root[0])].concat.len >= 2);
+    const multiline_start = ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(root[0])].concat[0])].anchor_start;
+    const multiline_end = ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(root[0])].concat[2])].anchor_end;
+    try testing.expect(multiline_start.multiline);
+    try testing.expect(multiline_end.multiline);
+
+    try testing.expectEqualDeep(Node{ .dot = .{ .matches_newline = true } }, ast.nodes[@intFromEnum(root[1])]);
+
+    const ascii_start = ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(root[2])].concat[0])].anchor_start;
+    const ascii_end = ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(root[2])].concat[2])].anchor_end;
+    try testing.expect(!ascii_start.multiline);
+    try testing.expect(!ascii_end.multiline);
+
+    try testing.expectEqualDeep(Node{ .dot = .{ .matches_newline = false } }, ast.nodes[@intFromEnum(root[3])]);
 }
 
 test "Parser decodes Unicode literal escapes as literals" {

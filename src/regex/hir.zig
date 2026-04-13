@@ -27,9 +27,15 @@ pub const ClassSetOp = parser.ClassSetOp;
 pub const Node = union(enum) {
     empty,
     literal: u32,
-    dot,
-    anchor_start,
-    anchor_end,
+    dot: struct {
+        matches_newline: ?bool,
+    },
+    anchor_start: struct {
+        multiline: bool,
+    },
+    anchor_end: struct {
+        multiline: bool,
+    },
     word_boundary: struct {
         ascii_only: bool,
     },
@@ -222,9 +228,9 @@ fn lowerNode(
     const lowered: Node = switch (node) {
         .empty => .empty,
         .literal => |cp| .{ .literal = cp },
-        .dot => .dot,
-        .anchor_start => .anchor_start,
-        .anchor_end => .anchor_end,
+        .dot => |dot| .{ .dot = .{ .matches_newline = dot.matches_newline } },
+        .anchor_start => |anchor| .{ .anchor_start = .{ .multiline = anchor.multiline } },
+        .anchor_end => |anchor| .{ .anchor_end = .{ .multiline = anchor.multiline } },
         .word_boundary => |boundary| .{ .word_boundary = .{ .ascii_only = boundary.ascii_only } },
         .not_word_boundary => |boundary| .{ .not_word_boundary = .{ .ascii_only = boundary.ascii_only } },
         .word_boundary_start_half => |boundary| .{ .word_boundary_start_half = .{ .ascii_only = boundary.ascii_only } },

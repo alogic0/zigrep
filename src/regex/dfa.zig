@@ -144,7 +144,7 @@ pub const Cache = struct {
                     }
                 },
                 .any => |any| {
-                    if (cp != '\n') {
+                    if (any.matches_newline or cp != '\n') {
                         if (try self.addEpsilonClosure(&builder, visited, any.out.?, next_pos, input_len, &matched)) {
                             matched = true;
                         }

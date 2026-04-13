@@ -23,6 +23,7 @@ The current engine supports:
 - Non-capturing groups `(?:...)`
 - Inline Unicode mode groups `(?-u:...)` and `(?u:...)`
 - Inline local case-fold groups `(?i:...)` and `(?-i:...)`
+- Inline scoped multiline and dotall groups `(?m:...)`, `(?-m:...)`, `(?s:...)`, and `(?-s:...)`
 - Escaped metacharacters such as `\.`, `\(`, `\)`, `\[`, `\]`, `\{`, `\}`, `\|`, `\*`, `\+`, `\?`, `\^`, `\$`, and `\\`
 
 Notes:
@@ -87,6 +88,13 @@ Current escape boundary:
   - `(?-i:...)` disables local case-insensitive matching for the group
   - they compose with global `--ignore-case` and `--smart-case` by overriding
     only the local subgroup
+- inline scoped multiline and dotall groups are supported:
+  - `(?m:...)` makes `^` and `$` use line-boundary semantics inside the group
+  - `(?-m:...)` restores absolute start/end semantics inside the group
+  - `(?s:...)` makes `.` match `\n` inside the group
+  - `(?-s:...)` keeps `.` from matching `\n` inside the group
+  - they do not change the CLI-level `-U` / `--multiline` requirement for any
+    pattern that can actually match across newlines
   - broader inline flag syntax remains unsupported
 - explicit ASCII regexes such as `[0-9]` and `[A-Za-z0-9_]` remain the stable
   way to request ASCII-only behavior outside inline mode groups
@@ -162,9 +170,10 @@ of scope for the main engine:
 - Features that require general backtracking semantics
 - Full PCRE2 compatibility
 
-In particular, `(?:...)`, `(?-u:...)`, `(?u:...)`, `(?i:...)`, and `(?-i:...)`
-are supported, but other `(?...)` group forms are rejected explicitly rather
-than being interpreted partially.
+In particular, `(?:...)`, `(?-u:...)`, `(?u:...)`, `(?i:...)`, `(?-i:...)`,
+`(?m:...)`, `(?-m:...)`, `(?s:...)`, and `(?-s:...)` are supported, but other
+`(?...)` group forms are rejected explicitly rather than being interpreted
+partially.
 
 ## CLI Behavior
 
