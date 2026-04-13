@@ -1,4 +1,6 @@
 const std = @import("std");
+const config = @import("config.zig");
+const build_options = @import("build_options");
 const search = @import("search/root.zig");
 const runner = @import("search_runner.zig");
 
@@ -17,6 +19,7 @@ pub const OutputFormat = runner.OutputFormat;
 pub const BinaryMode = runner.BinaryMode;
 pub const ReportMode = runner.ReportMode;
 pub const CliOptions = runner.CliOptions;
+pub const app_version = build_options.app_version;
 
 pub const ParseResult = union(enum) {
     help,
@@ -30,6 +33,50 @@ pub const ParseResult = union(enum) {
     },
     run: CliOptions,
 };
+
+pub fn writeFatalError(writer: *std.Io.Writer, argv0: []const u8, err: anyerror) !void {
+    try writer.print("error: {s}\n", .{@errorName(err)});
+    if (isUsageError(err)) {
+        try writeUsage(writer, argv0);
+    }
+}
+
+pub fn runCli(
+    allocator: std.mem.Allocator,
+    stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
+    argv: []const []const u8,
+) !u8 {
+    const resolved = try config.resolveArgs(allocator, argv);
+    defer resolved.deinit(allocator);
+
+    const parsed = try parseArgs(allocator, resolved.argv);
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(allocator),
+        .type_list => |opts| opts.deinit(allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .help => {
+            try writeUsage(stdout, resolved.argv[0]);
+            return 0;
+        },
+        .version => {
+            try stdout.print("zigrep {s}\n", .{app_version});
+            return 0;
+        },
+        .type_list => |opts| {
+            const matcher = try search.types.init(allocator, opts.type_adds);
+            defer matcher.deinit(allocator);
+            try search.types.writeTypeList(stdout, matcher);
+            return 0;
+        },
+        .run => |opts| {
+            return runner.runSearch(allocator, stdout, stderr, opts);
+        },
+    }
+}
 
 pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseResult {
     if (argv.len <= 1) return error.MissingPattern;
@@ -407,6 +454,20 @@ fn shortUnrestrictedCount(arg: []const u8) ?u8 {
         if (byte != 'u') return null;
     }
     return @intCast(arg.len - 1);
+}
+
+fn isUsageError(err: anyerror) bool {
+    return switch (err) {
+        error.MissingPattern,
+        error.UnknownFlag,
+        error.UnknownType,
+        error.MissingFlagValue,
+        error.InvalidFlagValue,
+        error.InvalidFlagCombination,
+        error.InvalidTypeAddSpec,
+        => true,
+        else => false,
+    };
 }
 
 fn parseEncoding(arg: []const u8) CliError!search.io.InputEncoding {

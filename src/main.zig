@@ -16,6 +16,8 @@ const SearchResult = runner.SearchResult;
 const ParseResult = cli.ParseResult;
 const parseArgs = cli.parseArgs;
 const writeUsage = cli.writeUsage;
+const writeFatalError = cli.writeFatalError;
+const runCli = cli.runCli;
 
 
 pub fn main() !void {
@@ -36,8 +38,8 @@ pub fn main() !void {
     var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
     const stderr = &stderr_writer.interface;
 
-    const exit_code = runCli(allocator, stdout, stderr, argv) catch |err| {
-        try writeFatalError(stderr, argv[0], err);
+    const exit_code = cli.runCli(allocator, stdout, stderr, argv) catch |err| {
+        try cli.writeFatalError(stderr, argv[0], err);
         try stderr.flush();
         std.process.exit(2);
     };
@@ -45,64 +47,6 @@ pub fn main() !void {
     try stdout.flush();
     try stderr.flush();
     if (exit_code != 0) std.process.exit(exit_code);
-}
-
-fn writeFatalError(writer: *std.Io.Writer, argv0: []const u8, err: anyerror) !void {
-    try writer.print("error: {s}\n", .{@errorName(err)});
-    if (isUsageError(err)) {
-        try writeUsage(writer, argv0);
-    }
-}
-
-fn isUsageError(err: anyerror) bool {
-    return switch (err) {
-        error.MissingPattern,
-        error.UnknownFlag,
-        error.UnknownType,
-        error.MissingFlagValue,
-        error.InvalidFlagValue,
-        error.InvalidFlagCombination,
-        error.InvalidTypeAddSpec,
-        => true,
-        else => false,
-    };
-}
-
-fn runCli(
-    allocator: std.mem.Allocator,
-    stdout: *std.Io.Writer,
-    stderr: *std.Io.Writer,
-    argv: []const []const u8,
-) !u8 {
-    const resolved = try zigrep.config.resolveArgs(allocator, argv);
-    defer resolved.deinit(allocator);
-
-    const parsed = try cli.parseArgs(allocator, resolved.argv);
-    defer switch (parsed) {
-        .run => |opts| opts.deinit(allocator),
-        .type_list => |opts| opts.deinit(allocator),
-        .help, .version => {},
-    };
-
-    switch (parsed) {
-        .help => {
-            try cli.writeUsage(stdout, resolved.argv[0]);
-            return 0;
-        },
-        .version => {
-            try stdout.print("zigrep {s}\n", .{zigrep.app_version});
-            return 0;
-        },
-        .type_list => |opts| {
-            const matcher = try zigrep.search.types.init(allocator, opts.type_adds);
-            defer matcher.deinit(allocator);
-            try zigrep.search.types.writeTypeList(stdout, matcher);
-            return 0;
-        },
-        .run => |opts| {
-            return runSearch(allocator, stdout, stderr, opts);
-        },
-    }
 }
 
 pub fn runSearch(
