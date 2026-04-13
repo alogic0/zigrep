@@ -11,6 +11,7 @@ The current engine supports:
 - Concatenation
 - Alternation with `|`
 - Capturing groups with `(...)`
+- Named capturing groups with `(?P<name>...)`
 - Wildcard `.` matching any character except newline
 - Anchors `^` and `$`
 - Quantifiers `*`, `+`, `?`
@@ -31,7 +32,8 @@ Notes:
 
 - `.` does not match `\n` by default.
 - Matching is UTF-8 aware but stays byte-oriented in the hot path.
-- Captures are supported by the engine, but the current CLI only reports whole-line matches.
+- Capture names currently use ASCII letters, digits, and `_`.
+- Captures are supported by the engine, but the current CLI still reports whole-line matches rather than named-capture-specific output.
 
 ## Character Class Behavior
 

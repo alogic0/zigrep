@@ -4534,6 +4534,30 @@ test "runCli supports non-capturing groups" {
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:3:1:ax"));
 }
 
+test "runCli supports named capture groups" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "abcc\n" ++
+            "zz\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?P<head>ab)(c+)", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:abcc"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:zz"));
+}
+
 test "runCli supports Unicode literal escapes" {
     const testing = std.testing;
 

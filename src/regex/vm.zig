@@ -1053,6 +1053,24 @@ test "VM returns whole-match and capture spans" {
     try testing.expectEqual(Capture{ .start = 4, .end = 6 }, found.groups[1]);
 }
 
+test "VM supports named capture group syntax without changing capture order" {
+    const testing = std.testing;
+
+    const program = try compileProgram(testing.allocator, "(?P<head>ab)(c+)");
+    defer program.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 2), program.capture_count);
+
+    var engine = MatchEngine.init(testing.allocator);
+    const found = (try engine.firstMatch(program, "zzabccyy")).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(Capture{ .start = 2, .end = 6 }, found.span);
+    try testing.expectEqual(@as(usize, 2), found.groups.len);
+    try testing.expectEqual(Capture{ .start = 2, .end = 4 }, found.groups[0]);
+    try testing.expectEqual(Capture{ .start = 4, .end = 6 }, found.groups[1]);
+}
+
 test "VM returns null when no capture match exists" {
     const testing = std.testing;
 

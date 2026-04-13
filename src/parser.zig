@@ -90,6 +90,7 @@ pub const Ast = struct {
     nodes: []Node,
     root: NodeId,
     capture_count: u32,
+    capture_names: []const ?[]const u8,
 
     pub fn deinit(self: Ast, allocator: std.mem.Allocator) void {
         for (self.nodes) |node| {
@@ -100,7 +101,11 @@ pub const Ast = struct {
                 else => {},
             }
         }
+        for (self.capture_names) |name| {
+            if (name) |capture_name| allocator.free(capture_name);
+        }
         allocator.free(self.nodes);
+        allocator.free(self.capture_names);
     }
 };
 
@@ -112,6 +117,7 @@ pub const ParseError = lexer_mod.LexError || error{
     InvalidClassRange,
     EmptyClass,
     InvalidQuantifier,
+    InvalidCaptureName,
     UnsupportedGroup,
     TrailingInput,
 };
@@ -129,6 +135,7 @@ pub const Parser = struct {
     nodes: std.ArrayList(Node),
     last_error: ?ParseDiagnostic,
     capture_count: u32,
+    capture_names: std.ArrayList(?[]const u8),
     unicode_mode: bool,
     multiline_mode: bool,
     dotall_mode: ?bool,
@@ -147,6 +154,7 @@ pub const Parser = struct {
             .nodes = .empty,
             .last_error = null,
             .capture_count = 0,
+            .capture_names = .empty,
             .unicode_mode = true,
             .multiline_mode = false,
             .dotall_mode = null,
@@ -156,6 +164,7 @@ pub const Parser = struct {
 
     pub fn parse(self: *Parser) ParseError!Ast {
         defer self.nodes.deinit(self.allocator);
+        errdefer self.captureNamesDeinit();
 
         const root = self.parseAlternation() catch |err| {
             if (self.last_error == null) return self.fail(err, self.lookahead.span);
@@ -167,6 +176,7 @@ pub const Parser = struct {
             .nodes = try self.nodes.toOwnedSlice(self.allocator),
             .root = root,
             .capture_count = self.capture_count,
+            .capture_names = try self.capture_names.toOwnedSlice(self.allocator),
         };
     }
 
@@ -177,6 +187,13 @@ pub const Parser = struct {
     fn advance(self: *Parser) ParseError!void {
         self.lookahead = self.lookahead2;
         self.lookahead2 = try self.lexer.nextSpanned();
+    }
+
+    fn captureNamesDeinit(self: *Parser) void {
+        for (self.capture_names.items) |name| {
+            if (name) |capture_name| self.allocator.free(capture_name);
+        }
+        self.capture_names.deinit(self.allocator);
     }
 
     fn parseAlternation(self: *Parser) ParseError!NodeId {
@@ -411,6 +428,14 @@ pub const Parser = struct {
                 try self.advance();
                 if (self.lookahead.token == .question) {
                     try self.advance();
+                    if (self.lookahead.token == .literal and self.lookahead.token.literal == 'P') {
+                        try self.advance();
+                        if (self.lookahead.token != .literal or self.lookahead.token.literal != '<') {
+                            return self.fail(error.UnsupportedGroup, group_span);
+                        }
+                        try self.advance();
+                        return self.parseNamedCaptureGroup();
+                    }
                     if (self.lookahead.token == .literal and self.lookahead.token.literal == ':') {
                         const saved_modes = self.modeState();
                         defer self.restoreModeState(saved_modes);
@@ -424,6 +449,7 @@ pub const Parser = struct {
                 }
                 const group_index = self.capture_count;
                 self.capture_count += 1;
+                try self.capture_names.append(self.allocator, null);
                 const saved_modes = self.modeState();
                 defer self.restoreModeState(saved_modes);
                 const expr = try self.parseAlternation();
@@ -437,6 +463,52 @@ pub const Parser = struct {
             .l_bracket => return self.parseClass(),
             else => return error.UnexpectedToken,
         }
+    }
+
+    fn parseNamedCaptureGroup(self: *Parser) ParseError!NodeId {
+        const capture_name = try self.parseCaptureName();
+        errdefer self.allocator.free(capture_name);
+
+        const group_index = self.capture_count;
+        self.capture_count += 1;
+        try self.capture_names.append(self.allocator, capture_name);
+
+        const saved_modes = self.modeState();
+        defer self.restoreModeState(saved_modes);
+        const expr = try self.parseAlternation();
+        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+        try self.advance();
+        return self.push(.{ .group = .{
+            .index = group_index,
+            .child = expr,
+        } });
+    }
+
+    fn parseCaptureName(self: *Parser) ParseError![]const u8 {
+        var bytes: std.ArrayList(u8) = .empty;
+        errdefer bytes.deinit(self.allocator);
+
+        while (self.lookahead.token == .literal) {
+            const cp = self.lookahead.token.literal;
+            if (cp == '>') break;
+            if (!isValidCaptureNameByte(cp)) return self.fail(error.InvalidCaptureName, self.lookahead.span);
+            try bytes.append(self.allocator, @intCast(cp));
+            try self.advance();
+        }
+
+        if (bytes.items.len == 0) return self.fail(error.InvalidCaptureName, self.lookahead.span);
+        if (self.lookahead.token != .literal or self.lookahead.token.literal != '>') {
+            return self.fail(error.InvalidCaptureName, self.lookahead.span);
+        }
+        try self.advance();
+        return bytes.toOwnedSlice(self.allocator);
+    }
+
+    fn isValidCaptureNameByte(cp: u32) bool {
+        return (cp >= '0' and cp <= '9') or
+            (cp >= 'A' and cp <= 'Z') or
+            (cp >= 'a' and cp <= 'z') or
+            cp == '_';
     }
 
     fn parseClass(self: *Parser) ParseError!NodeId {
@@ -997,6 +1069,39 @@ test "Parser supports non-capturing groups without incrementing capture count" {
     try testing.expectEqualDeep(Node{ .literal = 'b' }, ast.nodes[@intFromEnum(non_capturing[1])]);
     try testing.expectEqual(.group, std.meta.activeTag(ast.nodes[@intFromEnum(root[1])]));
     try testing.expectEqual(@as(u32, 0), ast.nodes[@intFromEnum(root[1])].group.index);
+}
+
+test "Parser supports named capture groups without changing numeric order" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "(?P<word>ab)(c)");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 2), ast.capture_count);
+    try testing.expectEqual(@as(usize, 2), ast.capture_names.len);
+    try testing.expectEqualStrings("word", ast.capture_names[0].?);
+    try testing.expectEqual(@as(?[]const u8, null), ast.capture_names[1]);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(.group, std.meta.activeTag(ast.nodes[@intFromEnum(root[0])]));
+    try testing.expectEqual(@as(u32, 0), ast.nodes[@intFromEnum(root[0])].group.index);
+    try testing.expectEqual(.group, std.meta.activeTag(ast.nodes[@intFromEnum(root[1])]));
+    try testing.expectEqual(@as(u32, 1), ast.nodes[@intFromEnum(root[1])].group.index);
+}
+
+test "Parser rejects invalid named capture groups" {
+    const testing = std.testing;
+
+    var empty_name = try Parser.init(testing.allocator, "(?P<>a)");
+    try testing.expectError(error.InvalidCaptureName, empty_name.parse());
+
+    var bad_name = try Parser.init(testing.allocator, "(?P<na-me>a)");
+    try testing.expectError(error.InvalidCaptureName, bad_name.parse());
+    try testing.expectEqualDeep(ParseDiagnostic{
+        .err = error.InvalidCaptureName,
+        .span = .{ .start = 6, .end = 7 },
+    }, bad_name.lastError().?);
 }
 
 test "Parser supports inline Unicode mode groups" {

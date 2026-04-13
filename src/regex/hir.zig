@@ -89,6 +89,7 @@ pub const Hir = struct {
     nodes: []Node,
     root: NodeId,
     capture_count: u32,
+    capture_names: []const ?[]const u8,
     literals: []literal_mod.LiteralSequence,
     prefix: Prefix,
     fast_path: FastPath,
@@ -104,6 +105,10 @@ pub const Hir = struct {
         }
 
         allocator.free(self.nodes);
+        for (self.capture_names) |name| {
+            if (name) |capture_name| allocator.free(capture_name);
+        }
+        allocator.free(self.capture_names);
         allocator.free(self.literals);
         allocator.free(self.prefix.bytes);
     }
@@ -137,12 +142,16 @@ pub fn lower(allocator: std.mem.Allocator, ast: parser.Ast) LowerError!Hir {
     const root = try lowerNode(allocator, ast, ast.root, &nodes);
     const prefix = try extractPrefix(allocator, nodes.items, root);
     errdefer allocator.free(prefix.bytes);
+    const capture_names = try dupCaptureNames(allocator, ast.capture_names);
+    errdefer freeCaptureNames(allocator, capture_names);
     const literals = try extractLiterals(allocator, prefix.bytes);
+    errdefer allocator.free(literals);
 
     return .{
         .nodes = try nodes.toOwnedSlice(allocator),
         .root = root,
         .capture_count = ast.capture_count,
+        .capture_names = capture_names,
         .literals = literals,
         .prefix = prefix,
         .fast_path = if (prefix.bytes.len == 0)
@@ -282,6 +291,26 @@ fn lowerChildren(
     }
 
     return lowered;
+}
+
+fn dupCaptureNames(allocator: std.mem.Allocator, input: []const ?[]const u8) LowerError![]const ?[]const u8 {
+    const duped = try allocator.alloc(?[]const u8, input.len);
+    errdefer allocator.free(duped);
+
+    for (input, 0..) |name, index| {
+        duped[index] = if (name) |capture_name|
+            try allocator.dupe(u8, capture_name)
+        else
+            null;
+    }
+    return duped;
+}
+
+fn freeCaptureNames(allocator: std.mem.Allocator, capture_names: []const ?[]const u8) void {
+    for (capture_names) |name| {
+        if (name) |capture_name| allocator.free(capture_name);
+    }
+    allocator.free(capture_names);
 }
 
 fn lowerClassItems(allocator: std.mem.Allocator, items: []const parser.ClassItem) LowerError![]const ClassItem {
@@ -541,9 +570,28 @@ test "HIR lowering preserves capture groups" {
     defer hir.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u32, 2), hir.capture_count);
+    try testing.expectEqual(@as(usize, 2), hir.capture_names.len);
+    try testing.expectEqual(@as(?[]const u8, null), hir.capture_names[0]);
+    try testing.expectEqual(@as(?[]const u8, null), hir.capture_names[1]);
     const root = hir.nodes[@intFromEnum(hir.root)].concat;
     try testing.expectEqual(.group, std.meta.activeTag(hir.nodes[@intFromEnum(root[0])]));
     try testing.expectEqual(@as(u32, 0), hir.nodes[@intFromEnum(root[0])].group.index);
     try testing.expectEqual(.group, std.meta.activeTag(hir.nodes[@intFromEnum(root[1])]));
     try testing.expectEqual(@as(u32, 1), hir.nodes[@intFromEnum(root[1])].group.index);
+}
+
+test "HIR lowering preserves named capture metadata" {
+    const testing = std.testing;
+
+    var p = try parser.Parser.init(testing.allocator, "(?P<word>ab)(c)");
+    const ast = try p.parse();
+    defer ast.deinit(testing.allocator);
+
+    const hir = try lower(testing.allocator, ast);
+    defer hir.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 2), hir.capture_count);
+    try testing.expectEqual(@as(usize, 2), hir.capture_names.len);
+    try testing.expectEqualStrings("word", hir.capture_names[0].?);
+    try testing.expectEqual(@as(?[]const u8, null), hir.capture_names[1]);
 }

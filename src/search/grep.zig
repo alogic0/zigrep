@@ -3003,6 +3003,24 @@ test "Searcher firstByteMatch reports planner-friendly capture groups" {
     try testing.expectEqual(@as(?usize, 6), found.groups[1].end);
 }
 
+test "Searcher firstByteMatch supports named capture group syntax" {
+    const testing = std.testing;
+
+    var searcher = try Searcher.init(testing.allocator, "(?P<head>a.)([0-9]b)", .{});
+    defer searcher.deinit();
+
+    const found = (try searcher.firstByteMatch("xxa\xff7byy")).?;
+    defer found.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(?usize, 2), found.span.start);
+    try testing.expectEqual(@as(?usize, 6), found.span.end);
+    try testing.expectEqual(@as(usize, 2), found.groups.len);
+    try testing.expectEqual(@as(?usize, 2), found.groups[0].start);
+    try testing.expectEqual(@as(?usize, 4), found.groups[0].end);
+    try testing.expectEqual(@as(?usize, 4), found.groups[1].start);
+    try testing.expectEqual(@as(?usize, 6), found.groups[1].end);
+}
+
 test "Searcher firstByteMatch preserves UTF-8 literal captures on the byte path" {
     const testing = std.testing;
 
