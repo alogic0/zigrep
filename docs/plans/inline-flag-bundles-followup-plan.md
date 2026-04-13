@@ -85,10 +85,10 @@ Out of scope for this plan:
 
 ## Phase 4: Engine Integration
 
-- [ ] Keep parser-time flags (`u`, `m`, `s`) represented directly on the parsed
+- [x] Keep parser-time flags (`u`, `m`, `s`) represented directly on the parsed
   nodes they affect
-- [ ] Keep case-fold flag changes in the existing scoped HIR rewrite model
-- [ ] Keep planner and DFA gating conservative for any new bundled line-mode
+- [x] Keep case-fold flag changes in the existing scoped HIR rewrite model
+- [x] Keep planner and DFA gating conservative for any new bundled line-mode
   cases until equivalence is proven
 
 ## Phase 5: Validation And Docs
@@ -108,19 +108,28 @@ Out of scope for this plan:
 - [x] 1. Land unscoped `i` / `u` / `m` / `s` toggles for the remainder of the
       pattern
 - [x] 2. Land grouped scoped bundles for the same supported subset
-- [ ] 3. Re-check whether any other inline flags are still materially useful
+- [x] 3. Re-check whether any other inline flags are still materially useful
+  - current result:
+    - no further inline-flag expansion is justified inside this plan
+    - the remaining local `ripgrep` inline flags are either outside the current
+      native-core scope or explicitly excluded here
+    - any future follow-up should be a separate narrow plan, not more drift
+      inside this one
 
 ## Status
 
-The main implementation slices of this plan are implemented:
+This plan is complete.
+
+The implemented scope is:
 
 - unscoped single-flag toggles for `i`, `u`, `m`, and `s`
 - grouped scoped bundles over the same `i/u/m/s` subset
 - multi-flag unscoped bundles using that same parser surface
 
-The next remaining work in this plan is:
+No broader inline-flag work is justified inside this plan.
 
-- re-check whether any other inline flags are still materially useful
+Any future work in this area should be handled by a separate narrow follow-up
+only if there is a concrete parity or user-facing need.
 
 ## Explicit Non-Goals
 

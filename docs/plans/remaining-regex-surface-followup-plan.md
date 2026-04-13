@@ -59,22 +59,31 @@ Implementation order for this plan:
 
 ## Phase 3: Broader Inline-Flag Re-Check
 
-- [ ] Re-check which inline flags in local `ripgrep` remain outside the current
+- [x] Re-check which inline flags in local `ripgrep` remain outside the current
   `i/u/m/s` implementation
-- [ ] Separate useful native-core candidates from flags that are outside this
+- [x] Separate useful native-core candidates from flags that are outside this
   engine’s intended scope
-- [ ] Only implement additional inline flags here if:
+- [x] Only implement additional inline flags here if:
   - they map cleanly to existing native-core semantics
   - they do not require verbose-mode parsing or unrelated syntax features
-- [ ] Otherwise, close this phase with an explicit non-goal decision
+- [x] Otherwise, close this phase with an explicit non-goal decision
+
+Result:
+
+- local `ripgrep` still exposes inline flags beyond `i/u/m/s`, most notably
+  `R` for CRLF-aware line terminators
+- those flags do not map cleanly to the current `zigrep` native core because
+  they would require a broader line-terminator model, not just parser syntax
+- no additional inline flags are justified inside this plan
+- any future work on CRLF-aware regex behavior should be its own narrow plan
 
 ## Phase 4: Validation And Docs
 
-- [ ] Update [docs/supported-syntax.md](../supported-syntax.md) after each
+- [x] Update [docs/supported-syntax.md](../supported-syntax.md) after each
   implemented slice
-- [ ] Add focused regressions for any new named-capture and inline-flag
+- [x] Add focused regressions for any new named-capture and inline-flag
   behavior
-- [ ] Run:
+- [x] Run:
   - `zig build test`
   - `zig build bench-smoke`
 
@@ -82,7 +91,7 @@ Implementation order for this plan:
 
 - [x] 1. Land named capture syntax first
 - [x] 2. Decide the named-capture surface boundary
-- [ ] 3. Re-check and either implement or explicitly defer any remaining inline
+- [x] 3. Re-check and either implement or explicitly defer any remaining inline
       flags outside `i/u/m/s`
 
 ## Explicit Non-Goals
