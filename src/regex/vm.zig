@@ -298,6 +298,14 @@ pub const MatchEngine = struct {
                 if (wordBoundaryAt(haystack, pos, boundary.ascii_only)) return null;
                 return self.addThread(program, haystack, list, visited, boundary.out.?, slots, pos);
             },
+            .word_boundary_start_half => |boundary| {
+                if (!wordBoundaryStartHalfAt(haystack, pos, boundary.ascii_only)) return null;
+                return self.addThread(program, haystack, list, visited, boundary.out.?, slots, pos);
+            },
+            .word_boundary_end_half => |boundary| {
+                if (!wordBoundaryEndHalfAt(haystack, pos, boundary.ascii_only)) return null;
+                return self.addThread(program, haystack, list, visited, boundary.out.?, slots, pos);
+            },
             .match => return try self.buildMatch(program, slots),
             .literal, .char_class, .unicode_property, .any => {
                 if (!hasThread(list.items, inst_ptr)) {
@@ -510,6 +518,26 @@ fn wordBoundaryAt(haystack: []const u8, offset: usize, ascii_only: bool) bool {
         false;
 
     return before_is_word != after_is_word;
+}
+
+fn wordBoundaryStartHalfAt(haystack: []const u8, offset: usize, ascii_only: bool) bool {
+    var before_is_word = false;
+    var pos: usize = 0;
+    while (pos < offset) {
+        const unit = nextTextUnit(haystack, &pos) orelse break;
+        if (unit.end > offset) break;
+        before_is_word = if (ascii_only) isAsciiWordTextUnit(unit) else isWordTextUnit(unit);
+    }
+    return !before_is_word;
+}
+
+fn wordBoundaryEndHalfAt(haystack: []const u8, offset: usize, ascii_only: bool) bool {
+    var after_pos = offset;
+    const after_is_word = if (nextTextUnit(haystack, &after_pos)) |unit|
+        if (ascii_only) isAsciiWordTextUnit(unit) else isWordTextUnit(unit)
+    else
+        false;
+    return !after_is_word;
 }
 
 fn isAsciiBytes(bytes: []const u8) bool {
@@ -853,6 +881,17 @@ test "VM handles word boundaries on UTF-8 and raw-byte haystacks" {
     const raw = (try engine.firstMatchBytes(word_boundary, "\xffcat\xff")).?;
     defer raw.deinit(testing.allocator);
     try testing.expectEqual(Capture{ .start = 1, .end = 4 }, raw.span);
+}
+
+test "VM handles half-word boundaries" {
+    try expectMatch("\\b{start-half}cat\\b{end-half}", "cat");
+    try expectMatch("\\b{start-half}cat\\b{end-half}", "!cat");
+    try expectMatch("\\b{start-half}cat\\b{end-half}", "cat!");
+    try expectNoMatch("\\b{start-half}cat\\b{end-half}", "βcat");
+    try expectNoMatch("\\b{start-half}cat\\b{end-half}", "catβ");
+    try expectMatch("\\b{start-half}-2\\b{end-half}", "(-2)");
+    try expectMatch("(?-u:\\b{start-half}A\\b{end-half})", "!A!");
+    try expectNoMatch("(?-u:\\b{start-half}Ж\\b{end-half})", "!Ж!");
 }
 
 test "VM handles empty alternation branches and anchor-only patterns" {

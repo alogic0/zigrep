@@ -96,15 +96,19 @@ Implementation order for this plan:
 
 ## Phase 3: Half-Boundaries
 
-- [ ] Confirm the local `ripgrep` semantics for:
+- [x] Confirm the local `ripgrep` semantics for:
   - `\b{start-half}`
   - `\b{end-half}`
+  - current result:
+    - `\b{start-half}` checks only the left side for `\W|\A`
+    - `\b{end-half}` checks only the right side for `\W|\z`
+    - together they match the documented `-w/--word-regexp` wrapping behavior
 
-- [ ] Extend the parser AST and HIR with explicit half-boundary nodes
+- [x] Extend the parser AST and HIR with explicit half-boundary nodes
 
-- [ ] Add VM/NFA support for half-boundary assertions
+- [x] Add VM/NFA support for half-boundary assertions
 
-- [ ] Add search-layer and CLI regressions for:
+- [x] Add search-layer and CLI regressions for:
   - ASCII words
   - Unicode words
   - punctuation boundaries
@@ -150,7 +154,7 @@ Implementation order for this plan:
 
 - [x] 1. Land `Script_Extensions`
 - [x] 2. Land inline Unicode mode toggles
-- [ ] 3. Land half-boundaries
+- [x] 3. Land half-boundaries
 - [ ] 4. Decide and land the smallest useful class-set subset
 - [ ] 5. Re-evaluate remaining property-surface gaps
 

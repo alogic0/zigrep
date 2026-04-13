@@ -6072,6 +6072,49 @@ test "runCli supports inline Unicode mode toggles" {
     try testing.expectError(error.UnsupportedGroup, runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u:\\p{Greek})", root_path }));
 }
 
+test "runCli supports half-word boundaries" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "cat\n" ++
+            "!cat\n" ++
+            "cat!\n" ++
+            "βcat\n" ++
+            "catβ\n" ++
+            "(-2)\n" ++
+            "!A!\n" ++
+            "!Ж!\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const half_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\b{start-half}cat\\b{end-half}", root_path });
+    defer half_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), half_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:1:1:cat"));
+    try testing.expect(std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:2:2:!cat"));
+    try testing.expect(std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:3:1:cat!"));
+    try testing.expect(!std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:4:1:βcat"));
+    try testing.expect(!std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:5:1:catβ"));
+
+    const minus_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\b{start-half}-2\\b{end-half}", root_path });
+    defer minus_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), minus_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, minus_run.stdout, 1, "sample.txt:6:2:(-2)"));
+
+    const ascii_half_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u:\\b{start-half}A\\b{end-half})", root_path });
+    defer ascii_half_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), ascii_half_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_half_run.stdout, 1, "sample.txt:7:2:!A!"));
+    try testing.expect(!std.mem.containsAtLeast(u8, ascii_half_run.stdout, 1, "sample.txt:8:2:!Ж!"));
+}
+
 test "runCli supports non-capturing groups" {
     const testing = std.testing;
 

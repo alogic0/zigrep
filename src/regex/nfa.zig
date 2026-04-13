@@ -50,6 +50,14 @@ pub const Inst = union(enum) {
         ascii_only: bool = false,
         out: ?InstPtr = null,
     },
+    word_boundary_start_half: struct {
+        ascii_only: bool = false,
+        out: ?InstPtr = null,
+    },
+    word_boundary_end_half: struct {
+        ascii_only: bool = false,
+        out: ?InstPtr = null,
+    },
     unicode_property: struct {
         property: unicode.Property,
         negated: bool,
@@ -140,7 +148,7 @@ pub fn compile(allocator: std.mem.Allocator, compiled_hir: hir_mod.Hir, options:
 
 fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, multiline: bool, dotall: bool) bool {
     return switch (compiled_hir.nodes[@intFromEnum(node_id)]) {
-        .empty, .anchor_start, .anchor_end, .word_boundary, .not_word_boundary => false,
+        .empty, .anchor_start, .anchor_end, .word_boundary, .not_word_boundary, .word_boundary_start_half, .word_boundary_end_half => false,
         .unicode_property => |property| !property.negated and switch (property.property) {
             .whitespace => true,
             .shorthand_whitespace => multiline,
@@ -220,7 +228,7 @@ fn isAsciiOnly(instructions: []const Inst) bool {
 fn hasWordBoundary(instructions: []const Inst) bool {
     for (instructions) |inst| {
         switch (inst) {
-            .word_boundary, .not_word_boundary => return true,
+            .word_boundary, .not_word_boundary, .word_boundary_start_half, .word_boundary_end_half => return true,
             else => {},
         }
     }
@@ -250,6 +258,8 @@ const Compiler = struct {
             .anchor_end => self.compileAnchorEnd(),
             .word_boundary => |boundary| self.compileWordBoundary(boundary.ascii_only),
             .not_word_boundary => |boundary| self.compileNotWordBoundary(boundary.ascii_only),
+            .word_boundary_start_half => |boundary| self.compileWordBoundaryStartHalf(boundary.ascii_only),
+            .word_boundary_end_half => |boundary| self.compileWordBoundaryEndHalf(boundary.ascii_only),
             .unicode_property => |property| self.compileUnicodeProperty(property.property, property.negated),
             .char_class => |class| self.compileClass(class),
             .group => |group| self.compileGroup(compiled_hir, group.index, group.child),
@@ -303,6 +313,20 @@ const Compiler = struct {
 
     fn compileNotWordBoundary(self: *Compiler, ascii_only: bool) CompileError!Fragment {
         const index = try self.emit(.{ .not_word_boundary = .{ .ascii_only = ascii_only } });
+        var outs: std.ArrayList(PatchRef) = .empty;
+        try outs.append(self.allocator, .{ .inst = index, .slot = .out });
+        return .{ .start = index, .outs = outs };
+    }
+
+    fn compileWordBoundaryStartHalf(self: *Compiler, ascii_only: bool) CompileError!Fragment {
+        const index = try self.emit(.{ .word_boundary_start_half = .{ .ascii_only = ascii_only } });
+        var outs: std.ArrayList(PatchRef) = .empty;
+        try outs.append(self.allocator, .{ .inst = index, .slot = .out });
+        return .{ .start = index, .outs = outs };
+    }
+
+    fn compileWordBoundaryEndHalf(self: *Compiler, ascii_only: bool) CompileError!Fragment {
+        const index = try self.emit(.{ .word_boundary_end_half = .{ .ascii_only = ascii_only } });
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
         return .{ .start = index, .outs = outs };
@@ -507,6 +531,8 @@ const Compiler = struct {
                 .anchor_end => |*anchor| anchor.out = target,
                 .word_boundary => |*boundary| boundary.out = target,
                 .not_word_boundary => |*boundary| boundary.out = target,
+                .word_boundary_start_half => |*boundary| boundary.out = target,
+                .word_boundary_end_half => |*boundary| boundary.out = target,
                 .unicode_property => |*property| property.out = target,
                 .split => |*split| switch (patch_ref.slot) {
                     .out => split.out = target,

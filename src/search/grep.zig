@@ -526,7 +526,7 @@ fn extractBytePattern(
             .mode = .contains,
             .terms = try allocator.alloc(ByteTerm, 0),
         },
-        .word_boundary, .not_word_boundary, .unicode_property => null,
+        .word_boundary, .not_word_boundary, .word_boundary_start_half, .word_boundary_end_half, .unicode_property => null,
         .alternation => blk: {
             const term = (try extractAlternationByteTerm(allocator, nodes, root)) orelse break :blk null;
             const terms = try allocator.alloc(ByteTerm, 1);
@@ -683,7 +683,7 @@ fn appendNodeToByteTerms(
             try terms.append(allocator, .{ .atom = .anchor_end });
             return true;
         },
-        .word_boundary, .not_word_boundary, .unicode_property => {
+        .word_boundary, .not_word_boundary, .word_boundary_start_half, .word_boundary_end_half, .unicode_property => {
             return false;
         },
         .char_class => |class| {
@@ -2293,6 +2293,28 @@ test "Searcher supports inline Unicode mode toggles" {
     try testing.expect((try nested.reportFirstMatch("sample.txt", "AЖЖ")) == null);
 
     try testing.expectError(error.UnsupportedGroup, Searcher.init(testing.allocator, "(?-u:\\p{Greek})", .{}));
+}
+
+test "Searcher supports half-word boundaries" {
+    const testing = std.testing;
+
+    var half = try Searcher.init(testing.allocator, "\\b{start-half}cat\\b{end-half}", .{});
+    defer half.deinit();
+    try testing.expect(!half.hasBytePlan());
+    try testing.expect((try half.reportFirstMatch("sample.txt", "cat")) != null);
+    try testing.expect((try half.reportFirstMatch("sample.txt", "!cat")) != null);
+    try testing.expect((try half.reportFirstMatch("sample.txt", "cat!")) != null);
+    try testing.expect((try half.reportFirstMatch("sample.txt", "βcat")) == null);
+    try testing.expect((try half.reportFirstMatch("sample.txt", "catβ")) == null);
+
+    var minus = try Searcher.init(testing.allocator, "\\b{start-half}-2\\b{end-half}", .{});
+    defer minus.deinit();
+    try testing.expect((try minus.reportFirstMatch("sample.txt", "(-2)")) != null);
+
+    var ascii_half = try Searcher.init(testing.allocator, "(?-u:\\b{start-half}A\\b{end-half})", .{});
+    defer ascii_half.deinit();
+    try testing.expect((try ascii_half.reportFirstMatch("sample.txt", "!A!")) != null);
+    try testing.expect((try ascii_half.reportFirstMatch("sample.txt", "!Ж!")) == null);
 }
 
 test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {

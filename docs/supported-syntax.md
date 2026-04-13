@@ -19,6 +19,7 @@ The current engine supports:
 - Character classes like `[abc]`, `[a-z]`, and negated classes like `[^a-z]`
 - Shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S`
 - Word boundaries `\b` and `\B`
+- Half-word boundaries `\b{start-half}` and `\b{end-half}`
 - Non-capturing groups `(?:...)`
 - Inline Unicode mode groups `(?-u:...)` and `(?u:...)`
 - Escaped metacharacters such as `\.`, `\(`, `\)`, `\[`, `\]`, `\{`, `\}`, `\|`, `\*`, `\+`, `\?`, `\^`, `\$`, and `\\`
@@ -62,6 +63,10 @@ Current escape boundary:
 - word boundaries `\b` and `\B` are supported
   - boundary checks use the same Unicode word-character predicate as `\w`
   - invalid bytes on the raw-byte path are treated as non-word units
+- half-word boundaries are supported:
+  - `\b{start-half}` checks only the left side for non-word/start-of-input
+  - `\b{end-half}` checks only the right side for non-word/end-of-input
+  - they use the same Unicode or ASCII word predicate as the surrounding mode
 - inline Unicode mode groups are supported:
   - `(?-u:...)` switches shorthand and boundary operators inside the group to ASCII behavior
   - `(?u:...)` switches them back to Unicode-aware behavior inside a nested group

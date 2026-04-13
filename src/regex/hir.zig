@@ -35,6 +35,12 @@ pub const Node = union(enum) {
     not_word_boundary: struct {
         ascii_only: bool,
     },
+    word_boundary_start_half: struct {
+        ascii_only: bool,
+    },
+    word_boundary_end_half: struct {
+        ascii_only: bool,
+    },
     unicode_property: struct {
         property: unicode.Property,
         negated: bool,
@@ -187,6 +193,8 @@ fn lowerNode(
         .anchor_end => .anchor_end,
         .word_boundary => |boundary| .{ .word_boundary = .{ .ascii_only = boundary.ascii_only } },
         .not_word_boundary => |boundary| .{ .not_word_boundary = .{ .ascii_only = boundary.ascii_only } },
+        .word_boundary_start_half => |boundary| .{ .word_boundary_start_half = .{ .ascii_only = boundary.ascii_only } },
+        .word_boundary_end_half => |boundary| .{ .word_boundary_end_half = .{ .ascii_only = boundary.ascii_only } },
         .unicode_property => |property| .{ .unicode_property = .{
             .property = property.property,
             .negated = property.negated,

@@ -43,6 +43,12 @@ pub const Node = union(enum) {
     not_word_boundary: struct {
         ascii_only: bool,
     },
+    word_boundary_start_half: struct {
+        ascii_only: bool,
+    },
+    word_boundary_end_half: struct {
+        ascii_only: bool,
+    },
     unicode_property: struct {
         property: unicode.Property,
         negated: bool,
@@ -352,6 +358,9 @@ pub const Parser = struct {
             },
             .word_boundary => {
                 try self.advance();
+                if (self.lookahead.token == .l_brace) {
+                    return self.parseHalfBoundary();
+                }
                 return self.push(.{ .word_boundary = .{ .ascii_only = !self.unicode_mode } });
             },
             .not_word_boundary => {
@@ -542,6 +551,46 @@ pub const Parser = struct {
     fn push(self: *Parser, node: Node) !NodeId {
         try self.nodes.append(self.allocator, node);
         return @enumFromInt(self.nodes.items.len - 1);
+    }
+
+    fn parseHalfBoundary(self: *Parser) ParseError!NodeId {
+        const ascii_only = !self.unicode_mode;
+        try self.advance();
+
+        var buffer: [16]u8 = undefined;
+        var len: usize = 0;
+        while (self.lookahead.token != .r_brace) {
+            switch (self.lookahead.token) {
+                .literal => |cp| {
+                    if (cp > 0x7f or len >= buffer.len) {
+                        return self.fail(error.UnexpectedToken, self.lookahead.span);
+                    }
+                    buffer[len] = @intCast(cp);
+                    len += 1;
+                    try self.advance();
+                },
+                .hyphen => {
+                    if (len >= buffer.len) {
+                        return self.fail(error.UnexpectedToken, self.lookahead.span);
+                    }
+                    buffer[len] = '-';
+                    len += 1;
+                    try self.advance();
+                },
+                else => return self.fail(error.UnexpectedToken, self.lookahead.span),
+            }
+        }
+
+        const end_span = self.lookahead.span;
+        try self.advance();
+        const name = buffer[0..len];
+        if (std.mem.eql(u8, name, "start-half")) {
+            return self.push(.{ .word_boundary_start_half = .{ .ascii_only = ascii_only } });
+        }
+        if (std.mem.eql(u8, name, "end-half")) {
+            return self.push(.{ .word_boundary_end_half = .{ .ascii_only = ascii_only } });
+        }
+        return self.fail(error.UnexpectedToken, end_span);
     }
 };
 
@@ -884,6 +933,21 @@ test "Parser supports word boundary escapes" {
     try testing.expectEqualDeep(Node{ .literal = 'o' }, ast.nodes[@intFromEnum(root[3])]);
     try testing.expectEqual(.not_word_boundary, std.meta.activeTag(ast.nodes[@intFromEnum(root[4])]));
     try testing.expect(!ast.nodes[@intFromEnum(root[4])].not_word_boundary.ascii_only);
+}
+
+test "Parser supports half-word-boundary escapes" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "\\b{start-half}foo\\b{end-half}");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 5), root.len);
+    try testing.expectEqual(.word_boundary_start_half, std.meta.activeTag(ast.nodes[@intFromEnum(root[0])]));
+    try testing.expectEqual(.word_boundary_end_half, std.meta.activeTag(ast.nodes[@intFromEnum(root[4])]));
+    try testing.expect(!ast.nodes[@intFromEnum(root[0])].word_boundary_start_half.ascii_only);
+    try testing.expect(!ast.nodes[@intFromEnum(root[4])].word_boundary_end_half.ascii_only);
 }
 
 test "Parser decodes Unicode literal escapes as literals" {

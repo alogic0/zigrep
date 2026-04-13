@@ -184,7 +184,7 @@ pub const Cache = struct {
                 if (pos != input_len) return false;
                 return self.addEpsilonClosure(builder, visited, anchor.out.?, pos, input_len, matched);
             },
-            .word_boundary, .not_word_boundary => unreachable,
+            .word_boundary, .not_word_boundary, .word_boundary_start_half, .word_boundary_end_half => unreachable,
             .match => {
                 matched.* = true;
                 return true;
