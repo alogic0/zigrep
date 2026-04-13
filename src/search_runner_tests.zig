@@ -2,6 +2,7 @@ const std = @import("std");
 const zigrep = @import("zigrep");
 
 const runner = zigrep.search_runner;
+const search_reporting = zigrep.search_reporting;
 const CliOptions = zigrep.command.CliOptions;
 
 test "runSearch parallel path preserves heading groups" {
@@ -127,7 +128,7 @@ test "formatReport obeys output toggles" {
         .match_span = .{ .start = 0, .end = 6 },
     };
 
-    const line = try runner.formatReport(testing.allocator, report, .{
+    const line = try search_reporting.formatReport(testing.allocator, report, .{
         .with_filename = false,
         .line_number = true,
         .column_number = false,
@@ -149,7 +150,7 @@ test "formatReport escapes unsafe bytes in displayed lines" {
         .match_span = .{ .start = 4, .end = 10 },
     };
 
-    const line = try runner.formatReport(testing.allocator, report, .{});
+    const line = try search_reporting.formatReport(testing.allocator, report, .{});
     defer testing.allocator.free(line);
 
     try testing.expectEqualStrings("sample.bin:1:4:aa\\x00\\xFFneedle\\x1B\n", line);

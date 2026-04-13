@@ -3,8 +3,8 @@ const zigrep = struct {
     pub const search = @import("search/root.zig");
 };
 const command = @import("command.zig");
+const search_reporting = @import("search_reporting.zig");
 const search_execution = @import("search_execution.zig");
-const search_runner = @import("search_runner.zig");
 
 pub const CliOptions = command.CliOptions;
 
@@ -79,7 +79,7 @@ pub fn searchEntryToOwnedOutput(
     var capture: std.Io.Writer.Allocating = .init(output_allocator);
     defer capture.deinit();
 
-    const matched = try search_runner.writeFileOutput(
+    const matched = try search_reporting.writeFileOutput(
         file_allocator,
         &capture.writer,
         searcher,

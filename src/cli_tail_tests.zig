@@ -2,6 +2,7 @@ const std = @import("std");
 const zigrep = @import("zigrep");
 const runner = zigrep.search_runner;
 const cli_test_support = @import("cli_test_support.zig");
+const search_reporting = zigrep.search_reporting;
 
 test "runCli prints every matching line from one file" {
     const testing = std.testing;
@@ -1330,16 +1331,16 @@ test "reportFileMatch only owns line bytes for transformed haystacks" {
     var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{});
     defer searcher.deinit();
 
-    const normal = (try runner.reportFileMatch(testing.allocator, &searcher, "normal.txt", "xxneedleyy", .auto)).?;
+    const normal = (try search_reporting.reportFileMatch(testing.allocator, &searcher, "normal.txt", "xxneedleyy", .auto)).?;
     defer normal.deinit(testing.allocator);
     try testing.expect(normal.owned_line == null);
 
-    const decoded = (try runner.reportFileMatch(testing.allocator, &searcher, "utf16.txt", "\xff\xfen\x00e\x00e\x00d\x00l\x00e\x00", .auto)).?;
+    const decoded = (try search_reporting.reportFileMatch(testing.allocator, &searcher, "utf16.txt", "\xff\xfen\x00e\x00e\x00d\x00l\x00e\x00", .auto)).?;
     defer decoded.deinit(testing.allocator);
     try testing.expect(decoded.owned_line != null);
     try testing.expectEqualStrings("needle", decoded.line);
 
-    const invalid = (try runner.reportFileMatch(testing.allocator, &searcher, "invalid.bin", "xx\xffneedleyy", .auto)).?;
+    const invalid = (try search_reporting.reportFileMatch(testing.allocator, &searcher, "invalid.bin", "xx\xffneedleyy", .auto)).?;
     defer invalid.deinit(testing.allocator);
     try testing.expect(invalid.owned_line == null);
     try testing.expectEqualStrings("xx\xffneedleyy", invalid.line);
@@ -1360,7 +1361,7 @@ test "writeFileReports does not require owned line bytes for decoded multi-line 
     var capture: std.Io.Writer.Allocating = .init(testing.allocator);
     defer capture.deinit();
 
-    const matched = try runner.writeFileReports(
+    const matched = try search_reporting.writeFileReports(
         testing.allocator,
         &capture.writer,
         &searcher,
@@ -1386,7 +1387,7 @@ test "reportFileMatch uses byte matching for planner-covered invalid UTF-8 input
     var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{});
     defer searcher.deinit();
 
-    const report = (try runner.reportFileMatch(testing.allocator, &searcher, "plain.bin", "xx\xffneedleyy", .auto)).?;
+    const report = (try search_reporting.reportFileMatch(testing.allocator, &searcher, "plain.bin", "xx\xffneedleyy", .auto)).?;
     defer report.deinit(testing.allocator);
     try testing.expect(report.owned_line == null);
     try testing.expectEqualStrings("xx\xffneedleyy", report.line);
@@ -1398,7 +1399,7 @@ test "reportFileMatch uses the raw-byte matcher when the planner does not cover 
     var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "(^ab)y", .{});
     defer searcher.deinit();
 
-    const report = (try runner.reportFileMatch(testing.allocator, &searcher, "raw-vm.bin", "aby\xff", .auto)).?;
+    const report = (try search_reporting.reportFileMatch(testing.allocator, &searcher, "raw-vm.bin", "aby\xff", .auto)).?;
     defer report.deinit(testing.allocator);
     try testing.expect(report.owned_line == null);
     try testing.expectEqualStrings("aby\xff", report.line);
@@ -1410,7 +1411,7 @@ test "reportFileMatch supports Unicode digit shorthand on full file contents" {
     var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "a\\db", .{});
     defer searcher.deinit();
 
-    const report = (try runner.reportFileMatch(
+    const report = (try search_reporting.reportFileMatch(
         testing.allocator,
         &searcher,
         "sample.txt",
@@ -1432,7 +1433,7 @@ test "writeFileReports supports Unicode digit shorthand on full file contents" {
     var capture: std.Io.Writer.Allocating = .init(testing.allocator);
     defer capture.deinit();
 
-    const matched = try runner.writeFileReports(
+    const matched = try search_reporting.writeFileReports(
         testing.allocator,
         &capture.writer,
         &searcher,
@@ -1458,7 +1459,7 @@ test "reportFileMatch supports Unicode decimal property inside concatenation" {
     var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "a\\p{Decimal_Number}b", .{});
     defer searcher.deinit();
 
-    const report = (try runner.reportFileMatch(
+    const report = (try search_reporting.reportFileMatch(
         testing.allocator,
         &searcher,
         "sample.txt",
@@ -1479,7 +1480,7 @@ test "reportFileMatch supports ignore-case literals on full file contents" {
     });
     defer searcher.deinit();
 
-    const maybe_report = try runner.reportFileMatch(
+    const maybe_report = try search_reporting.reportFileMatch(
         testing.allocator,
         &searcher,
         "sample.txt",
