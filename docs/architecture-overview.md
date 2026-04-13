@@ -37,7 +37,7 @@
 
 ## Public root
 
-`src/root.zig` exposes the app-facing surface and intentionally does not re-export most internal decomposition modules. The remaining CLI-facing support export is `cli_dispatch`; `cli_entry` itself is no longer on the root surface.
+`src/root.zig` exposes the app-facing surface and intentionally does not re-export the internal decomposition modules.
 
 See also:
 - [docs/module-boundary-rules.md](module-boundary-rules.md)

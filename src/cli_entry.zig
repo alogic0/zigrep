@@ -1,7 +1,6 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
 const cli = zigrep.cli;
-const cli_dispatch = zigrep.cli_dispatch;
 const config = zigrep.config;
 
 // Top-level CLI entry orchestration.
@@ -27,7 +26,7 @@ pub fn runCli(
     defer resolved.deinit(allocator);
 
     const parsed = try cli.parseArgs(allocator, resolved.argv);
-    defer cli_dispatch.deinitParseResult(parsed, allocator);
+    defer cli.deinitParseResult(parsed, allocator);
 
     switch (parsed) {
         .help => {
@@ -38,6 +37,6 @@ pub fn runCli(
             try stdout.print("zigrep {s}\n", .{app_version});
             return 0;
         },
-        .type_list, .run => return cli_dispatch.executeParsedCommand(allocator, stdout, stderr, parsed),
+        .type_list, .run => return cli.executeParsedCommand(allocator, stdout, stderr, parsed),
     }
 }

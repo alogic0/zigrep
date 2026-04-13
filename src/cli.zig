@@ -68,6 +68,19 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
     return cli_validation.finalizeParse(allocator, &state, &buffers);
 }
 
+pub fn deinitParseResult(parsed: ParseResult, allocator: std.mem.Allocator) void {
+    cli_dispatch.deinitParseResult(parsed, allocator);
+}
+
+pub fn executeParsedCommand(
+    allocator: std.mem.Allocator,
+    stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
+    parsed: ParseResult,
+) !u8 {
+    return cli_dispatch.executeParsedCommand(allocator, stdout, stderr, parsed);
+}
+
 pub fn isUsageError(err: anyerror) bool {
     return switch (err) {
         error.MissingPattern,

@@ -11,7 +11,6 @@ pub const search_runner = @import("search_runner.zig");
 pub const search_reporting = @import("search_reporting.zig");
 pub const command = @import("command.zig");
 pub const cli = @import("cli.zig");
-pub const cli_dispatch = @import("cli_dispatch.zig");
 pub const config = @import("config.zig");
 pub const app_version = build_options.app_version;
 

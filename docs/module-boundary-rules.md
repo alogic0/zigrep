@@ -21,6 +21,7 @@ These rules are the current working contract for the `zigrep` codebase.
 - [src/cli.zig](../src/cli.zig) owns scanning, usage text, and usage-error classification.
 - [src/cli_parse_state.zig](../src/cli_parse_state.zig), [src/cli_parse_helpers.zig](../src/cli_parse_helpers.zig), and [src/cli_validation.zig](../src/cli_validation.zig) own parser internals.
 - [src/cli_dispatch.zig](../src/cli_dispatch.zig) owns parsed command execution.
+- [src/cli_entry.zig](../src/cli_entry.zig) should reach `cli_dispatch` through dedicated build wiring, not through [src/root.zig](../src/root.zig).
 
 ## Search rules
 
@@ -34,7 +35,3 @@ These rules are the current working contract for the `zigrep` codebase.
 
 - Treat [src/root.zig](../src/root.zig) as the app-facing surface, not as a dump of internal modules.
 - Do not reintroduce convenience exports in [src/root.zig](../src/root.zig) just to satisfy local test or build wiring.
-- The current CLI exception is deliberate:
-  [src/cli_dispatch.zig](../src/cli_dispatch.zig) remains on
-  the root surface so the separately wired `cli_entry` module can stay in the
-  same CLI ownership graph without reintroducing the old `cli_entry` export.
