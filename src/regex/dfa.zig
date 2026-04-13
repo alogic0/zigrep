@@ -184,6 +184,7 @@ pub const Cache = struct {
                 if (pos != input_len) return false;
                 return self.addEpsilonClosure(builder, visited, anchor.out.?, pos, input_len, matched);
             },
+            .word_boundary, .not_word_boundary => unreachable,
             .match => {
                 matched.* = true;
                 return true;
@@ -245,6 +246,13 @@ fn classMatches(class: anytype, cp: u32) bool {
             },
             .range => |range| {
                 if (range.start <= cp and cp <= range.end) {
+                    matched = true;
+                    break;
+                }
+            },
+            .unicode_property => |property| {
+                const property_matched = unicode.Strategy.hasProperty(cp, property.property);
+                if (property.negated != property_matched) {
                     matched = true;
                     break;
                 }

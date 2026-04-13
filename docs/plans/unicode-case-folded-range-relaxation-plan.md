@@ -141,11 +141,12 @@ The core rule remains:
     scalar range, while broader folded ranges like `[\u{0000}-\u{FFFF}]`
     remain a deliberate divergence
 
-- [ ] Run:
+- [x] Run:
   - `zig build test`
   - `zig build bench`
-  - current result: `zig build test` passed for this slice; benchmark rerun is
-    still deferred until a broader rewrite change lands
+  - current result: both commands now pass for this slice; a small DFA
+    exhaustiveness cleanup was needed in benchmark-only code before
+    `zig build bench` would compile again
 
 ## Phase 6: Documentation
 
@@ -177,8 +178,8 @@ Remaining work, if continued later:
 
 - determine whether additional broad folded ranges can be represented without
   unbounded rewrite blow-up
-- rerun `zig build bench` after any broader rewrite change, not just this
-  narrow exception
+- if broader rewrite work resumes, re-run `zig build bench` again after that
+  structural change
 
 ## Explicit Non-Goals
 
