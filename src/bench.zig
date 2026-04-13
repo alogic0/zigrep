@@ -1,6 +1,5 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
-const cli = @import("main.zig");
 
 const SyntheticBenchCase = struct {
     name: []const u8,
@@ -254,7 +253,7 @@ fn runOutputCase(allocator: std.mem.Allocator, bench_case: OutputBenchCase) !Res
         var stderr_writer = sink.file.writer(&stderr_buffer);
         const stderr = &stderr_writer.interface;
 
-        const exit_code = try cli.runSearch(allocator, stdout, stderr, .{
+        const exit_code = try zigrep.search_runner.runSearch(allocator, stdout, stderr, .{
             .pattern = bench_case.pattern,
             .paths = &.{bench_case.root},
             .parallel_jobs = bench_case.parallel_jobs,
