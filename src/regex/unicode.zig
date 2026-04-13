@@ -30,6 +30,7 @@ pub const Property = enum(u16) {
     default_ignorable_code_point,
     shorthand_word,
     shorthand_whitespace,
+    ascii_shorthand_whitespace,
     casefolded_case_letter,
     emoji,
     lowercase,
@@ -264,6 +265,7 @@ pub const Strategy = struct {
             .default_ignorable_code_point => inRanges(cp, &generated.default_ignorable_code_point_ranges),
             .shorthand_word => isUnicodeWord(cp),
             .shorthand_whitespace => inRanges(cp, &generated.whitespace_ranges),
+            .ascii_shorthand_whitespace => cp == ' ' or cp == '\t' or cp == '\n' or cp == '\r' or cp == '\x0C' or cp == '\x0B',
             .casefolded_case_letter => inRanges(cp, &generated.lowercase_ranges) or
                 inRanges(cp, &generated.uppercase_ranges) or
                 inRanges(cp, &generated.titlecase_letter_ranges),

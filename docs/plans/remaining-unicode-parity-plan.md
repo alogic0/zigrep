@@ -68,21 +68,31 @@ Implementation order for this plan:
 
 ## Phase 2: Inline Unicode Mode Controls
 
-- [ ] Confirm the local `ripgrep` behavior for:
+- [x] Confirm the local `ripgrep` behavior for:
   - `(?-u:...)`
   - nested Unicode mode toggles
   - interactions with Unicode-aware shorthand and properties
+  - current result: local `ripgrep` supports `(?-u:...)`, nested `(?u:...)`
+    restoration, keeps ASCII shorthand and boundary behavior inside `(?-u:...)`,
+    and rejects Unicode property escapes there
 
-- [ ] Decide whether `zigrep` should support only `(?-u:...)` first or a
+- [x] Decide whether `zigrep` should support only `(?-u:...)` first or a
   broader inline flag subset
+  - current result: support only `(?-u:...)` and `(?u:...)` in this slice;
+    broader inline-flag parsing stays out of scope
 
-- [ ] Add parser support for the chosen inline Unicode-mode syntax
+- [x] Add parser support for the chosen inline Unicode-mode syntax
 
-- [ ] Define the native-engine lowering rule:
+- [x] Define the native-engine lowering rule:
   - Unicode-aware defaults outside the group
   - ASCII-mode behavior inside the group
+  - current result:
+    - `\d`, `\D`, `\w`, `\W`, `\s`, `\S`, `\b`, and `\B` switch to ASCII
+      semantics inside `(?-u:...)`
+    - `(?u:...)` restores Unicode-aware semantics in nested groups
+    - `\p{...}` remains rejected inside ASCII-mode groups
 
-- [ ] Add search-layer and CLI regressions for mixed Unicode/ASCII subpatterns
+- [x] Add search-layer and CLI regressions for mixed Unicode/ASCII subpatterns
 
 ## Phase 3: Half-Boundaries
 
@@ -127,19 +137,19 @@ Implementation order for this plan:
 
 ## Phase 6: Validation And Docs
 
-- [ ] Keep [docs/supported-syntax.md](../supported-syntax.md) aligned after each
+- [x] Keep [docs/supported-syntax.md](../supported-syntax.md) aligned after each
   implemented slice
 
-- [ ] Compare each completed slice against local `ripgrep` before closing it
+- [x] Compare each completed slice against local `ripgrep` before closing it
 
-- [ ] Run:
+- [x] Run:
   - `zig build test`
   - `zig build bench`
 
 ## Recommended Order
 
-- [ ] 1. Land `Script_Extensions`
-- [ ] 2. Land inline Unicode mode toggles
+- [x] 1. Land `Script_Extensions`
+- [x] 2. Land inline Unicode mode toggles
 - [ ] 3. Land half-boundaries
 - [ ] 4. Decide and land the smallest useful class-set subset
 - [ ] 5. Re-evaluate remaining property-surface gaps

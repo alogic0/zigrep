@@ -37,8 +37,12 @@ pub const Node = union(enum) {
     dot,
     anchor_start,
     anchor_end,
-    word_boundary,
-    not_word_boundary,
+    word_boundary: struct {
+        ascii_only: bool,
+    },
+    not_word_boundary: struct {
+        ascii_only: bool,
+    },
     unicode_property: struct {
         property: unicode.Property,
         negated: bool,
@@ -98,6 +102,7 @@ pub const Parser = struct {
     nodes: std.ArrayList(Node),
     last_error: ?ParseDiagnostic,
     capture_count: u32,
+    unicode_mode: bool,
 
     pub fn init(allocator: std.mem.Allocator, pattern: []const u8) ParseError!Parser {
         var lex = lexer_mod.Lexer(u8).init(pattern);
@@ -110,6 +115,7 @@ pub const Parser = struct {
             .nodes = .empty,
             .last_error = null,
             .capture_count = 0,
+            .unicode_mode = true,
         };
     }
 
@@ -260,45 +266,69 @@ pub const Parser = struct {
             },
             .digit_class => {
                 try self.advance();
-                return self.push(.{ .unicode_property = .{
-                    .property = .decimal_number,
-                    .negated = false,
-                } });
+                return self.push(if (self.unicode_mode)
+                    .{ .unicode_property = .{
+                        .property = .decimal_number,
+                        .negated = false,
+                    } }
+                else
+                    .{ .char_class = try asciiDigitClass(self, false) });
             },
             .not_digit_class => {
                 try self.advance();
-                return self.push(.{ .unicode_property = .{
-                    .property = .decimal_number,
-                    .negated = true,
-                } });
+                return self.push(if (self.unicode_mode)
+                    .{ .unicode_property = .{
+                        .property = .decimal_number,
+                        .negated = true,
+                    } }
+                else
+                    .{ .char_class = try asciiDigitClass(self, true) });
             },
             .word_class => {
                 try self.advance();
-                return self.push(.{ .unicode_property = .{
-                    .property = .shorthand_word,
-                    .negated = false,
-                } });
+                return self.push(if (self.unicode_mode)
+                    .{ .unicode_property = .{
+                        .property = .shorthand_word,
+                        .negated = false,
+                    } }
+                else
+                    .{ .char_class = try asciiWordClass(self, false) });
             },
             .not_word_class => {
                 try self.advance();
-                return self.push(.{ .unicode_property = .{
-                    .property = .shorthand_word,
-                    .negated = true,
-                } });
+                return self.push(if (self.unicode_mode)
+                    .{ .unicode_property = .{
+                        .property = .shorthand_word,
+                        .negated = true,
+                    } }
+                else
+                    .{ .char_class = try asciiWordClass(self, true) });
             },
             .space_class => {
                 try self.advance();
-                return self.push(.{ .unicode_property = .{
-                    .property = .shorthand_whitespace,
-                    .negated = false,
-                } });
+                return self.push(if (self.unicode_mode)
+                    .{ .unicode_property = .{
+                        .property = .shorthand_whitespace,
+                        .negated = false,
+                    } }
+                else
+                    .{ .unicode_property = .{
+                        .property = .ascii_shorthand_whitespace,
+                        .negated = false,
+                    } });
             },
             .not_space_class => {
                 try self.advance();
-                return self.push(.{ .unicode_property = .{
-                    .property = .shorthand_whitespace,
-                    .negated = true,
-                } });
+                return self.push(if (self.unicode_mode)
+                    .{ .unicode_property = .{
+                        .property = .shorthand_whitespace,
+                        .negated = true,
+                    } }
+                else
+                    .{ .unicode_property = .{
+                        .property = .ascii_shorthand_whitespace,
+                        .negated = true,
+                    } });
             },
             .comma => {
                 try self.advance();
@@ -322,13 +352,14 @@ pub const Parser = struct {
             },
             .word_boundary => {
                 try self.advance();
-                return self.push(.word_boundary);
+                return self.push(.{ .word_boundary = .{ .ascii_only = !self.unicode_mode } });
             },
             .not_word_boundary => {
                 try self.advance();
-                return self.push(.not_word_boundary);
+                return self.push(.{ .not_word_boundary = .{ .ascii_only = !self.unicode_mode } });
             },
             .unicode_property => |property| {
+                if (!self.unicode_mode) return self.fail(error.UnsupportedGroup, self.lookahead.span);
                 try self.advance();
                 return self.push(.{ .unicode_property = .{
                     .property = property.property,
@@ -342,6 +373,38 @@ pub const Parser = struct {
                     try self.advance();
                     if (self.lookahead.token == .literal and self.lookahead.token.literal == ':') {
                         try self.advance();
+                        const expr = try self.parseAlternation();
+                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+                        try self.advance();
+                        return expr;
+                    }
+                    if (self.lookahead.token == .hyphen) {
+                        try self.advance();
+                        if (self.lookahead.token != .literal or self.lookahead.token.literal != 'u') {
+                            return self.fail(error.UnsupportedGroup, group_span);
+                        }
+                        try self.advance();
+                        if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
+                            return self.fail(error.UnsupportedGroup, group_span);
+                        }
+                        try self.advance();
+                        const saved_unicode_mode = self.unicode_mode;
+                        self.unicode_mode = false;
+                        defer self.unicode_mode = saved_unicode_mode;
+                        const expr = try self.parseAlternation();
+                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+                        try self.advance();
+                        return expr;
+                    }
+                    if (self.lookahead.token == .literal and self.lookahead.token.literal == 'u') {
+                        try self.advance();
+                        if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
+                            return self.fail(error.UnsupportedGroup, group_span);
+                        }
+                        try self.advance();
+                        const saved_unicode_mode = self.unicode_mode;
+                        self.unicode_mode = true;
+                        defer self.unicode_mode = saved_unicode_mode;
                         const expr = try self.parseAlternation();
                         if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
                         try self.advance();
@@ -429,6 +492,7 @@ pub const Parser = struct {
                 return .{ .literal = '^' };
             },
             .unicode_property => |property| {
+                if (!self.unicode_mode) return error.UnsupportedGroup;
                 try self.advance();
                 return .{ .unicode_property = .{
                     .property = property.property,
@@ -480,6 +544,27 @@ pub const Parser = struct {
         return @enumFromInt(self.nodes.items.len - 1);
     }
 };
+
+fn asciiDigitClass(self: *Parser, negated: bool) ParseError!CharacterClass {
+    const items = try self.allocator.alloc(ClassItem, 1);
+    items[0] = .{ .range = .{ .start = '0', .end = '9' } };
+    return .{
+        .negated = negated,
+        .items = items,
+    };
+}
+
+fn asciiWordClass(self: *Parser, negated: bool) ParseError!CharacterClass {
+    const items = try self.allocator.alloc(ClassItem, 4);
+    items[0] = .{ .range = .{ .start = 'A', .end = 'Z' } };
+    items[1] = .{ .range = .{ .start = 'a', .end = 'z' } };
+    items[2] = .{ .range = .{ .start = '0', .end = '9' } };
+    items[3] = .{ .literal = '_' };
+    return .{
+        .negated = negated,
+        .items = items,
+    };
+}
 
 test "Parser builds an AST for grouped alternation and quantifiers" {
     const testing = std.testing;
@@ -639,6 +724,35 @@ test "Parser supports non-capturing groups without incrementing capture count" {
     try testing.expectEqual(@as(u32, 0), ast.nodes[@intFromEnum(root[1])].group.index);
 }
 
+test "Parser supports inline Unicode mode groups" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "(?-u:\\w+)(?u:\\w+)");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 2), root.len);
+
+    const ascii_rep = ast.nodes[@intFromEnum(root[0])].repetition;
+    try testing.expectEqual(.char_class, std.meta.activeTag(ast.nodes[@intFromEnum(ascii_rep.child)]));
+    const ascii_class = ast.nodes[@intFromEnum(ascii_rep.child)].char_class;
+    try testing.expectEqual(@as(usize, 4), ascii_class.items.len);
+
+    const unicode_rep = ast.nodes[@intFromEnum(root[1])].repetition;
+    try testing.expectEqualDeep(Node{ .unicode_property = .{
+        .property = .shorthand_word,
+        .negated = false,
+    } }, ast.nodes[@intFromEnum(unicode_rep.child)]);
+}
+
+test "Parser rejects Unicode properties inside ASCII mode groups" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "(?-u:\\p{Greek})");
+    try testing.expectError(error.UnsupportedGroup, parser.parse());
+}
+
 test "Parser supports escaped metacharacters and class edge literals" {
     const testing = std.testing;
 
@@ -764,10 +878,12 @@ test "Parser supports word boundary escapes" {
     const root = ast.nodes[@intFromEnum(ast.root)].concat;
     try testing.expectEqual(@as(usize, 5), root.len);
     try testing.expectEqual(.word_boundary, std.meta.activeTag(ast.nodes[@intFromEnum(root[0])]));
+    try testing.expect(!ast.nodes[@intFromEnum(root[0])].word_boundary.ascii_only);
     try testing.expectEqualDeep(Node{ .literal = 'f' }, ast.nodes[@intFromEnum(root[1])]);
     try testing.expectEqualDeep(Node{ .literal = 'o' }, ast.nodes[@intFromEnum(root[2])]);
     try testing.expectEqualDeep(Node{ .literal = 'o' }, ast.nodes[@intFromEnum(root[3])]);
     try testing.expectEqual(.not_word_boundary, std.meta.activeTag(ast.nodes[@intFromEnum(root[4])]));
+    try testing.expect(!ast.nodes[@intFromEnum(root[4])].not_word_boundary.ascii_only);
 }
 
 test "Parser decodes Unicode literal escapes as literals" {

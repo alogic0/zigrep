@@ -291,11 +291,11 @@ pub const MatchEngine = struct {
                 return self.addThread(program, haystack, list, visited, anchor.out.?, slots, pos);
             },
             .word_boundary => |boundary| {
-                if (!wordBoundaryAt(haystack, pos)) return null;
+                if (!wordBoundaryAt(haystack, pos, boundary.ascii_only)) return null;
                 return self.addThread(program, haystack, list, visited, boundary.out.?, slots, pos);
             },
             .not_word_boundary => |boundary| {
-                if (wordBoundaryAt(haystack, pos)) return null;
+                if (wordBoundaryAt(haystack, pos, boundary.ascii_only)) return null;
                 return self.addThread(program, haystack, list, visited, boundary.out.?, slots, pos);
             },
             .match => return try self.buildMatch(program, slots),
@@ -415,7 +415,7 @@ fn textUnitMatchesUnicodeProperty(property: unicode.Property, negated: bool, uni
 }
 
 fn unicodePropertyMatches(program: nfa.Program, property: unicode.Property, cp: u32) bool {
-    if (property == .shorthand_whitespace and cp == '\n' and !program.can_match_newline) return false;
+    if ((property == .shorthand_whitespace or property == .ascii_shorthand_whitespace) and cp == '\n' and !program.can_match_newline) return false;
     return unicode.Strategy.hasProperty(cp, property);
 }
 
@@ -484,18 +484,28 @@ fn isWordTextUnit(unit: TextUnit) bool {
     return false;
 }
 
-fn wordBoundaryAt(haystack: []const u8, offset: usize) bool {
+fn isAsciiWordTextUnit(unit: TextUnit) bool {
+    if (unit.scalar) |cp| {
+        return (cp >= 'A' and cp <= 'Z') or
+            (cp >= 'a' and cp <= 'z') or
+            (cp >= '0' and cp <= '9') or
+            cp == '_';
+    }
+    return false;
+}
+
+fn wordBoundaryAt(haystack: []const u8, offset: usize, ascii_only: bool) bool {
     var before_is_word = false;
     var pos: usize = 0;
     while (pos < offset) {
         const unit = nextTextUnit(haystack, &pos) orelse break;
         if (unit.end > offset) break;
-        before_is_word = isWordTextUnit(unit);
+        before_is_word = if (ascii_only) isAsciiWordTextUnit(unit) else isWordTextUnit(unit);
     }
 
     var after_pos = offset;
     const after_is_word = if (nextTextUnit(haystack, &after_pos)) |unit|
-        isWordTextUnit(unit)
+        if (ascii_only) isAsciiWordTextUnit(unit) else isWordTextUnit(unit)
     else
         false;
 
@@ -791,6 +801,27 @@ test "VM shorthand space class follows multiline newline semantics" {
     var engine = MatchEngine.init(testing.allocator);
     try testing.expect(!(try engine.isMatch(no_multiline, "\t \n")));
     try testing.expect(try engine.isMatch(multiline, "\t \n"));
+}
+
+test "VM supports inline Unicode mode toggles" {
+    const testing = std.testing;
+
+    try expectMatch("(?-u:\\w+)", "A");
+    try expectNoMatch("(?-u:\\w+)", "Ж");
+    try expectMatch("(?-u:\\s+)", " \t");
+    try expectNoMatch("(?-u:\\s+)", "\xC2\xA0");
+    try expectMatch("(?-u:\\bA\\b)", "A");
+    try expectNoMatch("(?-u:\\bЖ\\b)", "Ж");
+    try expectMatch("(?-u:\\w(?u:\\w)\\w)", "AЖA");
+    try expectNoMatch("(?-u:\\w(?u:\\w)\\w)", "AЖЖ");
+
+    const raw_not_word = try compileProgram(testing.allocator, "(?-u:\\W+)", .{});
+    defer raw_not_word.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    const raw = (try engine.firstMatchBytes(raw_not_word, "\xff")).?;
+    defer raw.deinit(testing.allocator);
+    try testing.expectEqual(Capture{ .start = 0, .end = 1 }, raw.span);
 }
 
 test "VM handles word boundaries on UTF-8 and raw-byte haystacks" {

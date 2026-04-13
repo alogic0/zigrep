@@ -43,9 +43,11 @@ pub const Inst = union(enum) {
         out: ?InstPtr = null,
     },
     word_boundary: struct {
+        ascii_only: bool = false,
         out: ?InstPtr = null,
     },
     not_word_boundary: struct {
+        ascii_only: bool = false,
         out: ?InstPtr = null,
     },
     unicode_property: struct {
@@ -142,6 +144,7 @@ fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, multil
         .unicode_property => |property| !property.negated and switch (property.property) {
             .whitespace => true,
             .shorthand_whitespace => multiline,
+            .ascii_shorthand_whitespace => multiline,
             else => false,
         },
         .literal => |cp| cp == '\n',
@@ -182,7 +185,7 @@ fn classContainsCodePoint(items: []const hir_mod.ClassItem, cp: u32, multiline: 
                 if (unicode.Strategy.foldedRangeContains(cp, range.start, range.end, .simple)) return true;
             },
             .unicode_property => |property| {
-                const matched = if (property.property == .shorthand_whitespace and cp == '\n' and !multiline)
+                const matched = if ((property.property == .shorthand_whitespace or property.property == .ascii_shorthand_whitespace) and cp == '\n' and !multiline)
                     false
                 else
                     unicode.Strategy.hasProperty(cp, property.property);
@@ -245,8 +248,8 @@ const Compiler = struct {
             .dot => self.compileAny(),
             .anchor_start => self.compileAnchorStart(),
             .anchor_end => self.compileAnchorEnd(),
-            .word_boundary => self.compileWordBoundary(),
-            .not_word_boundary => self.compileNotWordBoundary(),
+            .word_boundary => |boundary| self.compileWordBoundary(boundary.ascii_only),
+            .not_word_boundary => |boundary| self.compileNotWordBoundary(boundary.ascii_only),
             .unicode_property => |property| self.compileUnicodeProperty(property.property, property.negated),
             .char_class => |class| self.compileClass(class),
             .group => |group| self.compileGroup(compiled_hir, group.index, group.child),
@@ -291,15 +294,15 @@ const Compiler = struct {
         return .{ .start = index, .outs = outs };
     }
 
-    fn compileWordBoundary(self: *Compiler) CompileError!Fragment {
-        const index = try self.emit(.{ .word_boundary = .{} });
+    fn compileWordBoundary(self: *Compiler, ascii_only: bool) CompileError!Fragment {
+        const index = try self.emit(.{ .word_boundary = .{ .ascii_only = ascii_only } });
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
         return .{ .start = index, .outs = outs };
     }
 
-    fn compileNotWordBoundary(self: *Compiler) CompileError!Fragment {
-        const index = try self.emit(.{ .not_word_boundary = .{} });
+    fn compileNotWordBoundary(self: *Compiler, ascii_only: bool) CompileError!Fragment {
+        const index = try self.emit(.{ .not_word_boundary = .{ .ascii_only = ascii_only } });
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
         return .{ .start = index, .outs = outs };

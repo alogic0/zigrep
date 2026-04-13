@@ -2267,6 +2267,34 @@ test "Searcher handles word boundaries in UTF-8 and raw-byte paths" {
     try testing.expect((try unicode_not_word.reportFirstMatch("sample.txt", "Жβ")) == null);
 }
 
+test "Searcher supports inline Unicode mode toggles" {
+    const testing = std.testing;
+
+    var ascii_word = try Searcher.init(testing.allocator, "(?-u:\\w+)", .{});
+    defer ascii_word.deinit();
+    try testing.expect(ascii_word.hasBytePlan());
+    try testing.expect((try ascii_word.reportFirstMatch("sample.txt", "A")) != null);
+    try testing.expect((try ascii_word.reportFirstMatch("sample.txt", "Ж")) == null);
+
+    var ascii_space = try Searcher.init(testing.allocator, "foo(?-u:\\s)bar", .{});
+    defer ascii_space.deinit();
+    try testing.expect((try ascii_space.reportFirstMatch("sample.txt", "foo bar")) != null);
+    try testing.expect((try ascii_space.reportFirstMatch("sample.txt", "foo\xC2\xA0bar")) == null);
+
+    var ascii_boundary = try Searcher.init(testing.allocator, "(?-u:\\bA\\b)", .{});
+    defer ascii_boundary.deinit();
+    try testing.expect(!ascii_boundary.hasBytePlan());
+    try testing.expect((try ascii_boundary.reportFirstMatch("sample.txt", "A")) != null);
+    try testing.expect((try ascii_boundary.reportFirstMatch("sample.txt", "Ж")) == null);
+
+    var nested = try Searcher.init(testing.allocator, "(?-u:\\w(?u:\\w)\\w)", .{});
+    defer nested.deinit();
+    try testing.expect((try nested.reportFirstMatch("sample.txt", "AЖA")) != null);
+    try testing.expect((try nested.reportFirstMatch("sample.txt", "AЖЖ")) == null);
+
+    try testing.expectError(error.UnsupportedGroup, Searcher.init(testing.allocator, "(?-u:\\p{Greek})", .{}));
+}
+
 test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     const testing = std.testing;
 

@@ -6029,6 +6029,49 @@ test "runCli supports word boundaries on UTF-8 and raw-byte inputs" {
     try testing.expect(std.mem.containsAtLeast(u8, combining_word_run.stdout, 1, "sample.txt:4:1:β\xCD\x85"));
 }
 
+test "runCli supports inline Unicode mode toggles" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "A\n" ++
+            "Ж\n" ++
+            "AЖA\n" ++
+            "AЖЖ\n" ++
+            "foo bar\n" ++
+            "foo\xC2\xA0bar\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const ascii_word_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u:\\w+)", root_path });
+    defer ascii_word_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), ascii_word_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:1:1:A"));
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:3:1:AЖA"));
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:4:1:AЖЖ"));
+    try testing.expect(!std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:2:1:Ж"));
+
+    const ascii_space_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "foo(?-u:\\s)bar", root_path });
+    defer ascii_space_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), ascii_space_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_space_run.stdout, 1, "sample.txt:5:1:foo bar"));
+    try testing.expect(!std.mem.containsAtLeast(u8, ascii_space_run.stdout, 1, "sample.txt:6:1:foo"));
+
+    const nested_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u:\\w(?u:\\w)\\w)", root_path });
+    defer nested_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), nested_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, nested_run.stdout, 1, "sample.txt:3:1:AЖA"));
+    try testing.expect(!std.mem.containsAtLeast(u8, nested_run.stdout, 1, "sample.txt:4:1:AЖЖ"));
+
+    try testing.expectError(error.UnsupportedGroup, runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u:\\p{Greek})", root_path }));
+}
+
 test "runCli supports non-capturing groups" {
     const testing = std.testing;
 

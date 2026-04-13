@@ -20,6 +20,7 @@ The current engine supports:
 - Shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S`
 - Word boundaries `\b` and `\B`
 - Non-capturing groups `(?:...)`
+- Inline Unicode mode groups `(?-u:...)` and `(?u:...)`
 - Escaped metacharacters such as `\.`, `\(`, `\)`, `\[`, `\]`, `\{`, `\}`, `\|`, `\*`, `\+`, `\?`, `\^`, `\$`, and `\\`
 
 Notes:
@@ -54,21 +55,21 @@ Current escape boundary:
 - Unicode literal escapes with braced hex syntax are supported via `\u{...}`
 - escaped metacharacters like `\.`, `\(`, `\)`, `\[`, and `\\` are supported
 - shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S` are supported
-- current shorthand semantics are mixed during the compatibility migration:
-  - `\d` and `\D` use Unicode decimal-digit semantics
-  - `\w` and `\W` use the Unicode word-character predicate
-  - `\s` and `\S` use Unicode whitespace semantics
+  - by default, `\d` and `\D` use Unicode decimal-digit semantics
+  - by default, `\w` and `\W` use the Unicode word-character predicate
+  - by default, `\s` and `\S` use Unicode whitespace semantics
   - in normal non-multiline search, `\s` does not match `\n`
 - word boundaries `\b` and `\B` are supported
   - boundary checks use the same Unicode word-character predicate as `\w`
   - invalid bytes on the raw-byte path are treated as non-word units
-- shorthand and word-boundary migration note:
-  - the current release is mid-migration toward Unicode-aware shorthand defaults
-  - the visible compatibility change is that `\d`, `\s`, `\w`, `\b`, and `\B`
-    are no longer ASCII-only
-  - explicit ASCII regexes such as `[0-9]` and `[A-Za-z0-9_]` remain the stable way to request ASCII-only behavior
-  - explicit ASCII whitespace classes such as `[ \t\r\n\f\v]` remain the stable
-    way to request ASCII-only whitespace behavior
+- inline Unicode mode groups are supported:
+  - `(?-u:...)` switches shorthand and boundary operators inside the group to ASCII behavior
+  - `(?u:...)` switches them back to Unicode-aware behavior inside a nested group
+  - inside `(?-u:...)`, Unicode property escapes like `\p{Greek}` remain unsupported
+- explicit ASCII regexes such as `[0-9]` and `[A-Za-z0-9_]` remain the stable
+  way to request ASCII-only behavior outside inline mode groups
+- explicit ASCII whitespace classes such as `[ \t\r\n\f\v]` remain the stable
+  way to request ASCII-only whitespace behavior outside inline mode groups
 - Unicode property escapes are supported for:
   - `\p{Any}` and `\P{Any}`
   - `\p{ASCII}` and `\P{ASCII}`
@@ -139,8 +140,9 @@ of scope for the main engine:
 - Features that require general backtracking semantics
 - Full PCRE2 compatibility
 
-In particular, `(?:...)` is supported, but other `(?...)` group forms are
-rejected explicitly rather than being interpreted partially.
+In particular, `(?:...)`, `(?-u:...)`, and `(?u:...)` are supported, but other
+`(?...)` group forms are rejected explicitly rather than being interpreted
+partially.
 
 ## CLI Behavior
 
