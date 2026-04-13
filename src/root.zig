@@ -12,18 +12,11 @@ pub const command = @import("command.zig");
 pub const cli = @import("cli.zig");
 pub const config = @import("config.zig");
 pub const app_version = build_options.app_version;
-pub const reader = regex_mod.reader;
-pub const decoder = reader;
-pub const lexer = regex_mod.lexer;
-pub const Parser = regex_mod.Parser;
-pub const Ast = regex_mod.Ast;
-pub const Hir = regex_mod.Hir;
-pub const Node = regex_mod.Node;
-pub const NodeId = regex_mod.NodeId;
-pub const ParseError = regex_mod.ParseError;
-pub const ParseDiagnostic = regex_mod.ParseDiagnostic;
 
-pub fn compile(allocator: std.mem.Allocator, pattern: []const u8) (ParseError || error{OutOfMemory})!Hir {
+pub fn compile(
+    allocator: std.mem.Allocator,
+    pattern: []const u8,
+) (regex_mod.ParseError || error{OutOfMemory})!regex_mod.Hir {
     return regex_mod.compile(allocator, pattern, .{});
 }
 

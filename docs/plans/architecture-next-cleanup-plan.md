@@ -34,17 +34,17 @@ The main issues to address are:
 
 ## Phase 2: CLI Parse Decomposition
 
-- [ ] Split `parseArgs(...)` into smaller helpers
-- [ ] Separate scalar flag parsing from value-taking flag parsing
-- [ ] Separate post-parse validation from final `CliOptions` assembly
-- [ ] Keep current CLI syntax and error behavior unchanged
+- [x] Split `parseArgs(...)` into smaller helpers
+- [x] Separate scalar flag parsing from value-taking flag parsing
+- [x] Separate post-parse validation from final `CliOptions` assembly
+- [x] Keep current CLI syntax and error behavior unchanged
 
 ## Phase 3: Root Surface Narrowing
 
-- [ ] Decide which regex internals should remain re-exported from `src/root.zig`
-- [ ] Remove re-exports that are convenience-only and not part of the intended
+- [x] Decide which regex internals should remain re-exported from `src/root.zig`
+- [x] Remove re-exports that are convenience-only and not part of the intended
   app-facing surface
-- [ ] Keep the public entrypoints used by bench, tests, and the app stable
+- [x] Keep the public entrypoints used by bench, tests, and the app stable
 
 ## Validation
 
@@ -55,8 +55,8 @@ The main issues to address are:
 ## Recommended Order
 
 - [x] 1. Split search execution policy out of `src/search_runner.zig`
-- [ ] 2. Decompose `src/cli.zig` argument parsing
-- [ ] 3. Narrow `src/root.zig` exports
+- [x] 2. Decompose `src/cli.zig` argument parsing
+- [x] 3. Narrow `src/root.zig` exports
 
 ## Explicit Non-Goals
 
