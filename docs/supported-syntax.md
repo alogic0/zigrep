@@ -58,6 +58,8 @@ Current escape boundary:
   - boundary checks use ASCII wordness (`[A-Za-z0-9_]`) on valid text units
   - invalid bytes on the raw-byte path are treated as non-word units
 - Unicode property escapes are supported for:
+  - `\p{Any}` and `\P{Any}`
+  - `\p{ASCII}` and `\P{ASCII}`
   - `\p{Alphabetic}` and `\P{Alphabetic}`
   - `\p{Cased}` and `\P{Cased}`
   - `\p{Case_Ignorable}` and `\P{Case_Ignorable}`
@@ -92,6 +94,8 @@ Current escape boundary:
     - subgroup aliases such as `Ll`, `Lu`, `Lt`, `Lm`, `Lo`, `Mn`, `Mc`, `Me`, `Nd`, `Nl`, `No`, `Pc`, `Pd`, `Ps`, `Pe`, `Pi`, `Pf`, `Po`, `Sm`, `Sc`, `Sk`, `So`, `Zs`, `Zl`, `Zp`, `Cc`, `Cf`, `Cs`, `Co`, and `Cn`
     - long-name aliases such as `alpha`, `lower`, `upper`, `punct`, `space`, `white_space`, and `private_use`
   - property names are normalized by ignoring ASCII case, `_`, `-`, and ASCII whitespace
+  - `Any` matches any valid Unicode scalar
+  - `ASCII` matches only scalars in `U+0000..U+007F`
   - invalid raw bytes do not match positive Unicode properties and do match
     negated Unicode properties
 - `\u{...}` accepts 1 to 6 hex digits and rejects surrogate code points and values above `U+10FFFF`

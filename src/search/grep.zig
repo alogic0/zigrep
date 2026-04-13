@@ -2102,6 +2102,23 @@ test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     defer alphabetic.deinit();
     try testing.expect((try alphabetic.reportFirstMatch("sample.txt", "\xCD\x85")) != null);
 
+    var any = try Searcher.init(testing.allocator, "\\p{Any}+", .{});
+    defer any.deinit();
+    try testing.expect((try any.reportFirstMatch("sample.txt", "ж")) != null);
+
+    var ascii = try Searcher.init(testing.allocator, "\\p{ASCII}+", .{});
+    defer ascii.deinit();
+    try testing.expect((try ascii.reportFirstMatch("sample.txt", "Az09")) != null);
+    try testing.expect((try ascii.reportFirstMatch("sample.txt", "ж")) == null);
+
+    try testing.expect((try any.reportFirstByteMatch("raw.bin", "\xff")) == null);
+
+    var not_any = try Searcher.init(testing.allocator, "\\P{Any}+", .{});
+    defer not_any.deinit();
+    const raw_not_any = (try not_any.reportFirstByteMatch("raw.bin", "\xff")).?;
+    defer raw_not_any.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 0, .end = 1 }, raw_not_any.match_span);
+
     var cased = try Searcher.init(testing.allocator, "\\p{Cased}+", .{});
     defer cased.deinit();
     try testing.expect((try cased.reportFirstMatch("sample.txt", "Σ")) != null);

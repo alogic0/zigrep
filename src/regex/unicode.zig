@@ -12,6 +12,8 @@ pub const BoundaryKind = enum {
 };
 
 pub const Property = enum {
+    any,
+    ascii,
     letter,
     number,
     whitespace,
@@ -143,6 +145,8 @@ pub const Strategy = struct {
     }
 
     pub fn lookupProperty(name: []const u8) ?Property {
+        if (propertyNameEq(name, "any")) return .any;
+        if (propertyNameEq(name, "ascii")) return .ascii;
         if (propertyNameEq(name, "letter") or propertyNameEq(name, "l")) return .letter;
         if (propertyNameEq(name, "number") or propertyNameEq(name, "n")) return .number;
         if (propertyNameEq(name, "whitespace") or propertyNameEq(name, "space") or propertyNameEq(name, "white_space")) return .whitespace;
@@ -194,6 +198,8 @@ pub const Strategy = struct {
 
     pub fn hasProperty(cp: u32, property: Property) bool {
         return switch (property) {
+            .any => cp <= 0x10FFFF and !(cp >= 0xD800 and cp <= 0xDFFF),
+            .ascii => cp <= 0x7F,
             .letter => inRanges(cp, &generated.letter_ranges),
             .number => inRanges(cp, &generated.number_ranges),
             .whitespace => inRanges(cp, &generated.whitespace_ranges),
@@ -463,6 +469,8 @@ test "Unicode strategy classifies properties and boundaries" {
 test "Unicode strategy looks up named properties and aliases" {
     const testing = std.testing;
 
+    try testing.expectEqual(@as(?Property, .any), Strategy.lookupProperty("Any"));
+    try testing.expectEqual(@as(?Property, .ascii), Strategy.lookupProperty("ASCII"));
     try testing.expectEqual(@as(?Property, .letter), Strategy.lookupProperty("Letter"));
     try testing.expectEqual(@as(?Property, .letter), Strategy.lookupProperty("L"));
     try testing.expectEqual(@as(?Property, .number), Strategy.lookupProperty("Number"));
@@ -517,6 +525,9 @@ test "Unicode strategy looks up named properties and aliases" {
 test "Unicode strategy evaluates property membership" {
     const testing = std.testing;
 
+    try testing.expect(Strategy.hasProperty('A', .any));
+    try testing.expect(Strategy.hasProperty('A', .ascii));
+    try testing.expect(!Strategy.hasProperty('ж', .ascii));
     try testing.expect(Strategy.hasProperty('A', .letter));
     try testing.expect(Strategy.hasProperty('ß', .letter));
     try testing.expect(Strategy.hasProperty('7', .number));

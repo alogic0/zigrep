@@ -5910,6 +5910,42 @@ test "runCli supports Cased and Case_Ignorable Unicode properties" {
     try testing.expect(std.mem.containsAtLeast(u8, case_ignorable_run.stdout, 1, "sample.txt:2:1:"));
 }
 
+test "runCli supports Any and ASCII Unicode properties" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "ж\n" ++
+            "Az09\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "raw.bin",
+        .data = "\xffA\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const any_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Any}+", root_path });
+    defer any_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), any_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, any_run.stdout, 1, "sample.txt:1:1:ж"));
+
+    const ascii_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{ASCII}+", root_path });
+    defer ascii_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), ascii_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_run.stdout, 1, "sample.txt:2:1:Az09"));
+
+    const not_any_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\P{Any}+", root_path });
+    defer not_any_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), not_any_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, not_any_run.stdout, 1, "raw.bin:1:1:"));
+}
+
 test "runCli supports identifier-style derived Unicode properties" {
     const testing = std.testing;
 

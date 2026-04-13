@@ -132,13 +132,13 @@ Script matching is still native-core work if implemented as table lookup over a
 
 ## Phase 5: Special Unicode Property Cases
 
-- [ ] Add `\p{Any}` if we want parity with ripgrep’s default regex surface.
+- [x] Add `\p{Any}` if we want parity with ripgrep’s default regex surface.
   Native-core rule:
   - valid Unicode scalar always matches
   - invalid raw byte does not match positive `Any`
   - invalid raw byte does match negated `Any`
 
-- [ ] Consider `\p{ASCII}` as a special native-core property.
+- [x] Consider `\p{ASCII}` as a special native-core property.
 
 - [ ] Decide whether binary-property-style names like `Emoji` are in scope.
   Default recommendation:
