@@ -68,6 +68,7 @@ const Config = struct {
     derived_core_properties: []const u8,
     derived_general_category: []const u8,
     scripts: []const u8,
+    script_extensions: []const u8,
     property_value_aliases: []const u8,
     emoji_data: []const u8,
     case_folding: []const u8,
@@ -280,6 +281,12 @@ pub fn main() !void {
         for (script_entries.items) |*entry| entry.ranges.deinit(arena);
         script_entries.deinit(arena);
     }
+    var script_extensions_entries = try cloneScriptEntries(arena, script_entries.items);
+    defer {
+        for (script_extensions_entries.items) |*entry| entry.ranges.deinit(arena);
+        script_extensions_entries.deinit(arena);
+    }
+    try loadScriptExtensions(arena, config.script_extensions, script_aliases.items, &script_extensions_entries);
     try loadGeneralCategoryData(
         arena,
         config.derived_general_category,
@@ -336,6 +343,7 @@ pub fn main() !void {
         inherited_script_ranges.items,
         unknown_script_ranges.items,
         script_entries.items,
+        script_extensions_entries.items,
         lowercase_ranges.items,
         uppercase_ranges.items,
         mark_ranges.items,
@@ -387,6 +395,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     const default_derived_core_properties = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "DerivedCoreProperties.txt" });
     const default_derived_general_category = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "extracted", "DerivedGeneralCategory.txt" });
     const default_scripts = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "Scripts.txt" });
+    const default_script_extensions = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "ScriptExtensions.txt" });
     const default_property_value_aliases = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "PropertyValueAliases.txt" });
     const default_emoji_data = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "emoji", "emoji-data.txt" });
     const default_case_folding = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "CaseFolding.txt" });
@@ -398,6 +407,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
         .derived_core_properties = default_derived_core_properties,
         .derived_general_category = default_derived_general_category,
         .scripts = default_scripts,
+        .script_extensions = default_script_extensions,
         .property_value_aliases = default_property_value_aliases,
         .emoji_data = default_emoji_data,
         .case_folding = default_case_folding,
@@ -416,6 +426,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             config.derived_core_properties = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "DerivedCoreProperties.txt" });
             config.derived_general_category = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "extracted", "DerivedGeneralCategory.txt" });
             config.scripts = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "Scripts.txt" });
+            config.script_extensions = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "ScriptExtensions.txt" });
             config.property_value_aliases = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "PropertyValueAliases.txt" });
             config.emoji_data = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "emoji", "emoji-data.txt" });
             config.case_folding = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "CaseFolding.txt" });
@@ -439,6 +450,10 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
             config.scripts = args[i];
+        } else if (std.mem.eql(u8, arg, "--script-extensions")) {
+            i += 1;
+            if (i >= args.len) return error.MissingArgument;
+            config.script_extensions = args[i];
         } else if (std.mem.eql(u8, arg, "--property-value-aliases")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -467,6 +482,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     try ensureFileExists(config.derived_core_properties);
     try ensureFileExists(config.derived_general_category);
     try ensureFileExists(config.scripts);
+    try ensureFileExists(config.script_extensions);
     try ensureFileExists(config.property_value_aliases);
     try ensureFileExists(config.emoji_data);
     try ensureFileExists(config.case_folding);
@@ -484,14 +500,14 @@ fn hasHelpFlag(args: []const []const u8) bool {
 fn writeUsage() !void {
     std.debug.print(
         \\usage: gen_unicode_props.zig [--zg-root PATH] [--unicode-data PATH] [--prop-list PATH] [--derived-core-properties PATH] --output PATH
-        \\                             [--derived-general-category PATH] [--scripts PATH] [--property-value-aliases PATH] [--emoji-data PATH] [--case-folding PATH]
+        \\                             [--derived-general-category PATH] [--scripts PATH] [--script-extensions PATH] [--property-value-aliases PATH] [--emoji-data PATH] [--case-folding PATH]
         \\
         \\Default data source:
         \\  ../zig-libs/zg/data/unicode relative to the zigrep repo root
         \\
         \\Examples:
         \\  zig run tools/gen_unicode_props.zig -- --zg-root ../zig-libs/zg --output src/regex/unicode_props_generated.zig
-        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --derived-general-category /path/to/DerivedGeneralCategory.txt --scripts /path/to/Scripts.txt --property-value-aliases /path/to/PropertyValueAliases.txt --emoji-data /path/to/emoji-data.txt --case-folding /path/to/CaseFolding.txt --output src/regex/unicode_props_generated.zig
+        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --derived-general-category /path/to/DerivedGeneralCategory.txt --scripts /path/to/Scripts.txt --script-extensions /path/to/ScriptExtensions.txt --property-value-aliases /path/to/PropertyValueAliases.txt --emoji-data /path/to/emoji-data.txt --case-folding /path/to/CaseFolding.txt --output src/regex/unicode_props_generated.zig
         \\
     , .{});
 }
@@ -952,6 +968,72 @@ fn loadScripts(
     return entries;
 }
 
+fn cloneScriptEntries(
+    allocator: std.mem.Allocator,
+    source: []const ScriptEntry,
+) !std.ArrayList(ScriptEntry) {
+    var cloned: std.ArrayList(ScriptEntry) = .empty;
+    errdefer {
+        for (cloned.items) |*entry| entry.ranges.deinit(allocator);
+        cloned.deinit(allocator);
+    }
+
+    for (source) |entry| {
+        var ranges: std.ArrayList(Range) = .empty;
+        for (entry.ranges.items) |range| {
+            try ranges.append(allocator, range);
+        }
+        try cloned.append(allocator, .{
+            .long_name = entry.long_name,
+            .short_name = entry.short_name,
+            .ranges = ranges,
+        });
+    }
+
+    return cloned;
+}
+
+fn loadScriptExtensions(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    aliases: []const ScriptAlias,
+    entries: *std.ArrayList(ScriptEntry),
+) !void {
+    const bytes = try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024 * 1024);
+    var lines = std.mem.tokenizeScalar(u8, bytes, '\n');
+    while (lines.next()) |line_raw| {
+        const line_trimmed = std.mem.trimRight(u8, line_raw, "\r");
+        const line = if (std.mem.indexOfScalar(u8, line_trimmed, '#')) |index|
+            std.mem.trim(u8, line_trimmed[0..index], " \t")
+        else
+            std.mem.trim(u8, line_trimmed, " \t");
+
+        if (line.len == 0 or line[0] == '@') continue;
+
+        const sep = std.mem.indexOfScalar(u8, line, ';') orelse continue;
+        const lhs = std.mem.trim(u8, line[0..sep], " \t");
+        const rhs = std.mem.trim(u8, line[sep + 1 ..], " \t");
+
+        const range = if (std.mem.indexOf(u8, lhs, "..")) |dots|
+            Range{
+                .start = try std.fmt.parseInt(u32, lhs[0..dots], 16),
+                .end = try std.fmt.parseInt(u32, lhs[dots + 2 ..], 16),
+            }
+        else
+            blk: {
+                const cp = try std.fmt.parseInt(u32, lhs, 16);
+                break :blk Range{ .start = cp, .end = cp };
+            };
+
+        var values = std.mem.tokenizeAny(u8, rhs, " \t");
+        while (values.next()) |short_name| {
+            const long_name = findScriptLongName(short_name, aliases) orelse short_name;
+            const entry = try ensureScriptEntry(allocator, entries, long_name, aliases);
+            try appendMergedRange(allocator, &entry.ranges, range);
+        }
+    }
+}
+
 fn ensureScriptEntry(
     allocator: std.mem.Allocator,
     entries: *std.ArrayList(ScriptEntry),
@@ -974,6 +1056,13 @@ fn ensureScriptEntry(
 fn findScriptAlias(long_name: []const u8, aliases: []const ScriptAlias) ?[]const u8 {
     for (aliases) |alias| {
         if (std.mem.eql(u8, alias.long_name, long_name)) return alias.short_name;
+    }
+    return null;
+}
+
+fn findScriptLongName(short_name: []const u8, aliases: []const ScriptAlias) ?[]const u8 {
+    for (aliases) |alias| {
+        if (std.mem.eql(u8, alias.short_name, short_name)) return alias.long_name;
     }
     return null;
 }
@@ -1061,6 +1150,7 @@ fn writeOutput(
     inherited_script_ranges: []const Range,
     unknown_script_ranges: []const Range,
     script_entries: []const ScriptEntry,
+    script_extensions_entries: []const ScriptEntry,
     lowercase_ranges: []const Range,
     uppercase_ranges: []const Range,
     mark_ranges: []const Range,
@@ -1115,6 +1205,7 @@ fn writeOutput(
     try writer.interface.print("// - {s}\n", .{config.derived_core_properties});
     try writer.interface.print("// - {s}\n", .{config.derived_general_category});
     try writer.interface.print("// - {s}\n", .{config.scripts});
+    try writer.interface.print("// - {s}\n", .{config.script_extensions});
     try writer.interface.print("// - {s}\n", .{config.property_value_aliases});
     try writer.interface.print("// - {s}\n", .{config.emoji_data});
     try writer.interface.print("// - {s}\n", .{config.case_folding});
@@ -1130,6 +1221,7 @@ fn writeOutput(
     try writer.interface.print("    to: u32,\n", .{});
     try writer.interface.print("}};\n\n", .{});
     try writer.interface.print("pub const script_property_base: u16 = 0x400;\n", .{});
+    try writer.interface.print("pub const script_extensions_property_base: u16 = 0x800;\n", .{});
     try writer.interface.print("pub const ScriptSpec = struct {{\n", .{});
     try writer.interface.print("    long_name: []const u8,\n", .{});
     try writer.interface.print("    short_name: []const u8,\n", .{});
@@ -1176,6 +1268,8 @@ fn writeOutput(
     try writeRangeList(&writer.interface, "unknown_script_ranges", unknown_script_ranges);
     try writer.interface.print("\n", .{});
     try writeScriptSpecs(&writer.interface, script_entries);
+    try writer.interface.print("\n", .{});
+    try writeScriptExtensionSpecs(&writer.interface, script_extensions_entries);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "lowercase_ranges", lowercase_ranges);
     try writer.interface.print("\n", .{});
@@ -1285,4 +1379,26 @@ fn writeScriptSpecs(writer: anytype, script_entries: []const ScriptEntry) !void 
     }
     try writer.print("}};\n", .{});
     try writer.print("pub const script_unknown_property_id: u16 = script_property_base + {d};\n", .{unknown_index orelse 0});
+}
+
+fn writeScriptExtensionSpecs(writer: anytype, script_entries: []const ScriptEntry) !void {
+    for (script_entries, 0..) |entry, index| {
+        try writer.print("pub const script_extensions_ranges_{d} = [_]Range{{\n", .{index});
+        for (entry.ranges.items) |range| {
+            try writer.print("    .{{ .start = 0x{X}, .end = 0x{X} }},\n", .{ range.start, range.end });
+        }
+        try writer.print("}};\n\n", .{});
+    }
+
+    var unknown_index: ?usize = null;
+    try writer.print("pub const script_extensions_specs = [_]ScriptSpec{{\n", .{});
+    for (script_entries, 0..) |entry, index| {
+        if (std.mem.eql(u8, entry.long_name, "Unknown")) unknown_index = index;
+        try writer.print(
+            "    .{{ .long_name = \"{s}\", .short_name = \"{s}\", .property_id = script_extensions_property_base + {d}, .ranges = script_extensions_ranges_{d}[0..] }},\n",
+            .{ entry.long_name, entry.short_name, index, index },
+        );
+    }
+    try writer.print("}};\n", .{});
+    try writer.print("pub const script_extensions_unknown_property_id: u16 = script_extensions_property_base + {d};\n", .{unknown_index orelse 0});
 }

@@ -1,0 +1,154 @@
+# Remaining Unicode Parity Plan
+
+This plan covers the main remaining Unicode regex-surface gaps between
+`zigrep` and the checked local `ripgrep` after the following work is already
+landed:
+
+- Unicode-aware `\w`, `\d`, `\s`, `\b`, `\B`
+- broad Unicode property support
+- script support via `Script=` and `sc=`
+- Unicode ignore-case and smart-case parity for the implemented surface
+- broad folded Unicode range support under `-i`
+
+## Goal
+
+Close the highest-value remaining Unicode regex parity gaps without:
+
+- introducing a fallback engine
+- weakening the current native-core correctness rules
+- mixing unrelated Unicode-property expansion work into syntax-surface work
+
+## Current Remaining Gaps
+
+The strongest remaining Unicode regex-surface gaps are:
+
+- `Script_Extensions` syntax such as `\p{scx=Greek}`
+- inline Unicode mode toggles such as `(?-u:...)`
+- ripgrep's half-boundary forms:
+  - `\b{start-half}`
+  - `\b{end-half}`
+- character-class set operations such as subtraction/intersection
+
+Secondary gap:
+
+- broader Unicode property coverage beyond the currently implemented curated
+  set
+
+## Priority Order
+
+Implementation order for this plan:
+
+1. `Script_Extensions` / `scx=...`
+2. inline Unicode mode toggles
+3. half-boundaries
+4. class set operations
+5. broader property-surface expansion only if still needed afterward
+
+## Phase 1: Script_Extensions
+
+- [x] Confirm the exact local `ripgrep` syntax and matching behavior for:
+  - `\p{scx=Greek}`
+  - `\P{scx=Greek}`
+  - bracketed forms such as `[\p{scx=Greek}]`
+  - current result: local `ripgrep` supports `scx=...`,
+    `Script_Extensions=...`, bracketed forms, and negated forms
+
+- [x] Extend the Unicode generator inputs to include `ScriptExtensions.txt`
+
+- [x] Generate a compact native data model for `Script_Extensions`
+  - current result: the generator now emits a second script-spec registry for
+    Script_Extensions, seeded from Script defaults and layered with
+    `ScriptExtensions.txt`
+
+- [x] Add native property lookup support for:
+  - `scx=...`
+  - `Script_Extensions=...`
+
+- [x] Add search-layer and CLI regressions for the initial `scx=` surface
+
+## Phase 2: Inline Unicode Mode Controls
+
+- [ ] Confirm the local `ripgrep` behavior for:
+  - `(?-u:...)`
+  - nested Unicode mode toggles
+  - interactions with Unicode-aware shorthand and properties
+
+- [ ] Decide whether `zigrep` should support only `(?-u:...)` first or a
+  broader inline flag subset
+
+- [ ] Add parser support for the chosen inline Unicode-mode syntax
+
+- [ ] Define the native-engine lowering rule:
+  - Unicode-aware defaults outside the group
+  - ASCII-mode behavior inside the group
+
+- [ ] Add search-layer and CLI regressions for mixed Unicode/ASCII subpatterns
+
+## Phase 3: Half-Boundaries
+
+- [ ] Confirm the local `ripgrep` semantics for:
+  - `\b{start-half}`
+  - `\b{end-half}`
+
+- [ ] Extend the parser AST and HIR with explicit half-boundary nodes
+
+- [ ] Add VM/NFA support for half-boundary assertions
+
+- [ ] Add search-layer and CLI regressions for:
+  - ASCII words
+  - Unicode words
+  - punctuation boundaries
+
+## Phase 4: Class Set Operations
+
+- [ ] Confirm the exact local `ripgrep` surface to target first:
+  - subtraction
+  - intersection
+  - nested set expressions
+
+- [ ] Decide the smallest native-core subset worth implementing first
+
+- [ ] Extend the parser with explicit class-set AST forms
+
+- [ ] Lower class-set operations into a native matcher representation that
+  preserves Unicode property items and folded ranges
+
+- [ ] Keep planner support out of scope until VM semantics are proven
+
+- [ ] Add search-layer and CLI regressions for representative set expressions
+
+## Phase 5: Remaining Property-Surface Review
+
+- [ ] Re-check whether broader property expansion is still materially useful
+  after the syntax-surface gaps are closed
+
+- [ ] If yes, spin that into a separate follow-up plan instead of widening this
+  plan
+
+## Phase 6: Validation And Docs
+
+- [ ] Keep [docs/supported-syntax.md](../supported-syntax.md) aligned after each
+  implemented slice
+
+- [ ] Compare each completed slice against local `ripgrep` before closing it
+
+- [ ] Run:
+  - `zig build test`
+  - `zig build bench`
+
+## Recommended Order
+
+- [ ] 1. Land `Script_Extensions`
+- [ ] 2. Land inline Unicode mode toggles
+- [ ] 3. Land half-boundaries
+- [ ] 4. Decide and land the smallest useful class-set subset
+- [ ] 5. Re-evaluate remaining property-surface gaps
+
+## Explicit Non-Goals
+
+This plan does not include:
+
+- fallback-engine work
+- unrelated performance tuning
+- planner support for new Unicode regex constructs before VM equivalence is
+  proven

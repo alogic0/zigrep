@@ -104,8 +104,13 @@ Current escape boundary:
     - direct names like `\p{Greek}` and `\p{Hebrew}`
     - qualified names like `\p{Script=Greek}`
     - short aliases like `\p{sc=Grek}`
+  - `Script_Extensions` support is also available in these forms:
+    - qualified names like `\p{Script_Extensions=Greek}`
+    - short aliases like `\p{scx=Grek}`
   - script names and `sc=` aliases are generated from the pinned Unicode
     `Scripts.txt` and `PropertyValueAliases.txt` data
+  - `Script_Extensions` data is generated from the pinned Unicode
+    `ScriptExtensions.txt` data
   - `Unknown` / `Zzzz` follows the script fallback behavior for unassigned,
     private-use, and surrogate code points
   - the same property items may also appear inside bracket classes
@@ -120,7 +125,6 @@ Current escape boundary:
   - `ASCII` matches only scalars in `U+0000..U+007F`
   - invalid raw bytes do not match positive Unicode properties and do match
     negated Unicode properties
-  - `Script_Extensions` forms such as `\p{scx=Greek}` are not supported yet
 - `\u{...}` accepts 1 to 6 hex digits and rejects surrogate code points and values above `U+10FFFF`
 
 ## Explicit Non-Goals

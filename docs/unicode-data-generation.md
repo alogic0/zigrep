@@ -36,6 +36,7 @@ Specifically, the current property generator reads:
 - `DerivedCoreProperties.txt`
 - `extracted/DerivedGeneralCategory.txt`
 - `Scripts.txt`
+- `ScriptExtensions.txt`
 - `PropertyValueAliases.txt`
 - `emoji/emoji-data.txt`
 - `CaseFolding.txt`
@@ -69,6 +70,7 @@ zig run tools/gen_unicode_props.zig -- \
   --derived-core-properties /path/to/DerivedCoreProperties.txt \
   --derived-general-category /path/to/DerivedGeneralCategory.txt \
   --scripts /path/to/Scripts.txt \
+  --script-extensions /path/to/ScriptExtensions.txt \
   --property-value-aliases /path/to/PropertyValueAliases.txt \
   --emoji-data /path/to/emoji-data.txt \
   --case-folding /path/to/CaseFolding.txt \

@@ -12,6 +12,7 @@ pub const BoundaryKind = enum {
 };
 
 pub const script_property_base: u16 = 0x400;
+pub const script_extensions_property_base: u16 = 0x800;
 
 pub const Property = enum(u16) {
     any,
@@ -67,6 +68,7 @@ pub const Property = enum(u16) {
     private_use,
     unassigned,
     script_base = script_property_base,
+    script_extensions_base = script_extensions_property_base,
     _,
 };
 
@@ -171,6 +173,7 @@ pub const Strategy = struct {
     pub fn lookupProperty(name: []const u8) ?Property {
         if (propertyNameEq(name, "any")) return .any;
         if (propertyNameEq(name, "ascii")) return .ascii;
+        if (lookupScriptExtensionsProperty(name)) |property| return property;
         if (lookupScriptProperty(name)) |property| return property;
         if (propertyNameEq(name, "letter") or propertyNameEq(name, "l")) return .letter;
         if (propertyNameEq(name, "number") or propertyNameEq(name, "n")) return .number;
@@ -223,6 +226,17 @@ pub const Strategy = struct {
     }
 
     pub fn hasProperty(cp: u32, property: Property) bool {
+        if (scriptExtensionsSpecForProperty(property)) |spec| {
+            const matched = inRanges(cp, spec.ranges);
+            if (@intFromEnum(property) == generated.script_extensions_unknown_property_id) {
+                return matched or
+                    inRanges(cp, &generated.unassigned_ranges) or
+                    inRanges(cp, &generated.private_use_ranges) or
+                    inRanges(cp, &generated.surrogate_ranges);
+            }
+            return matched;
+        }
+
         if (scriptSpecForProperty(property)) |spec| {
             const matched = inRanges(cp, spec.ranges);
             if (@intFromEnum(property) == generated.script_unknown_property_id) {
@@ -489,8 +503,28 @@ fn lookupScriptProperty(name: []const u8) ?Property {
     return lookupScriptName(name);
 }
 
+fn lookupScriptExtensionsProperty(name: []const u8) ?Property {
+    if (std.mem.indexOfScalar(u8, name, '=')) |eq_index| {
+        const lhs = std.mem.trim(u8, name[0..eq_index], " \t\r\n");
+        const rhs = std.mem.trim(u8, name[eq_index + 1 ..], " \t\r\n");
+        if (!(propertyNameEq(lhs, "Script_Extensions") or propertyNameEq(lhs, "scx"))) return null;
+        return lookupScriptExtensionsName(rhs);
+    }
+
+    return null;
+}
+
 fn lookupScriptName(name: []const u8) ?Property {
     for (generated.script_specs) |spec| {
+        if (propertyNameEq(name, spec.long_name) or propertyNameEq(name, spec.short_name)) {
+            return @enumFromInt(spec.property_id);
+        }
+    }
+    return null;
+}
+
+fn lookupScriptExtensionsName(name: []const u8) ?Property {
+    for (generated.script_extensions_specs) |spec| {
         if (propertyNameEq(name, spec.long_name) or propertyNameEq(name, spec.short_name)) {
             return @enumFromInt(spec.property_id);
         }
@@ -504,6 +538,14 @@ fn scriptSpecForProperty(property: Property) ?generated.ScriptSpec {
     const index = property_id - script_property_base;
     if (index >= generated.script_specs.len) return null;
     return generated.script_specs[index];
+}
+
+fn scriptExtensionsSpecForProperty(property: Property) ?generated.ScriptSpec {
+    const property_id = @intFromEnum(property);
+    if (property_id < script_extensions_property_base) return null;
+    const index = property_id - script_extensions_property_base;
+    if (index >= generated.script_extensions_specs.len) return null;
+    return generated.script_extensions_specs[index];
 }
 
 fn isPropertySeparator(byte: u8) bool {
@@ -596,6 +638,9 @@ test "Unicode strategy looks up named properties and aliases" {
     try testing.expectEqual(greek, Strategy.lookupProperty("Grek").?);
     try testing.expectEqual(greek, Strategy.lookupProperty("Script=Greek").?);
     try testing.expectEqual(greek, Strategy.lookupProperty("sc=Grek").?);
+    const greek_scx = Strategy.lookupProperty("scx=Greek").?;
+    try testing.expectEqual(greek_scx, Strategy.lookupProperty("Script_Extensions=Greek").?);
+    try testing.expectEqual(greek_scx, Strategy.lookupProperty("scx=Grek").?);
     const common = Strategy.lookupProperty("Common").?;
     try testing.expectEqual(common, Strategy.lookupProperty("Zyyy").?);
     const inherited = Strategy.lookupProperty("Inherited").?;
@@ -663,6 +708,9 @@ test "Unicode strategy evaluates property membership" {
     try testing.expect(!Strategy.hasProperty('ж', .ascii));
     try testing.expect(Strategy.hasProperty('A', Strategy.lookupProperty("Latin").?));
     try testing.expect(Strategy.hasProperty('Ω', Strategy.lookupProperty("Greek").?));
+    try testing.expect(Strategy.hasProperty('Ω', Strategy.lookupProperty("scx=Greek").?));
+    try testing.expect(Strategy.hasProperty(0x0375, Strategy.lookupProperty("scx=Greek").?));
+    try testing.expect(!Strategy.hasProperty('A', Strategy.lookupProperty("scx=Greek").?));
     try testing.expect(Strategy.hasProperty('Ж', Strategy.lookupProperty("Cyrillic").?));
     try testing.expect(Strategy.hasProperty('+', Strategy.lookupProperty("Common").?));
     try testing.expect(Strategy.hasProperty(0x0301, Strategy.lookupProperty("Inherited").?));

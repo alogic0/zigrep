@@ -2318,6 +2318,23 @@ test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     defer cyrillic.deinit();
     try testing.expect((try cyrillic.reportFirstMatch("sample.txt", "Ж")) != null);
 
+    var greek_scx = try Searcher.init(testing.allocator, "\\p{scx=Greek}+", .{});
+    defer greek_scx.deinit();
+    try testing.expect((try greek_scx.reportFirstMatch("sample.txt", "Ω")) != null);
+    try testing.expect((try greek_scx.reportFirstMatch("sample.txt", "\xCD\xB5")) != null);
+
+    var greek_scx_long = try Searcher.init(testing.allocator, "\\p{Script_Extensions=Greek}+", .{});
+    defer greek_scx_long.deinit();
+    try testing.expect((try greek_scx_long.reportFirstMatch("sample.txt", "\xCD\xB5")) != null);
+
+    var greek_scx_class = try Searcher.init(testing.allocator, "[\\p{scx=Greek}]+", .{});
+    defer greek_scx_class.deinit();
+    try testing.expect((try greek_scx_class.reportFirstMatch("sample.txt", "\xCD\xB5")) != null);
+
+    var not_greek_scx = try Searcher.init(testing.allocator, "\\P{scx=Greek}+", .{});
+    defer not_greek_scx.deinit();
+    try testing.expect((try not_greek_scx.reportFirstMatch("sample.txt", "A")) != null);
+
     var hebrew = try Searcher.init(testing.allocator, "\\p{Hebrew}+", .{});
     defer hebrew.deinit();
     try testing.expect((try hebrew.reportFirstMatch("sample.txt", "א")) != null);

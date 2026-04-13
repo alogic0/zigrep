@@ -6208,6 +6208,7 @@ test "runCli supports initial Script Unicode properties" {
         .data =
             "A\n" ++
             "Ω\n" ++
+            "\xCD\xB5\n" ++
             "Ж\n" ++
             "א\n",
     });
@@ -6220,6 +6221,17 @@ test "runCli supports initial Script Unicode properties" {
     try testing.expectEqual(@as(u8, 0), greek_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, greek_run.stdout, 1, "sample.txt:2:1:Ω"));
 
+    const greek_scx_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{scx=Greek}+", root_path });
+    defer greek_scx_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), greek_scx_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, greek_scx_run.stdout, 1, "sample.txt:2:1:Ω"));
+    try testing.expect(std.mem.containsAtLeast(u8, greek_scx_run.stdout, 1, "sample.txt:3:1:͵"));
+
+    const greek_scx_long_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Script_Extensions=Greek}+", root_path });
+    defer greek_scx_long_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), greek_scx_long_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, greek_scx_long_run.stdout, 1, "sample.txt:3:1:͵"));
+
     const latin_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Script=Latin}+", root_path });
     defer latin_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), latin_run.exit_code);
@@ -6228,12 +6240,12 @@ test "runCli supports initial Script Unicode properties" {
     const cyrillic_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{sc=Cyrl}+", root_path });
     defer cyrillic_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), cyrillic_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, cyrillic_run.stdout, 1, "sample.txt:3:1:Ж"));
+    try testing.expect(std.mem.containsAtLeast(u8, cyrillic_run.stdout, 1, "sample.txt:4:1:Ж"));
 
     const hebrew_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Hebrew}+", root_path });
     defer hebrew_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), hebrew_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, hebrew_run.stdout, 1, "sample.txt:4:1:א"));
+    try testing.expect(std.mem.containsAtLeast(u8, hebrew_run.stdout, 1, "sample.txt:5:1:א"));
 }
 
 test "runCli supports identifier-style derived Unicode properties" {
