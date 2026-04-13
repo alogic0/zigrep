@@ -127,7 +127,7 @@ The goal is not full PCRE2 parity. The goal is:
 
 ## Phase 5: Finish Native-Engine Candidate Scope
 
-- [ ] Review which remaining regex features are still good native-engine
+- [x] Review which remaining regex features are still good native-engine
   candidates because they stay inside Thompson NFA / DFA / Pike VM territory.
   Candidates:
   - Unicode literal escapes if added
@@ -136,7 +136,20 @@ The goal is not full PCRE2 parity. The goal is:
   - non-capturing groups if they are treated purely as syntax sugar
   - lazy quantifiers if they lower cleanly into the current execution model
 
-- [ ] Separate those features from the constructs that remain intentionally out
+  Review result:
+  - move non-capturing groups into the active implementation queue first
+    because the parser already has an explicit `(?...)` rejection boundary and
+    `(?:...)` can lower cleanly to existing grouping structure without new VM
+    semantics
+  - move lazy quantifiers into the active implementation queue next because the
+    parser already carries a `greedy` flag in `Quantifier`, which makes this a
+    native-engine completion task rather than a syntax-surface invention
+  - defer Unicode-aware character-class extensions and Unicode property classes
+    until there is a clearer data/model decision for Unicode category support
+  - keep those deferred Unicode class items as native-engine candidates, not as
+    fallback-engine features
+
+- [x] Separate those features from the constructs that remain intentionally out
   of scope for the native engine:
   - look-around
   - backreferences
@@ -144,9 +157,32 @@ The goal is not full PCRE2 parity. The goal is:
   - recursion and subroutine calls
   - control verbs and other PCRE-style backtracking features
 
-- [ ] Decide whether any of the remaining candidate features should be moved
+  Result:
+  - active native-engine queue:
+    - lazy quantifiers
+  - deferred native-engine candidates:
+    - Unicode-aware character-class extensions
+    - Unicode property classes
+  - fallback-only features remain unchanged:
+    - look-around
+    - backreferences
+    - conditional groups
+    - recursion and subroutine calls
+    - control verbs and other PCRE-style backtracking features
+
+- [x] Decide whether any of the remaining candidate features should be moved
   into the current implementation plan now, before making any fallback-engine
   decision.
+
+  Decision:
+  - yes: implement non-capturing groups first
+  - then implement lazy quantifiers
+  - leave Unicode property work and broader Unicode class extensions for a
+    separate native-engine plan after those smaller syntax-surface wins land
+
+- [x] Implement non-capturing groups `(?:...)` as native syntax sugar over the
+  existing grouping structure, without allocating capture slots or changing VM
+  semantics.
 
 ## Phase 6: Fallback Engine Decision
 

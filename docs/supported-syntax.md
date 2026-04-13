@@ -18,6 +18,7 @@ The current engine supports:
 - Character classes like `[abc]`, `[a-z]`, and negated classes like `[^a-z]`
 - Shorthand classes `\d`, `\D`, `\w`, `\W`, `\s`, and `\S`
 - Word boundaries `\b` and `\B`
+- Non-capturing groups `(?:...)`
 - Escaped metacharacters such as `\.`, `\(`, `\)`, `\[`, `\]`, `\{`, `\}`, `\|`, `\*`, `\+`, `\?`, `\^`, `\$`, and `\\`
 
 Notes:
@@ -55,14 +56,13 @@ of scope for the main engine:
 
 - Backreferences
 - Lookahead and lookbehind
-- Non-capturing groups like `(?:...)`
 - Conditional groups and PCRE2 control verbs
 - Recursion and subroutine calls
 - Features that require general backtracking semantics
 - Full PCRE2 compatibility
 
-In particular, `(?...)` group forms are rejected explicitly rather than being
-interpreted partially.
+In particular, `(?:...)` is supported, but other `(?...)` group forms are
+rejected explicitly rather than being interpreted partially.
 
 ## CLI Behavior
 

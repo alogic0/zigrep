@@ -5756,6 +5756,32 @@ test "runCli supports word boundaries on UTF-8 and raw-byte inputs" {
     try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "sample.txt:2:2:scatter"));
 }
 
+test "runCli supports non-capturing groups" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "ababx\n" ++
+            "abx\n" ++
+            "ax\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?:ab)+x", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:ababx"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:abx"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:3:1:ax"));
+}
+
 test "runCli supports Unicode literal escapes" {
     const testing = std.testing;
 

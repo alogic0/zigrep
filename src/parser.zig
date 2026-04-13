@@ -300,6 +300,14 @@ pub const Parser = struct {
                 const group_span = self.lookahead.span;
                 try self.advance();
                 if (self.lookahead.token == .question) {
+                    try self.advance();
+                    if (self.lookahead.token == .literal and self.lookahead.token.literal == ':') {
+                        try self.advance();
+                        const expr = try self.parseAlternation();
+                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+                        try self.advance();
+                        return expr;
+                    }
                     return self.fail(error.UnsupportedGroup, group_span);
                 }
                 const group_index = self.capture_count;
@@ -531,7 +539,7 @@ test "Parser rejects invalid class range and quantifier" {
 test "Parser records spans for unsupported groups and trailing input" {
     const testing = std.testing;
 
-    var group_parser = try Parser.init(testing.allocator, "(?:a)");
+    var group_parser = try Parser.init(testing.allocator, "(?=a)");
     try testing.expectError(error.UnsupportedGroup, group_parser.parse());
     try testing.expectEqualDeep(ParseDiagnostic{
         .err = error.UnsupportedGroup,
@@ -544,6 +552,26 @@ test "Parser records spans for unsupported groups and trailing input" {
         .err = error.TrailingInput,
         .span = .{ .start = 1, .end = 2 },
     }, trailing_parser.lastError().?);
+}
+
+test "Parser supports non-capturing groups without incrementing capture count" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "(?:ab)(c)");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 1), ast.capture_count);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 2), root.len);
+    try testing.expectEqual(.concat, std.meta.activeTag(ast.nodes[@intFromEnum(root[0])]));
+    const non_capturing = ast.nodes[@intFromEnum(root[0])].concat;
+    try testing.expectEqual(@as(usize, 2), non_capturing.len);
+    try testing.expectEqualDeep(Node{ .literal = 'a' }, ast.nodes[@intFromEnum(non_capturing[0])]);
+    try testing.expectEqualDeep(Node{ .literal = 'b' }, ast.nodes[@intFromEnum(non_capturing[1])]);
+    try testing.expectEqual(.group, std.meta.activeTag(ast.nodes[@intFromEnum(root[1])]));
+    try testing.expectEqual(@as(u32, 0), ast.nodes[@intFromEnum(root[1])].group.index);
 }
 
 test "Parser supports escaped metacharacters and class edge literals" {
