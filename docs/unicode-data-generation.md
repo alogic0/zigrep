@@ -35,6 +35,7 @@ Specifically, the current property generator reads:
 - `PropList.txt`
 - `DerivedCoreProperties.txt`
 - `extracted/DerivedGeneralCategory.txt`
+- `Scripts.txt`
 - Unicode version `16.0.0`
 
 This is a generation-time input only.
@@ -64,6 +65,7 @@ zig run tools/gen_unicode_props.zig -- \
   --prop-list /path/to/PropList.txt \
   --derived-core-properties /path/to/DerivedCoreProperties.txt \
   --derived-general-category /path/to/DerivedGeneralCategory.txt \
+  --scripts /path/to/Scripts.txt \
   --output src/regex/unicode_props_generated.zig
 ```
 

@@ -87,6 +87,17 @@ Current escape boundary:
   - `\p{XID_Start}` and `\P{XID_Start}`
   - `\p{XID_Continue}` and `\P{XID_Continue}`
   - `\p{Default_Ignorable_Code_Point}` and `\P{Default_Ignorable_Code_Point}`
+  - initial Script support is also available in these forms:
+    - `\p{Greek}`
+    - `\p{Script=Greek}`
+    - `\p{sc=Grek}`
+  - the current script set is:
+    - `Latin` / `Latn`
+    - `Greek` / `Grek`
+    - `Cyrillic` / `Cyrl`
+    - `Common` / `Zyyy`
+    - `Inherited` / `Zinh`
+    - `Unknown` / `Zzzz`
   - the same property items may also appear inside bracket classes
     - for example `[\p{Letter}\P{Whitespace}]`
   - accepted aliases currently include:
@@ -98,6 +109,7 @@ Current escape boundary:
   - `ASCII` matches only scalars in `U+0000..U+007F`
   - invalid raw bytes do not match positive Unicode properties and do match
     negated Unicode properties
+  - `Script_Extensions` forms such as `\p{scx=Greek}` are not supported yet
 - `\u{...}` accepts 1 to 6 hex digits and rejects surrogate code points and values above `U+10FFFF`
 
 ## Explicit Non-Goals

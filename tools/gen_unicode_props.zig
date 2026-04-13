@@ -51,6 +51,7 @@ const Config = struct {
     prop_list: []const u8,
     derived_core_properties: []const u8,
     derived_general_category: []const u8,
+    scripts: []const u8,
     output: []const u8,
 };
 
@@ -93,6 +94,24 @@ pub fn main() !void {
 
     var default_ignorable_code_point_ranges: std.ArrayList(Range) = .empty;
     defer default_ignorable_code_point_ranges.deinit(arena);
+
+    var latin_script_ranges: std.ArrayList(Range) = .empty;
+    defer latin_script_ranges.deinit(arena);
+
+    var greek_script_ranges: std.ArrayList(Range) = .empty;
+    defer greek_script_ranges.deinit(arena);
+
+    var cyrillic_script_ranges: std.ArrayList(Range) = .empty;
+    defer cyrillic_script_ranges.deinit(arena);
+
+    var common_script_ranges: std.ArrayList(Range) = .empty;
+    defer common_script_ranges.deinit(arena);
+
+    var inherited_script_ranges: std.ArrayList(Range) = .empty;
+    defer inherited_script_ranges.deinit(arena);
+
+    var unknown_script_ranges: std.ArrayList(Range) = .empty;
+    defer unknown_script_ranges.deinit(arena);
 
     var lowercase_ranges: std.ArrayList(Range) = .empty;
     defer lowercase_ranges.deinit(arena);
@@ -220,6 +239,12 @@ pub fn main() !void {
     try loadNamedPropertyData(arena, config.derived_core_properties, "XID_Start", &xid_start_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "XID_Continue", &xid_continue_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "Default_Ignorable_Code_Point", &default_ignorable_code_point_ranges);
+    try loadNamedScriptData(arena, config.scripts, "Latin", &latin_script_ranges);
+    try loadNamedScriptData(arena, config.scripts, "Greek", &greek_script_ranges);
+    try loadNamedScriptData(arena, config.scripts, "Cyrillic", &cyrillic_script_ranges);
+    try loadNamedScriptData(arena, config.scripts, "Common", &common_script_ranges);
+    try loadNamedScriptData(arena, config.scripts, "Inherited", &inherited_script_ranges);
+    try loadNamedScriptData(arena, config.scripts, "Unknown", &unknown_script_ranges);
     try loadGeneralCategoryData(
         arena,
         config.derived_general_category,
@@ -267,6 +292,12 @@ pub fn main() !void {
         xid_start_ranges.items,
         xid_continue_ranges.items,
         default_ignorable_code_point_ranges.items,
+        latin_script_ranges.items,
+        greek_script_ranges.items,
+        cyrillic_script_ranges.items,
+        common_script_ranges.items,
+        inherited_script_ranges.items,
+        unknown_script_ranges.items,
         lowercase_ranges.items,
         uppercase_ranges.items,
         mark_ranges.items,
@@ -317,6 +348,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     const default_prop_list = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "PropList.txt" });
     const default_derived_core_properties = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "DerivedCoreProperties.txt" });
     const default_derived_general_category = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "extracted", "DerivedGeneralCategory.txt" });
+    const default_scripts = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "Scripts.txt" });
 
     var config = Config{
         .zg_root = default_zg_root,
@@ -324,6 +356,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
         .prop_list = default_prop_list,
         .derived_core_properties = default_derived_core_properties,
         .derived_general_category = default_derived_general_category,
+        .scripts = default_scripts,
         .output = "",
     };
 
@@ -338,6 +371,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             config.prop_list = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "PropList.txt" });
             config.derived_core_properties = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "DerivedCoreProperties.txt" });
             config.derived_general_category = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "extracted", "DerivedGeneralCategory.txt" });
+            config.scripts = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "Scripts.txt" });
         } else if (std.mem.eql(u8, arg, "--unicode-data")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -354,6 +388,10 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
             config.derived_general_category = args[i];
+        } else if (std.mem.eql(u8, arg, "--scripts")) {
+            i += 1;
+            if (i >= args.len) return error.MissingArgument;
+            config.scripts = args[i];
         } else if (std.mem.eql(u8, arg, "--output")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -369,6 +407,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     try ensureFileExists(config.prop_list);
     try ensureFileExists(config.derived_core_properties);
     try ensureFileExists(config.derived_general_category);
+    try ensureFileExists(config.scripts);
 
     return config;
 }
@@ -383,14 +422,14 @@ fn hasHelpFlag(args: []const []const u8) bool {
 fn writeUsage() !void {
     std.debug.print(
         \\usage: gen_unicode_props.zig [--zg-root PATH] [--unicode-data PATH] [--prop-list PATH] [--derived-core-properties PATH] --output PATH
-        \\                             [--derived-general-category PATH]
+        \\                             [--derived-general-category PATH] [--scripts PATH]
         \\
         \\Default data source:
         \\  ../zig-libs/zg/data/unicode relative to the zigrep repo root
         \\
         \\Examples:
         \\  zig run tools/gen_unicode_props.zig -- --zg-root ../zig-libs/zg --output src/regex/unicode_props_generated.zig
-        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --derived-general-category /path/to/DerivedGeneralCategory.txt --output src/regex/unicode_props_generated.zig
+        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --derived-general-category /path/to/DerivedGeneralCategory.txt --scripts /path/to/Scripts.txt --output src/regex/unicode_props_generated.zig
         \\
     , .{});
 }
@@ -708,6 +747,44 @@ fn loadGeneralCategoryData(
     }
 }
 
+fn loadNamedScriptData(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    script_name: []const u8,
+    ranges: *std.ArrayList(Range),
+) !void {
+    const bytes = try std.fs.cwd().readFileAlloc(allocator, path, 32 * 1024 * 1024);
+
+    var lines = std.mem.tokenizeScalar(u8, bytes, '\n');
+    while (lines.next()) |line_raw| {
+        const line_trimmed = std.mem.trimRight(u8, line_raw, "\r");
+        const line = if (std.mem.indexOfScalar(u8, line_trimmed, '#')) |index|
+            std.mem.trim(u8, line_trimmed[0..index], " \t")
+        else
+            std.mem.trim(u8, line_trimmed, " \t");
+
+        if (line.len == 0) continue;
+
+        const sep = std.mem.indexOfScalar(u8, line, ';') orelse continue;
+        const lhs = std.mem.trim(u8, line[0..sep], " \t");
+        const rhs = std.mem.trim(u8, line[sep + 1 ..], " \t");
+        if (!std.mem.eql(u8, rhs, script_name)) continue;
+
+        const range = if (std.mem.indexOf(u8, lhs, "..")) |dots|
+            Range{
+                .start = try std.fmt.parseInt(u32, lhs[0..dots], 16),
+                .end = try std.fmt.parseInt(u32, lhs[dots + 2 ..], 16),
+            }
+        else
+            blk: {
+                const cp = try std.fmt.parseInt(u32, lhs, 16);
+                break :blk Range{ .start = cp, .end = cp };
+            };
+
+        try appendMergedRange(allocator, ranges, range);
+    }
+}
+
 fn generalCategoryKind(name: []const u8) ?CategoryKind {
     if (std.mem.eql(u8, name, "Lt")) return .titlecase_letter;
     if (std.mem.eql(u8, name, "Lm")) return .modifier_letter;
@@ -782,6 +859,12 @@ fn writeOutput(
     xid_start_ranges: []const Range,
     xid_continue_ranges: []const Range,
     default_ignorable_code_point_ranges: []const Range,
+    latin_script_ranges: []const Range,
+    greek_script_ranges: []const Range,
+    cyrillic_script_ranges: []const Range,
+    common_script_ranges: []const Range,
+    inherited_script_ranges: []const Range,
+    unknown_script_ranges: []const Range,
     lowercase_ranges: []const Range,
     uppercase_ranges: []const Range,
     mark_ranges: []const Range,
@@ -835,6 +918,7 @@ fn writeOutput(
     try writer.interface.print("// - {s}\n", .{config.prop_list});
     try writer.interface.print("// - {s}\n", .{config.derived_core_properties});
     try writer.interface.print("// - {s}\n", .{config.derived_general_category});
+    try writer.interface.print("// - {s}\n", .{config.scripts});
     try writer.interface.print("// Data source repository:\n", .{});
     try writer.interface.print("// - {s}\n", .{config.zg_root});
     try writer.interface.print("// - https://codeberg.org/atman/zg\n\n", .{});
@@ -864,6 +948,18 @@ fn writeOutput(
     try writeRangeList(&writer.interface, "xid_continue_ranges", xid_continue_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "default_ignorable_code_point_ranges", default_ignorable_code_point_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "latin_script_ranges", latin_script_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "greek_script_ranges", greek_script_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "cyrillic_script_ranges", cyrillic_script_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "common_script_ranges", common_script_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "inherited_script_ranges", inherited_script_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "unknown_script_ranges", unknown_script_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "lowercase_ranges", lowercase_ranges);
     try writer.interface.print("\n", .{});

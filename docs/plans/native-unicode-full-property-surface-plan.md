@@ -111,21 +111,21 @@ This bucket also stays native if each property is just a scalar predicate over
 Script matching is still native-core work if implemented as table lookup over a
  decoded scalar.
 
-- [ ] Decide whether to support:
-  - `Script`
-  - `Script_Extensions`
-  - or `Script` first and `Script_Extensions` later
+- [x] Lock the script-surface decision:
+  - [x] support `Script` in the native engine
+  - [x] defer `Script_Extensions`
+  - [x] keep `scx=` syntax out of scope for the current plan
 
-- [ ] Support syntax only if it stays parser-friendly:
-  - `\p{Greek}`
-  - `\p{Script=Greek}`
-  - `\p{sc=Greek}`
-  - `\p{scx=Greek}` only if `Script_Extensions` is included
+- [x] Support syntax only if it stays parser-friendly:
+  - [x] `\p{Greek}`
+  - [x] `\p{Script=Greek}`
+  - [x] `\p{sc=Greek}`
+  - [x] leave `\p{scx=Greek}` unsupported in this plan
 
-- [ ] Generate script tables from checked-in Unicode data instead of embedding
+- [x] Generate script tables from checked-in Unicode data instead of embedding
   them manually.
 
-- [ ] Keep raw-byte semantics unchanged:
+- [x] Keep raw-byte semantics unchanged:
   - valid scalar => script lookup
   - invalid raw byte => no positive match
   - invalid raw byte => negated match allowed

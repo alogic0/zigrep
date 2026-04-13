@@ -5946,6 +5946,39 @@ test "runCli supports Any and ASCII Unicode properties" {
     try testing.expect(std.mem.containsAtLeast(u8, not_any_run.stdout, 1, "raw.bin:1:1:"));
 }
 
+test "runCli supports initial Script Unicode properties" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "A\n" ++
+            "Ω\n" ++
+            "Ж\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const greek_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Greek}+", root_path });
+    defer greek_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), greek_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, greek_run.stdout, 1, "sample.txt:2:1:Ω"));
+
+    const latin_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Script=Latin}+", root_path });
+    defer latin_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), latin_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, latin_run.stdout, 1, "sample.txt:1:1:A"));
+
+    const cyrillic_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{sc=Cyrl}+", root_path });
+    defer cyrillic_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), cyrillic_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, cyrillic_run.stdout, 1, "sample.txt:3:1:Ж"));
+}
+
 test "runCli supports identifier-style derived Unicode properties" {
     const testing = std.testing;
 
