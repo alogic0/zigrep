@@ -97,6 +97,7 @@ Current escape boundary:
     private-use, and surrogate code points
   - the same property items may also appear inside bracket classes
     - for example `[\p{Letter}\P{Whitespace}]`
+    - this also applies to `Script`, `Any`, and `ASCII` forms
   - accepted aliases currently include:
     - family aliases such as `L`, `N`, `M`, `P`, `S`, `Z`, and `C`
     - subgroup aliases such as `Ll`, `Lu`, `Lt`, `Lm`, `Lo`, `Mn`, `Mc`, `Me`, `Nd`, `Nl`, `No`, `Pc`, `Pd`, `Ps`, `Pe`, `Pi`, `Pf`, `Po`, `Sm`, `Sc`, `Sk`, `So`, `Zs`, `Zl`, `Zp`, `Cc`, `Cf`, `Cs`, `Co`, and `Cn`

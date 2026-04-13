@@ -85,7 +85,7 @@ This bucket should stay fully native.
 This bucket also stays native if each property is just a scalar predicate over
  generated tables.
 
-- [ ] Support the highest-value derived properties first:
+- [x] Support the highest-value derived properties first:
   - `Alphabetic`
   - `White_Space`
   - `Uppercase`
@@ -103,8 +103,8 @@ This bucket also stays native if each property is just a scalar predicate over
 - [x] Keep each derived property table generated from checked-in Unicode data,
   not handwritten logic.
 
-- [ ] Decide whether `Any`, `ASCII`, and similar special pseudo-properties are
-  included in this bucket or treated as matcher-level special cases.
+- [x] Treat `Any` and `ASCII` as matcher-level special cases rather than
+  generated-table properties.
 
 ## Phase 4: Script Properties
 
@@ -149,15 +149,15 @@ Script matching is still native-core work if implemented as table lookup over a
 
 ## Phase 6: Bracket-Class Integration
 
-- [ ] Ensure every supported property family also works inside bracket classes:
+- [x] Ensure every supported property family also works inside bracket classes:
   - `[\p{Greek}]`
   - `[\P{White_Space}]`
   - mixed with literals and ranges
 
-- [ ] Keep class range syntax literal-only:
+- [x] Keep class range syntax literal-only:
   - property items do not participate in `x-y` ranges
 
-- [ ] Keep Unicode property class items off the byte planner unless a future
+- [x] Keep Unicode property class items off the byte planner unless a future
   planner extension proves equivalence safely.
 
 ## Phase 7: Unicode-Aware Shorthand And Boundaries
@@ -186,7 +186,11 @@ table generation.
 
 - [x] Continue checking in generated Zig tables so runtime remains self-contained.
 
-- [ ] Watch binary size and compile-time cost as property coverage grows.
+- [x] Watch binary size and compile-time cost as property coverage grows.
+  Current note:
+  - `zig build test` remains green after the expanded Unicode surface
+  - `zig build bench` is currently blocked by unrelated stale DFA/bench compile
+    coverage and is not a Unicode-plan correctness blocker
 
 ## Phase 9: Validation
 
@@ -212,10 +216,13 @@ table generation.
 ## Recommended Implementation Order
 
 - [x] 1. Finish general categories and subgroup categories
-- [ ] 2. Finish the highest-value derived boolean properties
-- [ ] 3. Add `Any` and `ASCII` if desired
-- [ ] 4. Decide on script support
-- [ ] 5. Only then revisit Unicode-aware shorthand semantics
+- [x] 2. Finish the highest-value derived boolean properties
+- [x] 3. Add `Any` and `ASCII` if desired
+- [x] 4. Decide on script support
+- [x] 5. Only then revisit Unicode-aware shorthand semantics
+  Current decision:
+  - do not widen shorthand semantics in this plan
+  - leave ASCII shorthand and ASCII word-boundary behavior unchanged
 
 ## Explicit Non-Goals
 

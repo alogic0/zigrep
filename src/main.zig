@@ -6154,6 +6154,7 @@ test "runCli supports Unicode property items inside character classes" {
         .sub_path = "sample.txt",
         .data =
             "ж7\n" ++
+            "ΩΣ\n" ++
             " \n",
     });
 
@@ -6165,6 +6166,11 @@ test "runCli supports Unicode property items inside character classes" {
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:ж7"));
+
+    const script_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "[\\p{Greek}\\p{Uppercase}]+", root_path });
+    defer script_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), script_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, script_run.stdout, 1, "sample.txt:2:1:ΩΣ"));
 }
 
 test "runCli rejects unsupported Unicode properties" {

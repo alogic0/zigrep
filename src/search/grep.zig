@@ -2221,6 +2221,18 @@ test "Searcher handles Unicode property items inside character classes" {
     const raw_report = (try searcher.reportFirstByteMatch("raw.bin", "\xffж7")).?;
     defer raw_report.deinit(testing.allocator);
     try testing.expectEqual(Span{ .start = 0, .end = 4 }, raw_report.match_span);
+
+    var script_class = try Searcher.init(testing.allocator, "[\\p{Greek}\\p{ASCII}]+", .{});
+    defer script_class.deinit();
+    try testing.expect(!script_class.hasBytePlan());
+    try testing.expect((try script_class.reportFirstMatch("sample.txt", "ΩA")) != null);
+
+    var any_class = try Searcher.init(testing.allocator, "[\\p{Any}\\P{Whitespace}]+", .{});
+    defer any_class.deinit();
+    try testing.expect(!any_class.hasBytePlan());
+    const raw_any_report = (try any_class.reportFirstByteMatch("raw.bin", "\xffA")).?;
+    defer raw_any_report.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 0, .end = 2 }, raw_any_report.match_span);
 }
 
 test "Searcher forEachMatchReport advances across repeated multiline matches" {
