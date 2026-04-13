@@ -11,6 +11,7 @@ pub const search_filtering = @import("search_filtering.zig");
 pub const search_result = @import("search_result.zig");
 pub const search_parallel = @import("search_parallel.zig");
 pub const search_entry_runner = @import("search_entry_runner.zig");
+pub const search_path_runner = @import("search_path_runner.zig");
 pub const command = @import("command.zig");
 pub const cli = @import("cli.zig");
 pub const cli_entry = @import("cli_entry.zig");
