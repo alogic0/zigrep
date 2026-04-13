@@ -1,6 +1,5 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
-const runner = zigrep.search_runner;
 const cli_test_support = @import("cli_test_support.zig");
 const search_reporting = zigrep.search_reporting;
 
