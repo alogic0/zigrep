@@ -763,10 +763,22 @@ test "VM handles word boundaries on UTF-8 and raw-byte haystacks" {
     const not_word_boundary = try compileProgram(testing.allocator, "\\Bcat\\B", .{});
     defer not_word_boundary.deinit(testing.allocator);
 
+    const unicode_word_boundary = try compileProgram(testing.allocator, "\\bЖβ\\b", .{});
+    defer unicode_word_boundary.deinit(testing.allocator);
+
+    const combining_word_boundary = try compileProgram(testing.allocator, "\\bβ\xCD\x85\\b", .{});
+    defer combining_word_boundary.deinit(testing.allocator);
+
+    const unicode_not_word_boundary = try compileProgram(testing.allocator, "\\BЖβ\\B", .{});
+    defer unicode_not_word_boundary.deinit(testing.allocator);
+
     var engine = MatchEngine.init(testing.allocator);
     try testing.expect(try engine.isMatch(word_boundary, "a cat!"));
     try testing.expect(!(try engine.isMatch(word_boundary, "scatter")));
     try testing.expect(try engine.isMatch(not_word_boundary, "scatter"));
+    try testing.expect(try engine.isMatch(unicode_word_boundary, "Жβ"));
+    try testing.expect(try engine.isMatch(combining_word_boundary, "β\xCD\x85"));
+    try testing.expect(!(try engine.isMatch(unicode_not_word_boundary, "Жβ")));
 
     const raw = (try engine.firstMatchBytes(word_boundary, "\xffcat\xff")).?;
     defer raw.deinit(testing.allocator);

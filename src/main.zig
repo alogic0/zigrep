@@ -5802,7 +5802,9 @@ test "runCli supports word boundaries on UTF-8 and raw-byte inputs" {
         .sub_path = "sample.txt",
         .data =
             "a cat!\n" ++
-            "scatter\n",
+            "scatter\n" ++
+            "Жβ\n" ++
+            "β\xCD\x85\n",
     });
     try tmp.dir.writeFile(.{
         .sub_path = "raw.bin",
@@ -5823,6 +5825,16 @@ test "runCli supports word boundaries on UTF-8 and raw-byte inputs" {
     defer not_word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), not_word_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "sample.txt:2:2:scatter"));
+
+    const unicode_word_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\bЖβ\\b", root_path });
+    defer unicode_word_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), unicode_word_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, unicode_word_run.stdout, 1, "sample.txt:3:1:Жβ"));
+
+    const combining_word_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\bβ\xCD\x85\\b", root_path });
+    defer combining_word_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), combining_word_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, combining_word_run.stdout, 1, "sample.txt:4:1:β\xCD\x85"));
 }
 
 test "runCli supports non-capturing groups" {

@@ -147,10 +147,10 @@ The raw-byte behavior remains explicit:
 
 ## Phase 5: Unicode-Aware `\b` And `\B`
 
-- [ ] Change boundary evaluation so `\b` / `\B` use the Unicode word-character
+- [x] Change boundary evaluation so `\b` / `\B` use the Unicode word-character
   predicate instead of ASCII wordness
 
-- [ ] Add UTF-8 and raw-byte regressions for:
+- [x] Add UTF-8 and raw-byte regressions for:
   - single-word non-ASCII lines
   - boundaries around mixed-script text
   - boundaries near combining marks
@@ -195,7 +195,7 @@ The raw-byte behavior remains explicit:
 - [ ] 1. Lock the exact semantic mapping for `\d`, `\s`, and `\w`
 - [ ] 2. Implement Unicode-aware `\d` and `\s`
 - [x] 3. Implement Unicode-aware `\w`
-- [ ] 4. Implement Unicode-aware `\b` / `\B`
+- [x] 4. Implement Unicode-aware `\b` / `\B`
 - [ ] 5. Update docs and migration notes
 - [ ] 6. Reconfirm raw-byte and planner boundaries
 

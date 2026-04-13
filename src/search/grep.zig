@@ -2092,6 +2092,18 @@ test "Searcher handles word boundaries in UTF-8 and raw-byte paths" {
     var not_word = try Searcher.init(testing.allocator, "\\Bcat\\B", .{});
     defer not_word.deinit();
     try testing.expect((try not_word.reportFirstMatch("sample.txt", "scatter")) != null);
+
+    var unicode_word = try Searcher.init(testing.allocator, "\\bЖβ\\b", .{});
+    defer unicode_word.deinit();
+    try testing.expect((try unicode_word.reportFirstMatch("sample.txt", "Жβ")) != null);
+
+    var combining_word = try Searcher.init(testing.allocator, "\\bβ\xCD\x85\\b", .{});
+    defer combining_word.deinit();
+    try testing.expect((try combining_word.reportFirstMatch("sample.txt", "β\xCD\x85")) != null);
+
+    var unicode_not_word = try Searcher.init(testing.allocator, "\\BЖβ\\B", .{});
+    defer unicode_not_word.deinit();
+    try testing.expect((try unicode_not_word.reportFirstMatch("sample.txt", "Жβ")) == null);
 }
 
 test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {

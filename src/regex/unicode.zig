@@ -148,7 +148,7 @@ pub const Strategy = struct {
     }
 
     pub fn isWord(cp: u32) bool {
-        return cp <= 0x7f and (std.ascii.isAlphanumeric(@intCast(cp)) or cp == '_');
+        return isUnicodeWord(cp);
     }
 
     pub fn isUnicodeDigit(cp: u32) bool {
@@ -530,9 +530,11 @@ test "Unicode strategy classifies properties and boundaries" {
     try testing.expectEqual(GeneralCategory.number, Strategy.category('9'));
     try testing.expectEqual(GeneralCategory.whitespace, Strategy.category(' '));
     try testing.expect(Strategy.isWord('_'));
+    try testing.expect(Strategy.isWord('Ж'));
     try testing.expect(!Strategy.isWord('-'));
 
     try testing.expect(Strategy.boundary('a', '-', .word));
+    try testing.expect(Strategy.boundary('Ж', '-', .word));
     try testing.expect(Strategy.boundary(null, 'x', .word));
     try testing.expect(Strategy.boundary('\n', 'x', .line));
     try testing.expect(!Strategy.boundary('a', 'b', .word));
@@ -729,14 +731,23 @@ test "Unicode strategy evaluates boundaries at byte offsets" {
     const line_break_offset = "éclair x".len;
     const beta_offset = "éclair x\n".len;
 
-    try testing.expect(!(try Strategy.boundaryAt(text, 0, .word)));
-    try testing.expect(try Strategy.boundaryAt(text, e_accent_end, .word));
+    try testing.expect(try Strategy.boundaryAt(text, 0, .word));
+    try testing.expect(!(try Strategy.boundaryAt(text, e_accent_end, .word)));
     try testing.expect(try Strategy.boundaryAt(text, space_offset, .word));
     try testing.expect(try Strategy.boundaryAt(text, line_break_offset, .line));
     try testing.expect(try Strategy.lineStart(text, 0));
     try testing.expect(!(try Strategy.lineStart(text, space_offset)));
     try testing.expect(try Strategy.lineStart(text, beta_offset));
     try testing.expect(try Strategy.lineEnd(text, line_break_offset));
+}
+
+test "Unicode strategy treats combining-mark sequences as word boundaries" {
+    const testing = std.testing;
+
+    const text = "β\xCD\x85 ";
+    try testing.expect(try Strategy.boundaryAt(text, 0, .word));
+    try testing.expect(!(try Strategy.boundaryAt(text, "β".len, .word)));
+    try testing.expect(try Strategy.boundaryAt(text, "β\xCD\x85".len, .word));
 }
 
 test "Unicode strategy rejects invalid boundary offsets inside UTF-8 scalars" {

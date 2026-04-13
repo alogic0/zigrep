@@ -60,11 +60,10 @@ Current escape boundary:
   - `\s` and `\S` use Unicode whitespace semantics
   - in normal non-multiline search, `\s` does not match `\n`
 - word boundaries `\b` and `\B` are supported
-  - boundary checks use ASCII wordness (`[A-Za-z0-9_]`) on valid text units
+  - boundary checks use the same Unicode word-character predicate as `\w`
   - invalid bytes on the raw-byte path are treated as non-word units
 - shorthand and word-boundary migration note:
   - the current release is mid-migration toward Unicode-aware shorthand defaults
-  - `\b` and `\B` still use ASCII word semantics today
   - explicit ASCII regexes such as `[0-9]` and `[A-Za-z0-9_]` remain the stable way to request ASCII-only behavior
 - Unicode property escapes are supported for:
   - `\p{Any}` and `\P{Any}`
