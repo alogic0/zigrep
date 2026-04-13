@@ -90,46 +90,48 @@ The next target properties are:
 
 ## Phase 4: Engine Validation
 
-- [ ] Add Unicode helper tests for:
+- [x] Add Unicode helper tests for:
   - property lookup
   - positive membership
   - negative membership
 
-- [ ] Add search-layer tests for:
+- [x] Add search-layer tests for:
   - top-level property escapes
   - bracket-class property items
   - raw-byte invalid-byte behavior
 
-- [ ] Add CLI tests for:
+- [x] Add CLI tests for:
   - one representative match for each new property
   - one representative negated-property case
 
-- [ ] Reconfirm planner boundary behavior:
+- [x] Reconfirm planner boundary behavior:
   - property-containing patterns still stay off the byte planner
   - they continue through the general raw-byte VM path
 
 ## Phase 5: Documentation
 
-- [ ] Update [docs/supported-syntax.md](../supported-syntax.md) with:
+- [x] Update [docs/supported-syntax.md](../supported-syntax.md) with:
   - the new property names
   - their aliases
   - unchanged raw-byte semantics
 
-- [ ] Update
+- [x] Update
   [docs/unicode-data-generation.md](../unicode-data-generation.md)
   only if the generator inputs or workflow change
 
 ## Recommended Order
 
-- [ ] 1. Add generated tables first
-- [ ] 2. Wire lookup and matching second
-- [ ] 3. Add tests before broadening aliases further
-- [ ] 4. Update docs last
+- [x] 1. Add generated tables first
+- [x] 2. Wire lookup and matching second
+- [x] 3. Add tests before broadening aliases further
+- [x] 4. Update docs last
 
 ## Explicit Non-Goals
 
-- [ ] Do not add Unicode properties unrelated to general-category-style sets in
+The following are scope constraints for this plan, not pending tasks:
+
+- do not add Unicode properties unrelated to general-category-style sets in
   this plan
-- [ ] Do not widen ASCII shorthand classes
-- [ ] Do not add a fallback engine
-- [ ] Do not teach the byte planner Unicode property execution
+- do not widen ASCII shorthand classes
+- do not add a fallback engine
+- do not teach the byte planner Unicode property execution
