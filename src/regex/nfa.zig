@@ -29,6 +29,14 @@ pub const Inst = union(enum) {
         items: []const hir_mod.ClassItem,
         out: ?InstPtr = null,
     },
+    char_class_set: struct {
+        lhs_negated: bool,
+        lhs_items: []const hir_mod.ClassItem,
+        rhs_negated: bool,
+        rhs_items: []const hir_mod.ClassItem,
+        op: hir_mod.ClassSetOp,
+        out: ?InstPtr = null,
+    },
     any: struct {
         out: ?InstPtr = null,
     },
@@ -66,6 +74,11 @@ pub const Inst = union(enum) {
     match,
 };
 
+const RuntimeClass = struct {
+    negated: bool,
+    items: []const hir_mod.ClassItem,
+};
+
 pub const Program = struct {
     instructions: []Inst,
     start: InstPtr,
@@ -82,6 +95,10 @@ pub const Program = struct {
         for (self.instructions) |inst| {
             switch (inst) {
                 .char_class => |class| allocator.free(class.items),
+                .char_class_set => |class_set| {
+                    allocator.free(class_set.lhs_items);
+                    allocator.free(class_set.rhs_items);
+                },
                 else => {},
             }
         }
@@ -158,6 +175,7 @@ fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, multil
         .literal => |cp| cp == '\n',
         .dot => dotall,
         .char_class => |class| classCanMatchNewline(class, multiline),
+        .char_class_set => |class_set| classSetCanMatchNewline(class_set, multiline),
         .group => |group| hirCanMatchNewline(compiled_hir, group.child, multiline, dotall),
         .concat => |children| blk: {
             for (children) |child| {
@@ -181,6 +199,17 @@ fn hirCanMatchNewline(compiled_hir: hir_mod.Hir, node_id: hir_mod.NodeId, multil
 fn classCanMatchNewline(class: hir_mod.CharacterClass, multiline: bool) bool {
     if (class.negated) return false;
     return classContainsCodePoint(class.items, '\n', multiline);
+}
+
+fn classSetCanMatchNewline(class_set: hir_mod.CharacterClassSet, multiline: bool) bool {
+    const lhs = hir_mod.CharacterClass{ .negated = class_set.lhs.negated, .items = class_set.lhs.items };
+    const rhs = hir_mod.CharacterClass{ .negated = class_set.rhs.negated, .items = class_set.rhs.items };
+    const lhs_matches = classCanMatchNewline(lhs, multiline);
+    const rhs_matches = classCanMatchNewline(rhs, multiline);
+    return switch (class_set.op) {
+        .intersection => lhs_matches and rhs_matches,
+        .subtraction => lhs_matches and !rhs_matches,
+    };
 }
 
 fn classContainsCodePoint(items: []const hir_mod.ClassItem, cp: u32, multiline: bool) bool {
@@ -219,6 +248,7 @@ fn isAsciiOnly(instructions: []const Inst) bool {
                     }
                 }
             },
+            .char_class_set => return false,
             else => {},
         }
     }
@@ -262,6 +292,7 @@ const Compiler = struct {
             .word_boundary_end_half => |boundary| self.compileWordBoundaryEndHalf(boundary.ascii_only),
             .unicode_property => |property| self.compileUnicodeProperty(property.property, property.negated),
             .char_class => |class| self.compileClass(class),
+            .char_class_set => |class_set| self.compileClassSet(class_set),
             .group => |group| self.compileGroup(compiled_hir, group.index, group.child),
             .concat => |children| self.compileConcat(compiled_hir, children),
             .alternation => |branches| self.compileAlternation(compiled_hir, branches),
@@ -353,6 +384,27 @@ const Compiler = struct {
         const index = try self.emit(.{ .char_class = .{
             .negated = class.negated,
             .items = items,
+        } });
+        var outs: std.ArrayList(PatchRef) = .empty;
+        try outs.append(self.allocator, .{ .inst = index, .slot = .out });
+        return .{ .start = index, .outs = outs };
+    }
+
+    fn compileClassSet(self: *Compiler, class_set: hir_mod.CharacterClassSet) CompileError!Fragment {
+        const lhs_items = try self.allocator.alloc(hir_mod.ClassItem, class_set.lhs.items.len);
+        errdefer self.allocator.free(lhs_items);
+        @memcpy(lhs_items, class_set.lhs.items);
+
+        const rhs_items = try self.allocator.alloc(hir_mod.ClassItem, class_set.rhs.items.len);
+        errdefer self.allocator.free(rhs_items);
+        @memcpy(rhs_items, class_set.rhs.items);
+
+        const index = try self.emit(.{ .char_class_set = .{
+            .lhs_negated = class_set.lhs.negated,
+            .lhs_items = lhs_items,
+            .rhs_negated = class_set.rhs.negated,
+            .rhs_items = rhs_items,
+            .op = class_set.op,
         } });
         var outs: std.ArrayList(PatchRef) = .empty;
         try outs.append(self.allocator, .{ .inst = index, .slot = .out });
@@ -526,6 +578,7 @@ const Compiler = struct {
                 .save => |*save| save.out = target,
                 .literal => |*literal| literal.out = target,
                 .char_class => |*class| class.out = target,
+                .char_class_set => |*class_set| class_set.out = target,
                 .any => |*any| any.out = target,
                 .anchor_start => |*anchor| anchor.out = target,
                 .anchor_end => |*anchor| anchor.out = target,

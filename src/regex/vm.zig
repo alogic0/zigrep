@@ -37,6 +37,11 @@ const TextUnit = struct {
     }
 };
 
+const RuntimeClass = struct {
+    negated: bool,
+    items: []const @import("hir.zig").ClassItem,
+};
+
 pub const MatchEngine = struct {
     allocator: std.mem.Allocator,
 
@@ -210,6 +215,10 @@ pub const MatchEngine = struct {
                 if (!classMatches(class, cp, program)) return null;
                 return self.addThread(program, haystack, list, visited, class.out.?, thread.slots, next_pos);
             },
+            .char_class_set => |class_set| {
+                if (!classSetMatches(class_set, cp, program)) return null;
+                return self.addThread(program, haystack, list, visited, class_set.out.?, thread.slots, next_pos);
+            },
             .unicode_property => |property| {
                 const matched = unicodePropertyMatches(program, property.property, cp);
                 if (property.negated == matched) return null;
@@ -240,6 +249,10 @@ pub const MatchEngine = struct {
             .char_class => |class| {
                 if (!textUnitMatchesClass(class, unit, program)) return null;
                 return self.addThread(program, haystack, list, visited, class.out.?, thread.slots, unit.end);
+            },
+            .char_class_set => |class_set| {
+                if (!textUnitMatchesClassSet(class_set, unit, program)) return null;
+                return self.addThread(program, haystack, list, visited, class_set.out.?, thread.slots, unit.end);
             },
             .unicode_property => |property| {
                 if (!textUnitMatchesUnicodeProperty(property.property, property.negated, unit, program)) return null;
@@ -307,7 +320,7 @@ pub const MatchEngine = struct {
                 return self.addThread(program, haystack, list, visited, boundary.out.?, slots, pos);
             },
             .match => return try self.buildMatch(program, slots),
-            .literal, .char_class, .unicode_property, .any => {
+            .literal, .char_class, .char_class_set, .unicode_property, .any => {
                 if (!hasThread(list.items, inst_ptr)) {
                     try list.append(self.allocator, .{
                         .inst_ptr = inst_ptr,
@@ -412,6 +425,28 @@ fn textUnitMatchesClass(class: anytype, unit: TextUnit, program: nfa.Program) bo
         return class.negated;
     }
     return classMatches(class, unit.scalar.?, program);
+}
+
+fn classSetMatches(class_set: anytype, cp: u32, program: nfa.Program) bool {
+    const lhs = RuntimeClass{ .negated = class_set.lhs_negated, .items = class_set.lhs_items };
+    const rhs = RuntimeClass{ .negated = class_set.rhs_negated, .items = class_set.rhs_items };
+    const lhs_matched = classMatches(lhs, cp, program);
+    const rhs_matched = classMatches(rhs, cp, program);
+    return switch (class_set.op) {
+        .intersection => lhs_matched and rhs_matched,
+        .subtraction => lhs_matched and !rhs_matched,
+    };
+}
+
+fn textUnitMatchesClassSet(class_set: anytype, unit: TextUnit, program: nfa.Program) bool {
+    const lhs = RuntimeClass{ .negated = class_set.lhs_negated, .items = class_set.lhs_items };
+    const rhs = RuntimeClass{ .negated = class_set.rhs_negated, .items = class_set.rhs_items };
+    const lhs_matched = textUnitMatchesClass(lhs, unit, program);
+    const rhs_matched = textUnitMatchesClass(rhs, unit, program);
+    return switch (class_set.op) {
+        .intersection => lhs_matched and rhs_matched,
+        .subtraction => lhs_matched and !rhs_matched,
+    };
 }
 
 fn textUnitMatchesUnicodeProperty(property: unicode.Property, negated: bool, unit: TextUnit, program: nfa.Program) bool {
@@ -892,6 +927,13 @@ test "VM handles half-word boundaries" {
     try expectMatch("\\b{start-half}-2\\b{end-half}", "(-2)");
     try expectMatch("(?-u:\\b{start-half}A\\b{end-half})", "!A!");
     try expectNoMatch("(?-u:\\b{start-half}Ж\\b{end-half})", "!Ж!");
+}
+
+test "VM handles class-set subtraction and intersection" {
+    try expectMatch("[\\w--\\p{ASCII}]+", "Ж");
+    try expectNoMatch("[\\w--\\p{ASCII}]+", "A");
+    try expectMatch("[\\p{Greek}&&\\p{Uppercase}]+", "Ω");
+    try expectNoMatch("[\\p{Greek}&&\\p{Uppercase}]+", "ω");
 }
 
 test "VM handles empty alternation branches and anchor-only patterns" {

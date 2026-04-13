@@ -115,21 +115,28 @@ Implementation order for this plan:
 
 ## Phase 4: Class Set Operations
 
-- [ ] Confirm the exact local `ripgrep` surface to target first:
+- [x] Confirm the exact local `ripgrep` surface to target first:
   - subtraction
   - intersection
   - nested set expressions
+  - current result:
+    - local `ripgrep` supports subtraction like `[\w--\p{ascii}]`
+    - local `ripgrep` supports intersection like `[\p{Greek}&&\p{Uppercase}]`
+    - nested set expressions remain deferred in this slice
 
-- [ ] Decide the smallest native-core subset worth implementing first
+- [x] Decide the smallest native-core subset worth implementing first
+  - current result:
+    - support one top-level subtraction or intersection inside a bracket class
+    - defer nested set expressions to a follow-up slice
 
-- [ ] Extend the parser with explicit class-set AST forms
+- [x] Extend the parser with explicit class-set AST forms
 
-- [ ] Lower class-set operations into a native matcher representation that
+- [x] Lower class-set operations into a native matcher representation that
   preserves Unicode property items and folded ranges
 
-- [ ] Keep planner support out of scope until VM semantics are proven
+- [x] Keep planner support out of scope until VM semantics are proven
 
-- [ ] Add search-layer and CLI regressions for representative set expressions
+- [x] Add search-layer and CLI regressions for representative set expressions
 
 ## Phase 5: Remaining Property-Surface Review
 
@@ -155,7 +162,7 @@ Implementation order for this plan:
 - [x] 1. Land `Script_Extensions`
 - [x] 2. Land inline Unicode mode toggles
 - [x] 3. Land half-boundaries
-- [ ] 4. Decide and land the smallest useful class-set subset
+- [x] 4. Decide and land the smallest useful class-set subset
 - [ ] 5. Re-evaluate remaining property-surface gaps
 
 ## Explicit Non-Goals

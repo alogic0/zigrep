@@ -31,6 +31,11 @@ pub const CharacterClass = struct {
     items: []const ClassItem,
 };
 
+pub const ClassSetOp = enum {
+    subtraction,
+    intersection,
+};
+
 pub const Node = union(enum) {
     empty,
     literal: u32,
@@ -54,6 +59,11 @@ pub const Node = union(enum) {
         negated: bool,
     },
     char_class: CharacterClass,
+    char_class_set: struct {
+        lhs: CharacterClass,
+        rhs: CharacterClass,
+        op: ClassSetOp,
+    },
     group: struct {
         index: u32,
         child: NodeId,
@@ -77,6 +87,10 @@ pub const Ast = struct {
                 .concat => |children| allocator.free(children),
                 .alternation => |branches| allocator.free(branches),
                 .char_class => |class| allocator.free(class.items),
+                .char_class_set => |class_set| {
+                    allocator.free(class_set.lhs.items);
+                    allocator.free(class_set.rhs.items);
+                },
                 else => {},
             }
         }
@@ -105,6 +119,7 @@ pub const Parser = struct {
     allocator: std.mem.Allocator,
     lexer: lexer_mod.Lexer(u8),
     lookahead: lexer_mod.SpannedToken,
+    lookahead2: lexer_mod.SpannedToken,
     nodes: std.ArrayList(Node),
     last_error: ?ParseDiagnostic,
     capture_count: u32,
@@ -113,11 +128,13 @@ pub const Parser = struct {
     pub fn init(allocator: std.mem.Allocator, pattern: []const u8) ParseError!Parser {
         var lex = lexer_mod.Lexer(u8).init(pattern);
         const first = try lex.nextSpanned();
+        const second = try lex.nextSpanned();
 
         return .{
             .allocator = allocator,
             .lexer = lex,
             .lookahead = first,
+            .lookahead2 = second,
             .nodes = .empty,
             .last_error = null,
             .capture_count = 0,
@@ -146,7 +163,8 @@ pub const Parser = struct {
     }
 
     fn advance(self: *Parser) ParseError!void {
-        self.lookahead = try self.lexer.nextSpanned();
+        self.lookahead = self.lookahead2;
+        self.lookahead2 = try self.lexer.nextSpanned();
     }
 
     fn parseAlternation(self: *Parser) ParseError!NodeId {
@@ -437,9 +455,6 @@ pub const Parser = struct {
     }
 
     fn parseClass(self: *Parser) ParseError!NodeId {
-        var items: std.ArrayList(ClassItem) = .empty;
-        defer items.deinit(self.allocator);
-
         try self.advance();
 
         var negated = false;
@@ -448,37 +463,32 @@ pub const Parser = struct {
             try self.advance();
         }
 
-        var first = true;
-        while (self.lookahead.token != .eof and self.lookahead.token != .r_bracket) {
-            const start = try self.parseClassAtom(first);
-            first = false;
+        const lhs_items = try self.parseClassItems();
+        errdefer self.allocator.free(lhs_items);
 
-            if (self.lookahead.token == .hyphen) {
-                try self.advance();
-                if (self.lookahead.token == .r_bracket) {
-                    try items.append(self.allocator, start);
-                    try items.append(self.allocator, .{ .literal = '-' });
-                    break;
-                }
+        if (lhs_items.len == 0) return error.EmptyClass;
 
-                const range_end = try self.parseClassAtom(false);
-                const start_literal = classItemToLiteral(start) orelse return error.InvalidClassRange;
-                const end_literal = classItemToLiteral(range_end) orelse return error.InvalidClassRange;
-                if (end_literal < start_literal) return error.InvalidClassRange;
-                try items.append(self.allocator, .{ .range = .{ .start = start_literal, .end = end_literal } });
-                continue;
-            }
-
-            try items.append(self.allocator, start);
+        if (classSetOperatorAhead(self)) {
+            if (negated) return error.UnexpectedToken;
+            const op = try self.parseClassSetOperator();
+            const rhs_items = try self.parseClassItems();
+            errdefer self.allocator.free(rhs_items);
+            if (rhs_items.len == 0) return error.EmptyClass;
+            if (self.lookahead.token != .r_bracket) return error.UnterminatedClass;
+            try self.advance();
+            return self.push(.{ .char_class_set = .{
+                .lhs = .{ .negated = false, .items = lhs_items },
+                .rhs = .{ .negated = false, .items = rhs_items },
+                .op = op,
+            } });
         }
 
         if (self.lookahead.token != .r_bracket) return error.UnterminatedClass;
-        if (items.items.len == 0) return error.EmptyClass;
         try self.advance();
 
         return self.push(.{ .char_class = .{
             .negated = negated,
-            .items = try items.toOwnedSlice(self.allocator),
+            .items = lhs_items,
         } });
     }
 
@@ -487,6 +497,54 @@ pub const Parser = struct {
             .literal => |cp| {
                 try self.advance();
                 return .{ .literal = cp };
+            },
+            .digit_class => {
+                if (!self.unicode_mode) return error.UnsupportedGroup;
+                try self.advance();
+                return .{ .unicode_property = .{
+                    .property = .decimal_number,
+                    .negated = false,
+                } };
+            },
+            .not_digit_class => {
+                if (!self.unicode_mode) return error.UnsupportedGroup;
+                try self.advance();
+                return .{ .unicode_property = .{
+                    .property = .decimal_number,
+                    .negated = true,
+                } };
+            },
+            .word_class => {
+                if (!self.unicode_mode) return error.UnsupportedGroup;
+                try self.advance();
+                return .{ .unicode_property = .{
+                    .property = .shorthand_word,
+                    .negated = false,
+                } };
+            },
+            .not_word_class => {
+                if (!self.unicode_mode) return error.UnsupportedGroup;
+                try self.advance();
+                return .{ .unicode_property = .{
+                    .property = .shorthand_word,
+                    .negated = true,
+                } };
+            },
+            .space_class => {
+                if (!self.unicode_mode) return error.UnsupportedGroup;
+                try self.advance();
+                return .{ .unicode_property = .{
+                    .property = .shorthand_whitespace,
+                    .negated = false,
+                } };
+            },
+            .not_space_class => {
+                if (!self.unicode_mode) return error.UnsupportedGroup;
+                try self.advance();
+                return .{ .unicode_property = .{
+                    .property = .shorthand_whitespace,
+                    .negated = true,
+                } };
             },
             .hyphen => {
                 try self.advance();
@@ -517,6 +575,39 @@ pub const Parser = struct {
             .literal => |cp| cp,
             else => null,
         };
+    }
+
+    fn parseClassItems(self: *Parser) ParseError![]const ClassItem {
+        var items: std.ArrayList(ClassItem) = .empty;
+        defer items.deinit(self.allocator);
+
+        var first = true;
+        while (self.lookahead.token != .eof and self.lookahead.token != .r_bracket) {
+            if (!first and classSetOperatorAhead(self)) break;
+
+            const start = try self.parseClassAtom(first);
+            first = false;
+
+            if (self.lookahead.token == .hyphen and self.lookahead2.token != .hyphen) {
+                try self.advance();
+                if (self.lookahead.token == .r_bracket) {
+                    try items.append(self.allocator, start);
+                    try items.append(self.allocator, .{ .literal = '-' });
+                    break;
+                }
+
+                const range_end = try self.parseClassAtom(false);
+                const start_literal = classItemToLiteral(start) orelse return error.InvalidClassRange;
+                const end_literal = classItemToLiteral(range_end) orelse return error.InvalidClassRange;
+                if (end_literal < start_literal) return error.InvalidClassRange;
+                try items.append(self.allocator, .{ .range = .{ .start = start_literal, .end = end_literal } });
+                continue;
+            }
+
+            try items.append(self.allocator, start);
+        }
+
+        return try items.toOwnedSlice(self.allocator);
     }
 
     fn canStartPrimary(self: *const Parser) bool {
@@ -551,6 +642,20 @@ pub const Parser = struct {
     fn push(self: *Parser, node: Node) !NodeId {
         try self.nodes.append(self.allocator, node);
         return @enumFromInt(self.nodes.items.len - 1);
+    }
+
+    fn parseClassSetOperator(self: *Parser) ParseError!ClassSetOp {
+        if (self.lookahead.token == .hyphen and self.lookahead2.token == .hyphen) {
+            try self.advance();
+            try self.advance();
+            return .subtraction;
+        }
+        if (isAmpersandToken(self.lookahead) and isAmpersandToken(self.lookahead2)) {
+            try self.advance();
+            try self.advance();
+            return .intersection;
+        }
+        return error.UnexpectedToken;
     }
 
     fn parseHalfBoundary(self: *Parser) ParseError!NodeId {
@@ -593,6 +698,18 @@ pub const Parser = struct {
         return self.fail(error.UnexpectedToken, end_span);
     }
 };
+
+fn classSetOperatorAhead(self: *const Parser) bool {
+    return (self.lookahead.token == .hyphen and self.lookahead2.token == .hyphen) or
+        (isAmpersandToken(self.lookahead) and isAmpersandToken(self.lookahead2));
+}
+
+fn isAmpersandToken(token: lexer_mod.SpannedToken) bool {
+    return switch (token.token) {
+        .literal => |cp| cp == '&',
+        else => false,
+    };
+}
 
 fn asciiDigitClass(self: *Parser, negated: bool) ParseError!CharacterClass {
     const items = try self.allocator.alloc(ClassItem, 1);
@@ -948,6 +1065,22 @@ test "Parser supports half-word-boundary escapes" {
     try testing.expectEqual(.word_boundary_end_half, std.meta.activeTag(ast.nodes[@intFromEnum(root[4])]));
     try testing.expect(!ast.nodes[@intFromEnum(root[0])].word_boundary_start_half.ascii_only);
     try testing.expect(!ast.nodes[@intFromEnum(root[4])].word_boundary_end_half.ascii_only);
+}
+
+test "Parser supports basic class-set operators" {
+    const testing = std.testing;
+
+    var subtraction = try Parser.init(testing.allocator, "[\\w--\\p{ASCII}]");
+    const subtraction_ast = try subtraction.parse();
+    defer subtraction_ast.deinit(testing.allocator);
+    try testing.expectEqual(.char_class_set, std.meta.activeTag(subtraction_ast.nodes[@intFromEnum(subtraction_ast.root)]));
+    try testing.expectEqual(.subtraction, subtraction_ast.nodes[@intFromEnum(subtraction_ast.root)].char_class_set.op);
+
+    var intersection = try Parser.init(testing.allocator, "[\\p{Greek}&&\\p{Uppercase}]");
+    const intersection_ast = try intersection.parse();
+    defer intersection_ast.deinit(testing.allocator);
+    try testing.expectEqual(.char_class_set, std.meta.activeTag(intersection_ast.nodes[@intFromEnum(intersection_ast.root)]));
+    try testing.expectEqual(.intersection, intersection_ast.nodes[@intFromEnum(intersection_ast.root)].char_class_set.op);
 }
 
 test "Parser decodes Unicode literal escapes as literals" {

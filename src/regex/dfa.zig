@@ -128,6 +128,13 @@ pub const Cache = struct {
                         }
                     }
                 },
+                .char_class_set => |class_set| {
+                    if (classSetMatches(class_set, cp, self.program.*)) {
+                        if (try self.addEpsilonClosure(&builder, visited, class_set.out.?, next_pos, input_len, &matched)) {
+                            matched = true;
+                        }
+                    }
+                },
                 .unicode_property => |property| {
                     const matched_property = unicode.Strategy.hasProperty(cp, property.property);
                     if (property.negated != matched_property) {
@@ -189,7 +196,7 @@ pub const Cache = struct {
                 matched.* = true;
                 return true;
             },
-            .literal, .char_class, .unicode_property, .any => {
+            .literal, .char_class, .char_class_set, .unicode_property, .any => {
                 try builder.append(self.allocator, inst_ptr);
                 return false;
             },
@@ -268,6 +275,29 @@ fn classMatches(class: anytype, cp: u32, program: nfa.Program) bool {
         }
     }
     return if (class.negated) !matched else matched;
+}
+
+fn classSetMatches(class_set: anytype, cp: u32, program: nfa.Program) bool {
+    const lhs = struct {
+        negated: bool,
+        items: []const @import("hir.zig").ClassItem,
+    }{
+        .negated = class_set.lhs_negated,
+        .items = class_set.lhs_items,
+    };
+    const rhs = struct {
+        negated: bool,
+        items: []const @import("hir.zig").ClassItem,
+    }{
+        .negated = class_set.rhs_negated,
+        .items = class_set.rhs_items,
+    };
+    const lhs_matched = classMatches(lhs, cp, program);
+    const rhs_matched = classMatches(rhs, cp, program);
+    return switch (class_set.op) {
+        .intersection => lhs_matched and rhs_matched,
+        .subtraction => lhs_matched and !rhs_matched,
+    };
 }
 
 fn isAsciiBytes(bytes: []const u8) bool {

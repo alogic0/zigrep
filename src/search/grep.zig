@@ -526,7 +526,7 @@ fn extractBytePattern(
             .mode = .contains,
             .terms = try allocator.alloc(ByteTerm, 0),
         },
-        .word_boundary, .not_word_boundary, .word_boundary_start_half, .word_boundary_end_half, .unicode_property => null,
+        .word_boundary, .not_word_boundary, .word_boundary_start_half, .word_boundary_end_half, .unicode_property, .char_class_set => null,
         .alternation => blk: {
             const term = (try extractAlternationByteTerm(allocator, nodes, root)) orelse break :blk null;
             const terms = try allocator.alloc(ByteTerm, 1);
@@ -683,7 +683,7 @@ fn appendNodeToByteTerms(
             try terms.append(allocator, .{ .atom = .anchor_end });
             return true;
         },
-        .word_boundary, .not_word_boundary, .word_boundary_start_half, .word_boundary_end_half, .unicode_property => {
+        .word_boundary, .not_word_boundary, .word_boundary_start_half, .word_boundary_end_half, .unicode_property, .char_class_set => {
             return false;
         },
         .char_class => |class| {
@@ -2315,6 +2315,22 @@ test "Searcher supports half-word boundaries" {
     defer ascii_half.deinit();
     try testing.expect((try ascii_half.reportFirstMatch("sample.txt", "!A!")) != null);
     try testing.expect((try ascii_half.reportFirstMatch("sample.txt", "!Ж!")) == null);
+}
+
+test "Searcher supports basic class-set operators" {
+    const testing = std.testing;
+
+    var subtraction = try Searcher.init(testing.allocator, "[\\w--\\p{ASCII}]+", .{});
+    defer subtraction.deinit();
+    try testing.expect(!subtraction.hasBytePlan());
+    try testing.expect((try subtraction.reportFirstMatch("sample.txt", "Ж")) != null);
+    try testing.expect((try subtraction.reportFirstMatch("sample.txt", "A")) == null);
+
+    var intersection = try Searcher.init(testing.allocator, "[\\p{Greek}&&\\p{Uppercase}]+", .{});
+    defer intersection.deinit();
+    try testing.expect(!intersection.hasBytePlan());
+    try testing.expect((try intersection.reportFirstMatch("sample.txt", "Ω")) != null);
+    try testing.expect((try intersection.reportFirstMatch("sample.txt", "ω")) == null);
 }
 
 test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
