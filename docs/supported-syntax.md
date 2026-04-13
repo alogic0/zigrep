@@ -293,6 +293,12 @@ Case-mode note:
 - `-S` or `--smart-case` enables ignore-case unless the pattern contains uppercase letters
 - when both are present, the last one wins
 - case-insensitive matching works through a folded regex rewrite instead of a separate VM mode
+- the current rewrite uses generated simple case-fold data for Unicode literal and
+  class folding, including cases like Greek sigma and accented Latin literals
+- smart-case uppercase detection is Unicode-aware and treats `Uppercase` and
+  `Titlecase_Letter` code points as case-sensitive triggers
+- case-folded patterns currently stay off the raw-byte planner and use the
+  general VM path
 - if a case-insensitive character class range is too large to rewrite safely, `zigrep` fails explicitly instead of silently under-matching
 
 Current `--text` note:

@@ -1624,6 +1624,32 @@ test "reportFirstMatch supports ignore-case Unicode literals" {
     try testing.expectEqualStrings("ЖАР", report.line);
 }
 
+test "reportFirstMatch supports ignore-case Unicode folding edge cases" {
+    const testing = std.testing;
+
+    const sigma = (try reportFirstMatch(
+        testing.allocator,
+        "Σ",
+        "sample.txt",
+        "ς",
+        .{ .case_mode = .insensitive },
+    )).?;
+    defer sigma.deinit(testing.allocator);
+    try testing.expectEqualStrings("ς", sigma.line);
+    try testing.expectEqual(Span{ .start = 0, .end = "ς".len }, sigma.match_span);
+
+    const accented = (try reportFirstMatch(
+        testing.allocator,
+        "éclair",
+        "sample.txt",
+        "ÉCLAIR",
+        .{ .case_mode = .insensitive },
+    )).?;
+    defer accented.deinit(testing.allocator);
+    try testing.expectEqualStrings("ÉCLAIR", accented.line);
+    try testing.expectEqual(Span{ .start = 0, .end = "ÉCLAIR".len }, accented.match_span);
+}
+
 test "reportFirstMatch supports ignore-case classes" {
     const testing = std.testing;
 
@@ -1637,6 +1663,32 @@ test "reportFirstMatch supports ignore-case classes" {
     defer report.deinit(testing.allocator);
 
     try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
+}
+
+test "reportFirstMatch supports ignore-case Unicode classes" {
+    const testing = std.testing;
+
+    const greek = (try reportFirstMatch(
+        testing.allocator,
+        "[Σ]+",
+        "sample.txt",
+        "ςσσ",
+        .{ .case_mode = .insensitive },
+    )).?;
+    defer greek.deinit(testing.allocator);
+    try testing.expectEqualStrings("ςσσ", greek.line);
+    try testing.expectEqual(Span{ .start = 0, .end = "ςσσ".len }, greek.match_span);
+
+    const accented = (try reportFirstMatch(
+        testing.allocator,
+        "[é]+",
+        "sample.txt",
+        "Éé",
+        .{ .case_mode = .insensitive },
+    )).?;
+    defer accented.deinit(testing.allocator);
+    try testing.expectEqualStrings("Éé", accented.line);
+    try testing.expectEqual(Span{ .start = 0, .end = "Éé".len }, accented.match_span);
 }
 
 test "reportFirstMatch smart-case keeps uppercase patterns case-sensitive" {

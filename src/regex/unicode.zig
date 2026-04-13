@@ -335,15 +335,13 @@ pub const Strategy = struct {
         try appendUnique(allocator, &folds, cp);
         try appendUnique(allocator, &folds, canonical);
 
-        const lower = foldScalar(simpleLower(cp), mode);
-        const upper = foldScalar(simpleUpper(cp), mode);
-        const title = foldScalar(simpleUpper(cp), mode);
-
-        try appendUnique(allocator, &folds, lower);
-        try appendUnique(allocator, &folds, upper);
-        try appendUnique(allocator, &folds, title);
-        if (canonical == 'σ') {
-            try appendUnique(allocator, &folds, 'ς');
+        for (generated.simple_case_fold_mappings) |mapping| {
+            if (foldScalar(mapping.from, mode) == canonical) {
+                try appendUnique(allocator, &folds, mapping.from);
+            }
+            if (foldScalar(mapping.to, mode) == canonical) {
+                try appendUnique(allocator, &folds, mapping.to);
+            }
         }
 
         return .{
@@ -412,30 +410,26 @@ fn inRanges(cp: u32, ranges: []const generated.Range) bool {
 }
 
 fn foldScalarSimple(cp: u32) u32 {
-    return switch (cp) {
-        // Greek sigma variants share a simple fold bucket.
-        'Σ', 'σ', 'ς' => 'σ',
-        else => simpleLower(cp),
-    };
+    return lookupSimpleCaseFold(cp) orelse cp;
 }
 
-fn simpleLower(cp: u32) u32 {
-    if (cp >= 'A' and cp <= 'Z') return cp + 32;
-    if (cp >= 0x0410 and cp <= 0x042F) return cp + 0x20;
-    return switch (cp) {
-        0x0401 => 0x0451, // Ё
-        else => cp,
-    };
-}
+fn lookupSimpleCaseFold(cp: u32) ?u32 {
+    var lo: usize = 0;
+    var hi: usize = generated.simple_case_fold_mappings.len;
 
-fn simpleUpper(cp: u32) u32 {
-    if (cp >= 'a' and cp <= 'z') return cp - 32;
-    if (cp >= 0x0430 and cp <= 0x044F) return cp - 0x20;
-    return switch (cp) {
-        'σ', 'ς' => 'Σ',
-        0x0451 => 0x0401, // ё
-        else => cp,
-    };
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        const mapping = generated.simple_case_fold_mappings[mid];
+        if (cp < mapping.from) {
+            hi = mid;
+        } else if (cp > mapping.from) {
+            lo = mid + 1;
+        } else {
+            return mapping.to;
+        }
+    }
+
+    return null;
 }
 
 fn propertyNameEq(actual: []const u8, canonical: []const u8) bool {
@@ -711,6 +705,17 @@ test "Unicode strategy exposes simple case-fold sets" {
     try testing.expect(std.mem.indexOfScalar(u32, sigma.equivalents, 'Σ') != null);
     try testing.expect(std.mem.indexOfScalar(u32, sigma.equivalents, 'σ') != null);
     try testing.expect(std.mem.indexOfScalar(u32, sigma.equivalents, 'ς') != null);
+
+    const accented = try Strategy.foldSet(testing.allocator, 'É', .simple);
+    defer accented.deinit(testing.allocator);
+    try testing.expectEqual(@as(u32, 'é'), accented.canonical);
+    try testing.expect(std.mem.indexOfScalar(u32, accented.equivalents, 'É') != null);
+    try testing.expect(std.mem.indexOfScalar(u32, accented.equivalents, 'é') != null);
+
+    const title = try Strategy.foldSet(testing.allocator, 0x01C5, .simple); // ǅ
+    defer title.deinit(testing.allocator);
+    try testing.expect(std.mem.indexOfScalar(u32, title.equivalents, 0x01C5) != null);
+    try testing.expect(std.mem.indexOfScalar(u32, title.equivalents, 0x01C6) != null);
 }
 
 test "Unicode strategy performs folded scalar comparison" {
@@ -719,6 +724,8 @@ test "Unicode strategy performs folded scalar comparison" {
     try testing.expect(Strategy.foldedEq('A', 'a', .simple));
     try testing.expect(Strategy.foldedEq('Σ', 'σ', .simple));
     try testing.expect(Strategy.foldedEq('Σ', 'ς', .simple));
+    try testing.expect(Strategy.foldedEq('É', 'é', .simple));
+    try testing.expect(Strategy.foldedEq(0x01C5, 0x01C6, .simple)); // ǅ / ǆ
     try testing.expect(!Strategy.foldedEq('A', 'b', .simple));
 }
 

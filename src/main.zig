@@ -3453,6 +3453,60 @@ test "runCli ignore-case matches differing literal case" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:Needle one"));
 }
 
+test "runCli ignore-case matches Unicode literal folding cases" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "ς\n" ++
+            "ÉCLAIR\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const sigma_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "Σ", root_path });
+    defer sigma_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), sigma_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, sigma_run.stdout, 1, "sample.txt:1:1:ς"));
+
+    const accented_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "éclair", root_path });
+    defer accented_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), accented_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, accented_run.stdout, 1, "sample.txt:2:1:ÉCLAIR"));
+}
+
+test "runCli ignore-case matches Unicode class folding cases" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "ςσσ\n" ++
+            "Éé\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const sigma_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "[Σ]+", root_path });
+    defer sigma_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), sigma_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, sigma_run.stdout, 1, "sample.txt:1:1:ςσσ"));
+
+    const accented_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "[é]+", root_path });
+    defer accented_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), accented_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, accented_run.stdout, 1, "sample.txt:2:1:Éé"));
+}
+
 test "runCli smart-case keeps uppercase patterns case-sensitive" {
     const testing = std.testing;
 

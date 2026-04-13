@@ -38,6 +38,7 @@ Specifically, the current property generator reads:
 - `Scripts.txt`
 - `PropertyValueAliases.txt`
 - `emoji/emoji-data.txt`
+- `CaseFolding.txt`
 - Unicode version `16.0.0`
 
 This is a generation-time input only.
@@ -70,6 +71,7 @@ zig run tools/gen_unicode_props.zig -- \
   --scripts /path/to/Scripts.txt \
   --property-value-aliases /path/to/PropertyValueAliases.txt \
   --emoji-data /path/to/emoji-data.txt \
+  --case-folding /path/to/CaseFolding.txt \
   --output src/regex/unicode_props_generated.zig
 ```
 

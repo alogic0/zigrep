@@ -10,6 +10,11 @@ const ScriptAlias = struct {
     short_name: []const u8,
 };
 
+const CaseFoldMapping = struct {
+    from: u32,
+    to: u32,
+};
+
 const ScriptEntry = struct {
     long_name: []const u8,
     short_name: []const u8,
@@ -65,6 +70,7 @@ const Config = struct {
     scripts: []const u8,
     property_value_aliases: []const u8,
     emoji_data: []const u8,
+    case_folding: []const u8,
     output: []const u8,
 };
 
@@ -110,6 +116,9 @@ pub fn main() !void {
 
     var emoji_ranges: std.ArrayList(Range) = .empty;
     defer emoji_ranges.deinit(arena);
+
+    var simple_case_fold_mappings: std.ArrayList(CaseFoldMapping) = .empty;
+    defer simple_case_fold_mappings.deinit(arena);
 
     var latin_script_ranges: std.ArrayList(Range) = .empty;
     defer latin_script_ranges.deinit(arena);
@@ -256,6 +265,7 @@ pub fn main() !void {
     try loadNamedPropertyData(arena, config.derived_core_properties, "XID_Continue", &xid_continue_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "Default_Ignorable_Code_Point", &default_ignorable_code_point_ranges);
     try loadNamedPropertyData(arena, config.emoji_data, "Emoji", &emoji_ranges);
+    try loadCaseFoldingData(arena, config.case_folding, &simple_case_fold_mappings);
     try loadNamedScriptData(arena, config.scripts, "Latin", &latin_script_ranges);
     try loadNamedScriptData(arena, config.scripts, "Greek", &greek_script_ranges);
     try loadNamedScriptData(arena, config.scripts, "Cyrillic", &cyrillic_script_ranges);
@@ -318,6 +328,7 @@ pub fn main() !void {
         xid_continue_ranges.items,
         default_ignorable_code_point_ranges.items,
         emoji_ranges.items,
+        simple_case_fold_mappings.items,
         latin_script_ranges.items,
         greek_script_ranges.items,
         cyrillic_script_ranges.items,
@@ -378,6 +389,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     const default_scripts = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "Scripts.txt" });
     const default_property_value_aliases = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "PropertyValueAliases.txt" });
     const default_emoji_data = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "emoji", "emoji-data.txt" });
+    const default_case_folding = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "CaseFolding.txt" });
 
     var config = Config{
         .zg_root = default_zg_root,
@@ -388,6 +400,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
         .scripts = default_scripts,
         .property_value_aliases = default_property_value_aliases,
         .emoji_data = default_emoji_data,
+        .case_folding = default_case_folding,
         .output = "",
     };
 
@@ -405,6 +418,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             config.scripts = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "Scripts.txt" });
             config.property_value_aliases = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "PropertyValueAliases.txt" });
             config.emoji_data = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "emoji", "emoji-data.txt" });
+            config.case_folding = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "CaseFolding.txt" });
         } else if (std.mem.eql(u8, arg, "--unicode-data")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -433,6 +447,10 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
             config.emoji_data = args[i];
+        } else if (std.mem.eql(u8, arg, "--case-folding")) {
+            i += 1;
+            if (i >= args.len) return error.MissingArgument;
+            config.case_folding = args[i];
         } else if (std.mem.eql(u8, arg, "--output")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -451,6 +469,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     try ensureFileExists(config.scripts);
     try ensureFileExists(config.property_value_aliases);
     try ensureFileExists(config.emoji_data);
+    try ensureFileExists(config.case_folding);
 
     return config;
 }
@@ -465,14 +484,14 @@ fn hasHelpFlag(args: []const []const u8) bool {
 fn writeUsage() !void {
     std.debug.print(
         \\usage: gen_unicode_props.zig [--zg-root PATH] [--unicode-data PATH] [--prop-list PATH] [--derived-core-properties PATH] --output PATH
-        \\                             [--derived-general-category PATH] [--scripts PATH] [--property-value-aliases PATH] [--emoji-data PATH]
+        \\                             [--derived-general-category PATH] [--scripts PATH] [--property-value-aliases PATH] [--emoji-data PATH] [--case-folding PATH]
         \\
         \\Default data source:
         \\  ../zig-libs/zg/data/unicode relative to the zigrep repo root
         \\
         \\Examples:
         \\  zig run tools/gen_unicode_props.zig -- --zg-root ../zig-libs/zg --output src/regex/unicode_props_generated.zig
-        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --derived-general-category /path/to/DerivedGeneralCategory.txt --scripts /path/to/Scripts.txt --property-value-aliases /path/to/PropertyValueAliases.txt --emoji-data /path/to/emoji-data.txt --output src/regex/unicode_props_generated.zig
+        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --derived-general-category /path/to/DerivedGeneralCategory.txt --scripts /path/to/Scripts.txt --property-value-aliases /path/to/PropertyValueAliases.txt --emoji-data /path/to/emoji-data.txt --case-folding /path/to/CaseFolding.txt --output src/regex/unicode_props_generated.zig
         \\
     , .{});
 }
@@ -677,6 +696,38 @@ fn loadNamedPropertyData(
             };
 
         try appendMergedRange(allocator, ranges, range);
+    }
+}
+
+fn loadCaseFoldingData(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    mappings: *std.ArrayList(CaseFoldMapping),
+) !void {
+    const bytes = try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024 * 1024);
+
+    var lines = std.mem.tokenizeScalar(u8, bytes, '\n');
+    while (lines.next()) |line_raw| {
+        const line_trimmed = std.mem.trimRight(u8, line_raw, "\r");
+        const line = if (std.mem.indexOfScalar(u8, line_trimmed, '#')) |index|
+            std.mem.trim(u8, line_trimmed[0..index], " \t")
+        else
+            std.mem.trim(u8, line_trimmed, " \t");
+
+        if (line.len == 0) continue;
+
+        var fields = std.mem.splitScalar(u8, line, ';');
+        const from_field = std.mem.trim(u8, fields.next() orelse continue, " \t");
+        const status_field = std.mem.trim(u8, fields.next() orelse continue, " \t");
+        const to_field = std.mem.trim(u8, fields.next() orelse continue, " \t");
+
+        if (!(std.mem.eql(u8, status_field, "C") or std.mem.eql(u8, status_field, "S"))) continue;
+        if (std.mem.indexOfScalar(u8, to_field, ' ') != null) continue;
+
+        try mappings.append(allocator, .{
+            .from = try std.fmt.parseInt(u32, from_field, 16),
+            .to = try std.fmt.parseInt(u32, to_field, 16),
+        });
     }
 }
 
@@ -1002,6 +1053,7 @@ fn writeOutput(
     xid_continue_ranges: []const Range,
     default_ignorable_code_point_ranges: []const Range,
     emoji_ranges: []const Range,
+    simple_case_fold_mappings: []const CaseFoldMapping,
     latin_script_ranges: []const Range,
     greek_script_ranges: []const Range,
     cyrillic_script_ranges: []const Range,
@@ -1065,12 +1117,17 @@ fn writeOutput(
     try writer.interface.print("// - {s}\n", .{config.scripts});
     try writer.interface.print("// - {s}\n", .{config.property_value_aliases});
     try writer.interface.print("// - {s}\n", .{config.emoji_data});
+    try writer.interface.print("// - {s}\n", .{config.case_folding});
     try writer.interface.print("// Data source repository:\n", .{});
     try writer.interface.print("// - {s}\n", .{config.zg_root});
     try writer.interface.print("// - https://codeberg.org/atman/zg\n\n", .{});
     try writer.interface.print("pub const Range = struct {{\n", .{});
     try writer.interface.print("    start: u32,\n", .{});
     try writer.interface.print("    end: u32,\n", .{});
+    try writer.interface.print("}};\n\n", .{});
+    try writer.interface.print("pub const CaseFoldMapping = struct {{\n", .{});
+    try writer.interface.print("    from: u32,\n", .{});
+    try writer.interface.print("    to: u32,\n", .{});
     try writer.interface.print("}};\n\n", .{});
     try writer.interface.print("pub const script_property_base: u16 = 0x400;\n", .{});
     try writer.interface.print("pub const ScriptSpec = struct {{\n", .{});
@@ -1103,6 +1160,8 @@ fn writeOutput(
     try writeRangeList(&writer.interface, "default_ignorable_code_point_ranges", default_ignorable_code_point_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "emoji_ranges", emoji_ranges);
+    try writer.interface.print("\n", .{});
+    try writeCaseFoldMappings(&writer.interface, simple_case_fold_mappings);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "latin_script_ranges", latin_script_ranges);
     try writer.interface.print("\n", .{});
@@ -1194,6 +1253,14 @@ fn writeRangeList(writer: anytype, name: []const u8, ranges: []const Range) !voi
     try writer.print("pub const {s} = [_]Range{{\n", .{name});
     for (ranges) |range| {
         try writer.print("    .{{ .start = 0x{X}, .end = 0x{X} }},\n", .{ range.start, range.end });
+    }
+    try writer.print("}};\n", .{});
+}
+
+fn writeCaseFoldMappings(writer: anytype, mappings: []const CaseFoldMapping) !void {
+    try writer.print("pub const simple_case_fold_mappings = [_]CaseFoldMapping{{\n", .{});
+    for (mappings) |mapping| {
+        try writer.print("    .{{ .from = 0x{X}, .to = 0x{X} }},\n", .{ mapping.from, mapping.to });
     }
     try writer.print("}};\n", .{});
 }

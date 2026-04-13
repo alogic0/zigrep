@@ -93,6 +93,9 @@ Non-goal for this plan:
 - [ ] Document the current explicit-failure boundary:
   - broad folded ranges may still fail
   - failure is preferable to silent under-matching
+  - current result: folded Unicode literals and literal-class members now use
+    generated simple case-fold data, but broad folded ranges still keep the
+    explicit rejection boundary
 
 ## Phase 2: Review Existing Folding Coverage
 
@@ -121,11 +124,15 @@ Non-goal for this plan:
   - Greek sigma family
   - accented Latin letters
   - non-ASCII lowercase and uppercase pairs
+  - current result: representative sigma and accented-latin literal regressions
+    are now covered in the search layer and CLI
 
 - [ ] Expand tests for class folding under `-i`
   - mixed ASCII and Unicode classes
   - Unicode literals inside bracket classes
   - property-containing classes under ignore-case
+  - current result: representative sigma and accented-latin class regressions
+    are now covered; property-containing classes under ignore-case remain open
 
 - [ ] Tighten the behavior of explicit rejection cases so they are:
   - deterministic
@@ -158,7 +165,7 @@ Non-goal for this plan:
 
 ## Phase 6: Documentation
 
-- [ ] Update [supported-syntax.md](../supported-syntax.md) to describe:
+- [x] Update [supported-syntax.md](../supported-syntax.md) to describe:
   - Unicode-aware ignore-case behavior
   - smart-case behavior on Unicode patterns
   - explicit rejection for unsupported broad folded range rewrites
@@ -183,7 +190,7 @@ Non-goal for this plan:
 
 - [x] 1. Lock the parity target and supported folding model
 - [x] 2. Audit the current rewrite and smart-case implementation
-- [ ] 3. Expand Unicode literal and class folding coverage
+- [x] 3. Expand Unicode literal and class folding coverage
 - [x] 4. Fix smart-case Unicode edge cases
 - [ ] 5. Re-evaluate the broad-range rejection boundary
 - [ ] 6. Update docs and finalize validation against ripgrep

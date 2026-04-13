@@ -360,46 +360,9 @@ fn appendUniqueLiteralItem(
 }
 
 fn simpleCaseFoldSetAlloc(allocator: std.mem.Allocator, cp: u32) CaseFoldError![]u32 {
-    var items: std.ArrayList(u32) = .empty;
-    errdefer items.deinit(allocator);
-
-    try appendUniqueCodePoint(allocator, &items, cp);
-
-    if (cp <= 0x7f) {
-        const byte = @as(u8, @intCast(cp));
-        try appendUniqueCodePoint(allocator, &items, std.ascii.toLower(byte));
-        try appendUniqueCodePoint(allocator, &items, std.ascii.toUpper(byte));
-        return items.toOwnedSlice(allocator);
-    }
-
-    if (cp > 0xFFFF) {
-        return items.toOwnedSlice(allocator);
-    }
-
-    const canonical = std.os.windows.nls.upcaseW(@as(u16, @intCast(cp)));
-    try appendUniqueCodePoint(allocator, &items, canonical);
-
-    if (canonical == cp) {
-        var candidate: u32 = 0;
-        while (candidate <= 0xFFFF) : (candidate += 1) {
-            if (std.os.windows.nls.upcaseW(@as(u16, @intCast(candidate))) == canonical) {
-                try appendUniqueCodePoint(allocator, &items, candidate);
-            }
-        }
-    }
-
-    return items.toOwnedSlice(allocator);
-}
-
-fn appendUniqueCodePoint(
-    allocator: std.mem.Allocator,
-    items: *std.ArrayList(u32),
-    cp: u32,
-) CaseFoldError!void {
-    for (items.items) |existing| {
-        if (existing == cp) return;
-    }
-    try items.append(allocator, cp);
+    const fold = try unicode.Strategy.foldSet(allocator, cp, .simple);
+    defer fold.deinit(allocator);
+    return allocator.dupe(u32, fold.equivalents);
 }
 
 test "HIR lowering preserves shape and extracts prefix analysis" {
