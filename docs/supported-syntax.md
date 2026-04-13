@@ -36,6 +36,12 @@ Character classes support:
 The current engine does not yet expose named Unicode properties or shorthand
 class syntax such as `\d`, `\w`, or `\s` in the user-facing regex syntax.
 
+Current escape boundary:
+
+- supported control and byte escapes include `\n`, `\r`, `\t`, `\f`, `\v`, `\0`, and `\xNN`
+- escaped metacharacters like `\.`, `\(`, `\)`, `\[`, and `\\` are supported
+- shorthand and boundary escapes such as `\d`, `\w`, `\s`, `\b`, and their uppercase variants are currently rejected explicitly instead of being treated as regex operators
+
 ## Explicit Non-Goals
 
 The following syntax is intentionally unsupported and should be treated as out

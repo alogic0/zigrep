@@ -4,6 +4,7 @@ const reader = @import("reader.zig");
 pub const LexError = reader.ReaderError || error{
     TrailingEscape,
     InvalidHexEscape,
+    UnsupportedEscape,
 };
 
 pub const Span = struct {
@@ -98,6 +99,7 @@ pub fn Lexer(comptime T: type) type {
                 'v' => .{ .literal = 0x0b },
                 '0' => .{ .literal = 0 },
                 'x' => .{ .literal = try self.readHexEscape() },
+                'd', 'D', 'w', 'W', 's', 'S', 'b', 'B' => error.UnsupportedEscape,
                 else => .{ .literal = escaped },
             };
         }
@@ -155,4 +157,13 @@ test "Lexer decodes common escapes and tracks spans" {
     const hex = try lexer.nextSpanned();
     try testing.expectEqualDeep(Token{ .literal = 'A' }, hex.token);
     try testing.expectEqualDeep(Span{ .start = 4, .end = 8 }, hex.span);
+}
+
+test "Lexer rejects unsupported shorthand and boundary escapes" {
+    const testing = @import("std").testing;
+
+    inline for (.{ "\\d", "\\D", "\\w", "\\W", "\\s", "\\S", "\\b", "\\B" }) |pattern| {
+        var lexer = Lexer(u8).init(pattern);
+        try testing.expectError(error.UnsupportedEscape, lexer.next());
+    }
 }

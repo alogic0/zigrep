@@ -72,7 +72,6 @@ pub const ParseError = lexer_mod.LexError || error{
     EmptyClass,
     InvalidQuantifier,
     UnsupportedGroup,
-    UnsupportedEscape,
     TrailingInput,
 };
 
@@ -543,4 +542,11 @@ test "Parser tracks capture groups in source order" {
     try testing.expectEqual(@as(u32, 0), ast.nodes[@intFromEnum(root[0])].group.index);
     try testing.expectEqual(.group, std.meta.activeTag(ast.nodes[@intFromEnum(root[1])]));
     try testing.expectEqual(@as(u32, 1), ast.nodes[@intFromEnum(root[1])].group.index);
+}
+
+test "Parser init rejects unsupported shorthand escapes" {
+    const testing = std.testing;
+
+    try testing.expectError(error.UnsupportedEscape, Parser.init(testing.allocator, "\\d"));
+    try testing.expectError(error.UnsupportedEscape, Parser.init(testing.allocator, "\\b"));
 }

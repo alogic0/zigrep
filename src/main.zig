@@ -2582,6 +2582,23 @@ test "writeFatalError omits usage for runtime search errors" {
     try testing.expectEqualStrings("error: FileNotFound\n", stderr_capture.written());
 }
 
+test "runCli returns UnsupportedEscape for unsupported shorthand escapes" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "123\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    try testing.expectError(error.UnsupportedEscape, runCliCaptured(testing.allocator, &.{ "zigrep", "\\d+", root_path }));
+}
+
 test "parseArgs treats version-like args as positional after the pattern starts" {
     const testing = std.testing;
 
@@ -5662,7 +5679,7 @@ test "runCli default mode uses the general raw-byte VM when no planner path exis
     try testing.expectEqualStrings("", run.stderr);
 }
 
-test "runCli default mode still returns no match for invalid UTF-8 patterns outside the byte planner" {
+test "runCli rejects unsupported shorthand escapes before invalid UTF-8 matching" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -5676,12 +5693,7 @@ test "runCli default mode still returns no match for invalid UTF-8 patterns outs
     const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
     defer testing.allocator.free(root_path);
 
-    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "a\\db", root_path });
-    defer run.deinit(testing.allocator);
-
-    try testing.expectEqual(@as(u8, 1), run.exit_code);
-    try testing.expectEqualStrings("", run.stdout);
-    try testing.expectEqualStrings("", run.stderr);
+    try testing.expectError(error.UnsupportedEscape, runCliCaptured(testing.allocator, &.{ "zigrep", "a\\db", root_path }));
 }
 
 test "runCli default mode matches literal-only UTF-8 classes through the byte path" {
