@@ -4469,6 +4469,45 @@ test "runCli supports unscoped inline flag toggles" {
     try testing.expectEqual(@as(u8, 0), local_dotall.exit_code);
 }
 
+test "runCli supports grouped inline flag bundles" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "x\n" ++
+            "A\n" ++
+            "A\n" ++
+            "b\n" ++
+            "Ж\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const multiline_case = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?im:^a$)", root_path });
+    defer multiline_case.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), multiline_case.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, multiline_case.stdout, 1, "sample.txt:2:1:A"));
+
+    const no_multiline = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?i-m:^a$)", root_path });
+    defer no_multiline.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), no_multiline.exit_code);
+
+    const dotall = try runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "(?is:a.b)", root_path });
+    defer dotall.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), dotall.exit_code);
+
+    const ascii_word = try runCliCaptured(testing.allocator, &.{ "zigrep", "(?i-u:\\w+)", root_path });
+    defer ascii_word.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), ascii_word.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:2:1:A"));
+    try testing.expect(!std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:5:1:Ж"));
+}
+
 test "runCli supports non-capturing groups" {
     const testing = std.testing;
 

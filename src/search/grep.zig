@@ -2482,6 +2482,30 @@ test "Searcher supports unscoped inline flag toggles" {
     try testing.expect((try local_dotall.reportFirstMatch("sample.txt", "a\nb")) != null);
 }
 
+test "Searcher supports grouped inline flag bundles" {
+    const testing = std.testing;
+
+    var multiline_case = try Searcher.init(testing.allocator, "(?im:^a$)", .{});
+    defer multiline_case.deinit();
+    try testing.expect(!multiline_case.hasBytePlan());
+    try testing.expect((try multiline_case.reportFirstMatch("sample.txt", "x\nA\n")) != null);
+
+    var no_multiline = try Searcher.init(testing.allocator, "(?i-m:^a$)", .{});
+    defer no_multiline.deinit();
+    try testing.expect((try no_multiline.reportFirstMatch("sample.txt", "x\nA\n")) == null);
+
+    var dotall = try Searcher.init(testing.allocator, "(?is:a.b)", .{ .multiline = true });
+    defer dotall.deinit();
+    try testing.expect(!dotall.hasBytePlan());
+    try testing.expect((try dotall.reportFirstMatch("sample.txt", "A\nb")) != null);
+
+    var ascii_word = try Searcher.init(testing.allocator, "(?i-u:\\w+)", .{});
+    defer ascii_word.deinit();
+    try testing.expect(ascii_word.hasBytePlan());
+    try testing.expect((try ascii_word.reportFirstMatch("sample.txt", "A")) != null);
+    try testing.expect((try ascii_word.reportFirstMatch("sample.txt", "Ж")) == null);
+}
+
 test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     const testing = std.testing;
 

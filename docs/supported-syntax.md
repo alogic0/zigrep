@@ -24,7 +24,7 @@ The current engine supports:
 - Inline Unicode mode groups `(?-u:...)` and `(?u:...)`
 - Inline local case-fold groups `(?i:...)` and `(?-i:...)`
 - Inline scoped multiline and dotall groups `(?m:...)`, `(?-m:...)`, `(?s:...)`, and `(?-s:...)`
-- Unscoped inline toggles `(?i)`, `(?-i)`, `(?u)`, `(?-u)`, `(?m)`, `(?-m)`, `(?s)`, and `(?-s)`
+- Unscoped inline toggles and bundles like `(?i)`, `(?-i)`, `(?u)`, `(?-u)`, `(?m)`, `(?-m)`, `(?s)`, `(?-s)`, `(?i-u)`, and `(?im)`
 - Escaped metacharacters such as `\.`, `\(`, `\)`, `\[`, `\]`, `\{`, `\}`, `\|`, `\*`, `\+`, `\?`, `\^`, `\$`, and `\\`
 
 Notes:
@@ -88,6 +88,8 @@ Current escape boundary:
   - `(?-u)` switches shorthand and boundary operators to ASCII behavior for the
     remainder of the current enclosing group or pattern
   - `(?u)` switches them back to Unicode-aware behavior for the same scope
+  - supported bundles may combine `u` with `i`, `m`, and `s`, for example
+    `(?i-u)`
   - inside `(?-u)` mode, Unicode property escapes like `\p{Greek}` remain unsupported
 - inline local case-fold groups are supported:
   - `(?i:...)` enables local case-insensitive matching for the group
@@ -98,11 +100,15 @@ Current escape boundary:
   - `(?i)` enables case-insensitive matching for the remainder of the current
     enclosing group or pattern
   - `(?-i)` disables case-insensitive matching for the same scope
+  - supported bundles may combine `i` with `u`, `m`, and `s`, for example
+    `(?im)` and `(?i-u)`
 - inline scoped multiline and dotall groups are supported:
   - `(?m:...)` makes `^` and `$` use line-boundary semantics inside the group
   - `(?-m:...)` restores absolute start/end semantics inside the group
   - `(?s:...)` makes `.` match `\n` inside the group
   - `(?-s:...)` keeps `.` from matching `\n` inside the group
+  - supported bundles may combine the current native-core subset inside a
+    scoped group, for example `(?im:...)`, `(?i-m:...)`, and `(?is:...)`
   - they do not change the CLI-level `-U` / `--multiline` requirement for any
     pattern that can actually match across newlines
 - unscoped inline multiline and dotall toggles are supported:
@@ -113,7 +119,8 @@ Current escape boundary:
   - `(?-s)` keeps later `.` atoms from matching `\n` for the same scope
   - they still do not bypass the CLI-level `-U` / `--multiline` requirement
     for any pattern that can match across newlines
-  - grouped inline flag bundles remain unsupported
+  - supported bundles may combine `m` and `s` with `i` and `u` for the same
+    scope, while unsupported flags still fail explicitly
 - explicit ASCII regexes such as `[0-9]` and `[A-Za-z0-9_]` remain the stable
   way to request ASCII-only behavior outside inline mode groups
 - explicit ASCII whitespace classes such as `[ \t\r\n\f\v]` remain the stable
@@ -188,10 +195,9 @@ of scope for the main engine:
 - Features that require general backtracking semantics
 - Full PCRE2 compatibility
 
-In particular, `(?:...)`, `(?-u:...)`, `(?u:...)`, `(?i:...)`, `(?-i:...)`,
-`(?m:...)`, `(?-m:...)`, `(?s:...)`, `(?-s:...)`, `(?i)`, `(?-i)`, `(?u)`,
-`(?-u)`, `(?m)`, `(?-m)`, `(?s)`, and `(?-s)` are supported, but other
-`(?...)` group forms are rejected explicitly rather than being interpreted partially.
+In particular, `(?:...)`, the `i/u/m/s` scoped and unscoped inline flag forms,
+and grouped bundles over that same subset are supported, but other `(?...)`
+group forms are rejected explicitly rather than being interpreted partially.
 
 ## CLI Behavior
 

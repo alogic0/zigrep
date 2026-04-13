@@ -948,6 +948,22 @@ test "VM supports unscoped inline flag toggles" {
     try testing.expect(!(try engine.isMatch(local_no_dotall, "a\nb")));
 }
 
+test "VM supports grouped inline flag bundles" {
+    const testing = std.testing;
+
+    try expectMatch("(?im:^a$)", "x\nA\n");
+    try expectNoMatch("(?i-m:^a$)", "x\nA\n");
+
+    const dotall = try compileProgram(testing.allocator, "(?is:a.b)", .{ .multiline = true });
+    defer dotall.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    try testing.expect(try engine.isMatch(dotall, "A\nb"));
+
+    try expectMatch("(?i-u:\\w+)", "A");
+    try expectNoMatch("(?i-u:\\w+)", "Ж");
+}
+
 test "VM handles word boundaries on UTF-8 and raw-byte haystacks" {
     const testing = std.testing;
 

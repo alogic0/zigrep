@@ -67,17 +67,21 @@ Out of scope for this plan:
 
 ## Phase 3: Scoped Flag Bundles
 
-- [ ] Extend scoped groups from one-flag forms to supported bundles like:
+- [x] Extend scoped groups from one-flag forms to supported bundles like:
   - `(?im:...)`
   - `(?i-m:...)`
-- [ ] Define a stable parse rule for:
+- [x] Define a stable parse rule for:
   - enabling multiple flags
   - disabling a suffix set after `-`
   - rejecting duplicate or contradictory bundle syntax where needed
-- [ ] Ensure grouped flag bundles compose correctly with existing:
+- [x] Ensure grouped flag bundles compose correctly with existing:
   - scoped Unicode groups
   - scoped multiline/dotall groups
   - scoped case-fold groups
+  - current result:
+    - grouped bundles over the native-core `i/u/m/s` subset are implemented
+    - the same flag-spec parser now also accepts multi-flag unscoped bundles
+      like `(?i-u)`
 
 ## Phase 4: Engine Integration
 
@@ -92,7 +96,7 @@ Out of scope for this plan:
 - [x] Add parser regressions for:
   - unscoped toggles
   - explicit rejection of unsupported flags
-- [ ] Add parser regressions for grouped scoped bundles
+- [x] Add parser regressions for grouped scoped bundles
 - [x] Add VM, search-layer, and CLI regressions for representative mixed cases
 - [x] Update [docs/supported-syntax.md](../supported-syntax.md)
 - [x] Run:
@@ -103,18 +107,20 @@ Out of scope for this plan:
 
 - [x] 1. Land unscoped `i` / `u` / `m` / `s` toggles for the remainder of the
       pattern
-- [ ] 2. Land grouped scoped bundles for the same supported subset
+- [x] 2. Land grouped scoped bundles for the same supported subset
 - [ ] 3. Re-check whether any other inline flags are still materially useful
 
 ## Status
 
-The first slice of this plan is implemented:
+The main implementation slices of this plan are implemented:
 
 - unscoped single-flag toggles for `i`, `u`, `m`, and `s`
+- grouped scoped bundles over the same `i/u/m/s` subset
+- multi-flag unscoped bundles using that same parser surface
 
 The next remaining work in this plan is:
 
-- grouped scoped bundles like `(?im:...)` and `(?i-m:...)`
+- re-check whether any other inline flags are still materially useful
 
 ## Explicit Non-Goals
 

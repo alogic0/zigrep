@@ -420,167 +420,7 @@ pub const Parser = struct {
                         try self.advance();
                         return expr;
                     }
-                    if (self.lookahead.token == .hyphen) {
-                        try self.advance();
-                        if (self.lookahead.token == .literal and self.lookahead.token.literal == 'i') {
-                            try self.advance();
-                            if (self.lookahead.token == .r_paren) {
-                                try self.advance();
-                                self.case_fold_override = false;
-                                return self.push(.empty);
-                            }
-                            if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
-                                return self.fail(error.UnsupportedGroup, group_span);
-                            }
-                            const saved_modes = self.modeState();
-                            defer self.restoreModeState(saved_modes);
-                            try self.advance();
-                            const expr = try self.parseAlternation();
-                            if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
-                            try self.advance();
-                            return self.push(.{ .case_fold_group = .{
-                                .enabled = false,
-                                .child = expr,
-                            } });
-                        }
-                        if (self.lookahead.token == .literal and self.lookahead.token.literal == 'm') {
-                            try self.advance();
-                            if (self.lookahead.token == .r_paren) {
-                                try self.advance();
-                                self.multiline_mode = false;
-                                return self.push(.empty);
-                            }
-                            if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
-                                return self.fail(error.UnsupportedGroup, group_span);
-                            }
-                            try self.advance();
-                            const saved_modes = self.modeState();
-                            self.multiline_mode = false;
-                            defer self.restoreModeState(saved_modes);
-                            const expr = try self.parseAlternation();
-                            if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
-                            try self.advance();
-                            return expr;
-                        }
-                        if (self.lookahead.token == .literal and self.lookahead.token.literal == 's') {
-                            try self.advance();
-                            if (self.lookahead.token == .r_paren) {
-                                try self.advance();
-                                self.dotall_mode = false;
-                                return self.push(.empty);
-                            }
-                            if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
-                                return self.fail(error.UnsupportedGroup, group_span);
-                            }
-                            try self.advance();
-                            const saved_modes = self.modeState();
-                            self.dotall_mode = false;
-                            defer self.restoreModeState(saved_modes);
-                            const expr = try self.parseAlternation();
-                            if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
-                            try self.advance();
-                            return expr;
-                        }
-                        if (self.lookahead.token != .literal or self.lookahead.token.literal != 'u') {
-                            return self.fail(error.UnsupportedGroup, group_span);
-                        }
-                        try self.advance();
-                        if (self.lookahead.token == .r_paren) {
-                            try self.advance();
-                            self.unicode_mode = false;
-                            return self.push(.empty);
-                        }
-                        if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
-                            return self.fail(error.UnsupportedGroup, group_span);
-                        }
-                        try self.advance();
-                        const saved_modes = self.modeState();
-                        self.unicode_mode = false;
-                        defer self.restoreModeState(saved_modes);
-                        const expr = try self.parseAlternation();
-                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
-                        try self.advance();
-                        return expr;
-                    }
-                    if (self.lookahead.token == .literal and self.lookahead.token.literal == 'i') {
-                        try self.advance();
-                        if (self.lookahead.token == .r_paren) {
-                            try self.advance();
-                            self.case_fold_override = true;
-                            return self.push(.empty);
-                        }
-                        if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
-                            return self.fail(error.UnsupportedGroup, group_span);
-                        }
-                        const saved_modes = self.modeState();
-                        defer self.restoreModeState(saved_modes);
-                        try self.advance();
-                        const expr = try self.parseAlternation();
-                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
-                        try self.advance();
-                        return self.push(.{ .case_fold_group = .{
-                            .enabled = true,
-                            .child = expr,
-                        } });
-                    }
-                    if (self.lookahead.token == .literal and self.lookahead.token.literal == 'm') {
-                        try self.advance();
-                        if (self.lookahead.token == .r_paren) {
-                            try self.advance();
-                            self.multiline_mode = true;
-                            return self.push(.empty);
-                        }
-                        if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
-                            return self.fail(error.UnsupportedGroup, group_span);
-                        }
-                        try self.advance();
-                        const saved_modes = self.modeState();
-                        self.multiline_mode = true;
-                        defer self.restoreModeState(saved_modes);
-                        const expr = try self.parseAlternation();
-                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
-                        try self.advance();
-                        return expr;
-                    }
-                    if (self.lookahead.token == .literal and self.lookahead.token.literal == 's') {
-                        try self.advance();
-                        if (self.lookahead.token == .r_paren) {
-                            try self.advance();
-                            self.dotall_mode = true;
-                            return self.push(.empty);
-                        }
-                        if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
-                            return self.fail(error.UnsupportedGroup, group_span);
-                        }
-                        try self.advance();
-                        const saved_modes = self.modeState();
-                        self.dotall_mode = true;
-                        defer self.restoreModeState(saved_modes);
-                        const expr = try self.parseAlternation();
-                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
-                        try self.advance();
-                        return expr;
-                    }
-                    if (self.lookahead.token == .literal and self.lookahead.token.literal == 'u') {
-                        try self.advance();
-                        if (self.lookahead.token == .r_paren) {
-                            try self.advance();
-                            self.unicode_mode = true;
-                            return self.push(.empty);
-                        }
-                        if (self.lookahead.token != .literal or self.lookahead.token.literal != ':') {
-                            return self.fail(error.UnsupportedGroup, group_span);
-                        }
-                        try self.advance();
-                        const saved_modes = self.modeState();
-                        self.unicode_mode = true;
-                        defer self.restoreModeState(saved_modes);
-                        const expr = try self.parseAlternation();
-                        if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
-                        try self.advance();
-                        return expr;
-                    }
-                    return self.fail(error.UnsupportedGroup, group_span);
+                    return self.parseInlineFlagDirective(group_span);
                 }
                 const group_index = self.capture_count;
                 self.capture_count += 1;
@@ -820,6 +660,92 @@ pub const Parser = struct {
             } });
         }
         return node_id;
+    }
+
+    const InlineFlagSpec = struct {
+        case_fold: ?bool = null,
+        unicode_mode: ?bool = null,
+        multiline_mode: ?bool = null,
+        dotall_mode: ?bool = null,
+    };
+
+    fn parseInlineFlagDirective(self: *Parser, group_span: lexer_mod.Span) ParseError!NodeId {
+        const spec = try self.parseInlineFlagSpec(group_span);
+        switch (self.lookahead.token) {
+            .r_paren => {
+                try self.advance();
+                self.applyInlineFlagSpec(spec);
+                return self.push(.empty);
+            },
+            .literal => |cp| {
+                if (cp != ':') return self.fail(error.UnsupportedGroup, group_span);
+                const saved_modes = self.modeState();
+                self.applyInlineFlagSpec(spec);
+                defer self.restoreModeState(saved_modes);
+                try self.advance();
+                const expr = try self.parseAlternation();
+                if (self.lookahead.token != .r_paren) return error.UnterminatedGroup;
+                try self.advance();
+                return expr;
+            },
+            else => return self.fail(error.UnsupportedGroup, group_span),
+        }
+    }
+
+    fn parseInlineFlagSpec(self: *Parser, group_span: lexer_mod.Span) ParseError!InlineFlagSpec {
+        var spec: InlineFlagSpec = .{};
+        var negated = false;
+        var saw_flag = false;
+
+        if (self.lookahead.token == .hyphen) {
+            negated = true;
+            try self.advance();
+        }
+
+        while (true) {
+            switch (self.lookahead.token) {
+                .hyphen => {
+                    if (!saw_flag or negated) return self.fail(error.UnsupportedGroup, group_span);
+                    negated = true;
+                    try self.advance();
+                },
+                .literal => |cp| {
+                    const enabled = !negated;
+                    switch (cp) {
+                        'i' => {
+                            if (spec.case_fold != null) return self.fail(error.UnsupportedGroup, group_span);
+                            spec.case_fold = enabled;
+                        },
+                        'u' => {
+                            if (spec.unicode_mode != null) return self.fail(error.UnsupportedGroup, group_span);
+                            spec.unicode_mode = enabled;
+                        },
+                        'm' => {
+                            if (spec.multiline_mode != null) return self.fail(error.UnsupportedGroup, group_span);
+                            spec.multiline_mode = enabled;
+                        },
+                        's' => {
+                            if (spec.dotall_mode != null) return self.fail(error.UnsupportedGroup, group_span);
+                            spec.dotall_mode = enabled;
+                        },
+                        else => break,
+                    }
+                    saw_flag = true;
+                    try self.advance();
+                },
+                else => break,
+            }
+        }
+
+        if (!saw_flag) return self.fail(error.UnsupportedGroup, group_span);
+        return spec;
+    }
+
+    fn applyInlineFlagSpec(self: *Parser, spec: InlineFlagSpec) void {
+        if (spec.case_fold) |enabled| self.case_fold_override = enabled;
+        if (spec.unicode_mode) |enabled| self.unicode_mode = enabled;
+        if (spec.multiline_mode) |enabled| self.multiline_mode = enabled;
+        if (spec.dotall_mode) |enabled| self.dotall_mode = enabled;
     }
 
     fn push(self: *Parser, node: Node) !NodeId {
@@ -1384,6 +1310,37 @@ test "Parser restores unscoped inline flag toggles at group boundaries" {
 
     const inner = ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(root[0])].group.child)].concat;
     try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(inner[1])]));
+}
+
+test "Parser supports grouped inline flag bundles" {
+    const testing = std.testing;
+
+    var parser = try Parser.init(testing.allocator, "(?im:^a$)(?i-m:^a$)(?is:.)(?i-u:\\w)");
+    const ast = try parser.parse();
+    defer ast.deinit(testing.allocator);
+
+    const root = ast.nodes[@intFromEnum(ast.root)].concat;
+    try testing.expectEqual(@as(usize, 4), root.len);
+
+    const first = ast.nodes[@intFromEnum(root[0])].concat;
+    try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(first[0])]));
+    try testing.expect(ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(first[0])].case_fold_group.child)].anchor_start.multiline);
+    try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(first[1])]));
+    try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(first[2])]));
+    try testing.expect(ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(first[2])].case_fold_group.child)].anchor_end.multiline);
+
+    const second = ast.nodes[@intFromEnum(root[1])].concat;
+    try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(second[0])]));
+    try testing.expect(!ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(second[0])].case_fold_group.child)].anchor_start.multiline);
+    try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(second[1])]));
+    try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(second[2])]));
+    try testing.expect(!ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(second[2])].case_fold_group.child)].anchor_end.multiline);
+
+    try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(root[2])]));
+    try testing.expectEqualDeep(Node{ .dot = .{ .matches_newline = true } }, ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(root[2])].case_fold_group.child)]);
+
+    try testing.expectEqual(.case_fold_group, std.meta.activeTag(ast.nodes[@intFromEnum(root[3])]));
+    try testing.expectEqual(.char_class, std.meta.activeTag(ast.nodes[@intFromEnum(ast.nodes[@intFromEnum(root[3])].case_fold_group.child)]));
 }
 
 test "Parser decodes Unicode literal escapes as literals" {
