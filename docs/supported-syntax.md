@@ -64,7 +64,11 @@ Current escape boundary:
   - invalid bytes on the raw-byte path are treated as non-word units
 - shorthand and word-boundary migration note:
   - the current release is mid-migration toward Unicode-aware shorthand defaults
+  - the visible compatibility change is that `\d`, `\s`, `\w`, `\b`, and `\B`
+    are no longer ASCII-only
   - explicit ASCII regexes such as `[0-9]` and `[A-Za-z0-9_]` remain the stable way to request ASCII-only behavior
+  - explicit ASCII whitespace classes such as `[ \t\r\n\f\v]` remain the stable
+    way to request ASCII-only whitespace behavior
 - Unicode property escapes are supported for:
   - `\p{Any}` and `\P{Any}`
   - `\p{ASCII}` and `\P{ASCII}`

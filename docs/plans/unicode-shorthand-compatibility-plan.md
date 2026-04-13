@@ -112,7 +112,7 @@ The raw-byte behavior remains explicit:
 - [x] Reuse generated property tables where possible instead of duplicating
   logic
 
-- [ ] Keep newline handling for `\s` explicit rather than burying it inside the
+- [x] Keep newline handling for `\s` explicit rather than burying it inside the
   generic whitespace predicate
 
 ## Phase 3: Unicode-Aware `\d` And `\s`
@@ -158,46 +158,47 @@ The raw-byte behavior remains explicit:
 
 ## Phase 6: Planner Boundary
 
-- [ ] Keep Unicode-aware shorthand and boundary patterns off the raw-byte
+- [x] Keep Unicode-aware shorthand and boundary patterns off the raw-byte
   planner initially
 
-- [ ] Add explicit regressions proving those patterns use the general raw-byte
+- [x] Add explicit regressions proving those patterns use the general raw-byte
   VM path
 
-- [ ] Only revisit planner support after planner-vs-VM equivalence is proven
+- [x] Only revisit planner support after planner-vs-VM equivalence is proven
+  - current outcome: still deferred
 
 ## Phase 7: Documentation And Migration Notes
 
-- [ ] Update [supported-syntax.md](../supported-syntax.md) to document the new
+- [x] Update [supported-syntax.md](../supported-syntax.md) to document the new
   default shorthand and boundary semantics
 
-- [ ] Add a migration note describing the visible change from ASCII-only
+- [x] Add a migration note describing the visible change from ASCII-only
   shorthand behavior
 
-- [ ] Document the explicit ASCII alternatives:
+- [x] Document the explicit ASCII alternatives:
   - `[0-9]`
   - `[A-Za-z0-9_]`
   - explicit ASCII whitespace classes
 
 ## Phase 8: Validation
 
-- [ ] Add Unicode helper tests that pin the new shorthand predicates directly
+- [x] Add Unicode helper tests that pin the new shorthand predicates directly
 
-- [ ] Add search-layer equivalence coverage for UTF-8 and invalid UTF-8 inputs
+- [x] Add search-layer equivalence coverage for UTF-8 and invalid UTF-8 inputs
 
-- [ ] Add end-to-end CLI regressions for representative multilingual cases
+- [x] Add end-to-end CLI regressions for representative multilingual cases
 
-- [ ] Re-run planner-boundary and output-equivalence coverage after the
+- [x] Re-run planner-boundary and output-equivalence coverage after the
   shorthand migration lands
 
 ## Recommended Order
 
-- [ ] 1. Lock the exact semantic mapping for `\d`, `\s`, and `\w`
-- [ ] 2. Implement Unicode-aware `\d` and `\s`
+- [x] 1. Lock the exact semantic mapping for `\d`, `\s`, and `\w`
+- [x] 2. Implement Unicode-aware `\d` and `\s`
 - [x] 3. Implement Unicode-aware `\w`
 - [x] 4. Implement Unicode-aware `\b` / `\B`
-- [ ] 5. Update docs and migration notes
-- [ ] 6. Reconfirm raw-byte and planner boundaries
+- [x] 5. Update docs and migration notes
+- [x] 6. Reconfirm raw-byte and planner boundaries
 
 ## Explicit Non-Goals
 

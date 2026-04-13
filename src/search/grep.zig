@@ -1892,6 +1892,14 @@ test "Searcher byte plan inventory records current unsupported structural shapes
     try expectBytePlan("x(a.[0-9]b)y", true);
     try expectBytePlan("x(^ab)y", true);
     try expectBytePlan("(^ab)y", false);
+    try expectBytePlan("\\d+", false);
+    try expectBytePlan("\\D+", false);
+    try expectBytePlan("\\s+", false);
+    try expectBytePlan("\\S+", false);
+    try expectBytePlan("\\w+", false);
+    try expectBytePlan("\\W+", false);
+    try expectBytePlan("\\bcat\\b", false);
+    try expectBytePlan("\\Bcat\\B", false);
 }
 
 test "Searcher byte fallback supports anchored literal start and end patterns" {
@@ -2266,6 +2274,31 @@ test "Searcher handles Unicode property items inside character classes" {
     const raw_any_report = (try any_class.reportFirstByteMatch("raw.bin", "\xffA")).?;
     defer raw_any_report.deinit(testing.allocator);
     try testing.expectEqual(Span{ .start = 0, .end = 2 }, raw_any_report.match_span);
+}
+
+test "Searcher keeps Unicode shorthand and boundary patterns off the byte planner" {
+    const testing = std.testing;
+
+    var digit = try Searcher.init(testing.allocator, "a\\db", .{});
+    defer digit.deinit();
+    try testing.expect(!digit.hasBytePlan());
+    const raw_digit = (try digit.reportFirstByteMatch("raw.bin", "a١b")).?;
+    defer raw_digit.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 0, .end = 4 }, raw_digit.match_span);
+
+    var not_word = try Searcher.init(testing.allocator, "\\W+", .{});
+    defer not_word.deinit();
+    try testing.expect(!not_word.hasBytePlan());
+    const raw_not_word = (try not_word.reportFirstByteMatch("raw.bin", "\xff")).?;
+    defer raw_not_word.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 0, .end = 1 }, raw_not_word.match_span);
+
+    var boundary = try Searcher.init(testing.allocator, "\\bcat\\b", .{});
+    defer boundary.deinit();
+    try testing.expect(!boundary.hasBytePlan());
+    const raw_boundary = (try boundary.reportFirstByteMatch("raw.bin", "\xffcat\xff")).?;
+    defer raw_boundary.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 1, .end = 4 }, raw_boundary.match_span);
 }
 
 test "Searcher forEachMatchReport advances across repeated multiline matches" {
