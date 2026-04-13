@@ -56,11 +56,11 @@ The main issues to address are:
 
 ## Phase 3: Search Runner Split
 
-- [ ] Split `src/search_runner.zig` by responsibility
+- [x] Split `src/search_runner.zig` by responsibility
 - [x] First extract output/report formatting into a dedicated module
-- [ ] Then extract ignore-loading and filtering helpers into a dedicated module
-- [ ] Keep execution orchestration in the runner layer
-- [ ] Preserve current end-to-end behavior and benchmark smoke coverage
+- [x] Then extract ignore-loading and filtering helpers into a dedicated module
+- [x] Keep execution orchestration in the runner layer
+- [x] Preserve current end-to-end behavior and benchmark smoke coverage
 
 ## Phase 4: Public API Boundary Fixes
 
@@ -83,7 +83,7 @@ The main issues to address are:
 
 - [x] 1. Extract the shared command model
 - [x] 2. Move test wrappers out of `src/main.zig`
-- [ ] 3. Split `src/search_runner.zig` by responsibility
+- [x] 3. Split `src/search_runner.zig` by responsibility
 - [ ] 4. Fix the public compile boundary in `src/root.zig`
 
 ## Explicit Non-Goals

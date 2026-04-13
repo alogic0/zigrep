@@ -6,6 +6,7 @@ pub const regex = regex_mod;
 pub const search = @import("search/root.zig");
 pub const search_runner = @import("search_runner.zig");
 pub const search_output = @import("search_output.zig");
+pub const search_filtering = @import("search_filtering.zig");
 pub const command = @import("command.zig");
 pub const cli = @import("cli.zig");
 pub const config = @import("config.zig");
