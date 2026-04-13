@@ -130,11 +130,43 @@ is to let `zig fetch` update `build.zig.zon` for you:
 zig fetch --save=zigrep git+https://github.com/alogic0/zigrep.git
 ```
 
+Exact requirement:
+
+- run this inside a real Zig project
+- Zig 0.15.2 expects:
+  - a `build.zig`
+  - a valid `build.zig.zon`
+  - a top-level `.paths` field in `build.zig.zon`
+
+Minimal manifest shape before running `zig fetch --save`:
+
+```zig
+.{
+    .name = "demo",
+    .version = "0.0.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+    },
+}
+```
+
 That command:
 
 - downloads the package into Zig's global cache
 - computes the package hash
 - adds the dependency entry to `build.zig.zon`
+
+Generated entry shape:
+
+```zig
+.dependencies = .{
+    .zigrep = .{
+        .url = "git+https://github.com/alogic0/zigrep.git#<commit>",
+        .hash = "zigrep-<package-hash>",
+    },
+},
+```
 
 After that, wire the dependency into your `build.zig` the same way:
 
@@ -166,6 +198,8 @@ Practical note:
 
 - `zig fetch --save` is better than hand-writing the hash because Zig computes
   the correct dependency entry for you
+- in a verified Zig 0.15.2 test, Zig rewrote the Git URL to an exact
+  commit-pinned URL and added the computed package hash automatically
 - if you want the dependency URL stored verbatim, Zig also supports
   `zig fetch --save-exact=zigrep ...`
 - if you specifically need a branch, tag, or commit, fetch the exact Git URL
