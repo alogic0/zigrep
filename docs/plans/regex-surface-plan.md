@@ -189,22 +189,47 @@ The goal is not full PCRE2 parity. The goal is:
 
 ## Phase 6: Fallback Engine Decision
 
-- [ ] Decide whether `zigrep` should ever have a second regex engine for the
+- [x] Decide whether `zigrep` should ever have a second regex engine for the
   remaining backtracking-like features.
 
-- [ ] If the answer is yes, write a separate plan for a ripgrep-style boundary:
+  Decision:
+  - not now
+  - keep `zigrep` single-engine for the current roadmap
+  - do not introduce a fallback engine until there is a concrete user-facing
+    requirement that cannot be met inside the native Thompson NFA / DFA /
+    Pike VM boundary
+  - if that requirement appears later, write a separate design and benchmark
+    plan instead of extending this plan implicitly
+
+- [x] If the answer is yes, write a separate plan for a ripgrep-style boundary:
   - native engine remains default
   - richer engine is explicit or auto-selected only when needed
   - behavior and performance differences are documented clearly
 
-- [ ] If the answer is no, document the non-goals explicitly and keep the
+  Current result:
+  - no fallback-engine plan is opened now because the answer is not yet yes
+  - fallback-only constructs remain documented as out of scope rather than
+    partially supported
+
+- [x] If the answer is no, document the non-goals explicitly and keep the
   native engine surface intentionally narrow.
+
+  Result:
+  - current non-goals remain explicit:
+    - lookahead and lookbehind
+    - backreferences
+    - conditional groups
+    - recursion and subroutine calls
+    - control verbs and other PCRE-style backtracking features
+  - future work should prefer more native-engine coverage first
+    (for example Unicode-aware class/property work) before reopening the
+    fallback-engine question
 
 ## Explicit Non-Goals For This Plan
 
-- [ ] Do not add full PCRE2-compatible syntax to the native engine.
-- [ ] Do not mix multiline work back into this plan.
-- [ ] Do not add a second regex engine before the native shorthand/boundary
+- [x] Do not add full PCRE2-compatible syntax to the native engine.
+- [x] Do not mix multiline work back into this plan.
+- [x] Do not add a second regex engine before the native shorthand/boundary
   surface is cleaned up.
 
 ## Clean Separation

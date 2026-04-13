@@ -39,6 +39,13 @@ Character classes support:
 
 The current engine does not yet expose named Unicode properties.
 
+Unicode data note:
+
+- the planned Unicode property work borrows checked-in Unicode database files
+  from the local `zg` repository at generation time only
+- `zigrep` runtime code is expected to use only generated files checked into
+  this repo, not a runtime dependency on `zg`
+
 Current escape boundary:
 
 - supported control and byte escapes include `\n`, `\r`, `\t`, `\f`, `\v`, `\0`, and `\xNN`
