@@ -64,6 +64,7 @@ const Config = struct {
     derived_general_category: []const u8,
     scripts: []const u8,
     property_value_aliases: []const u8,
+    emoji_data: []const u8,
     output: []const u8,
 };
 
@@ -106,6 +107,9 @@ pub fn main() !void {
 
     var default_ignorable_code_point_ranges: std.ArrayList(Range) = .empty;
     defer default_ignorable_code_point_ranges.deinit(arena);
+
+    var emoji_ranges: std.ArrayList(Range) = .empty;
+    defer emoji_ranges.deinit(arena);
 
     var latin_script_ranges: std.ArrayList(Range) = .empty;
     defer latin_script_ranges.deinit(arena);
@@ -251,6 +255,7 @@ pub fn main() !void {
     try loadNamedPropertyData(arena, config.derived_core_properties, "XID_Start", &xid_start_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "XID_Continue", &xid_continue_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "Default_Ignorable_Code_Point", &default_ignorable_code_point_ranges);
+    try loadNamedPropertyData(arena, config.emoji_data, "Emoji", &emoji_ranges);
     try loadNamedScriptData(arena, config.scripts, "Latin", &latin_script_ranges);
     try loadNamedScriptData(arena, config.scripts, "Greek", &greek_script_ranges);
     try loadNamedScriptData(arena, config.scripts, "Cyrillic", &cyrillic_script_ranges);
@@ -312,6 +317,7 @@ pub fn main() !void {
         xid_start_ranges.items,
         xid_continue_ranges.items,
         default_ignorable_code_point_ranges.items,
+        emoji_ranges.items,
         latin_script_ranges.items,
         greek_script_ranges.items,
         cyrillic_script_ranges.items,
@@ -371,6 +377,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     const default_derived_general_category = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "extracted", "DerivedGeneralCategory.txt" });
     const default_scripts = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "Scripts.txt" });
     const default_property_value_aliases = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "PropertyValueAliases.txt" });
+    const default_emoji_data = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "emoji", "emoji-data.txt" });
 
     var config = Config{
         .zg_root = default_zg_root,
@@ -380,6 +387,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
         .derived_general_category = default_derived_general_category,
         .scripts = default_scripts,
         .property_value_aliases = default_property_value_aliases,
+        .emoji_data = default_emoji_data,
         .output = "",
     };
 
@@ -396,6 +404,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             config.derived_general_category = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "extracted", "DerivedGeneralCategory.txt" });
             config.scripts = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "Scripts.txt" });
             config.property_value_aliases = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "PropertyValueAliases.txt" });
+            config.emoji_data = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "emoji", "emoji-data.txt" });
         } else if (std.mem.eql(u8, arg, "--unicode-data")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -420,6 +429,10 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
             config.property_value_aliases = args[i];
+        } else if (std.mem.eql(u8, arg, "--emoji-data")) {
+            i += 1;
+            if (i >= args.len) return error.MissingArgument;
+            config.emoji_data = args[i];
         } else if (std.mem.eql(u8, arg, "--output")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -437,6 +450,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     try ensureFileExists(config.derived_general_category);
     try ensureFileExists(config.scripts);
     try ensureFileExists(config.property_value_aliases);
+    try ensureFileExists(config.emoji_data);
 
     return config;
 }
@@ -451,14 +465,14 @@ fn hasHelpFlag(args: []const []const u8) bool {
 fn writeUsage() !void {
     std.debug.print(
         \\usage: gen_unicode_props.zig [--zg-root PATH] [--unicode-data PATH] [--prop-list PATH] [--derived-core-properties PATH] --output PATH
-        \\                             [--derived-general-category PATH] [--scripts PATH] [--property-value-aliases PATH]
+        \\                             [--derived-general-category PATH] [--scripts PATH] [--property-value-aliases PATH] [--emoji-data PATH]
         \\
         \\Default data source:
         \\  ../zig-libs/zg/data/unicode relative to the zigrep repo root
         \\
         \\Examples:
         \\  zig run tools/gen_unicode_props.zig -- --zg-root ../zig-libs/zg --output src/regex/unicode_props_generated.zig
-        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --derived-general-category /path/to/DerivedGeneralCategory.txt --scripts /path/to/Scripts.txt --property-value-aliases /path/to/PropertyValueAliases.txt --output src/regex/unicode_props_generated.zig
+        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --derived-general-category /path/to/DerivedGeneralCategory.txt --scripts /path/to/Scripts.txt --property-value-aliases /path/to/PropertyValueAliases.txt --emoji-data /path/to/emoji-data.txt --output src/regex/unicode_props_generated.zig
         \\
     , .{});
 }
@@ -987,6 +1001,7 @@ fn writeOutput(
     xid_start_ranges: []const Range,
     xid_continue_ranges: []const Range,
     default_ignorable_code_point_ranges: []const Range,
+    emoji_ranges: []const Range,
     latin_script_ranges: []const Range,
     greek_script_ranges: []const Range,
     cyrillic_script_ranges: []const Range,
@@ -1049,6 +1064,7 @@ fn writeOutput(
     try writer.interface.print("// - {s}\n", .{config.derived_general_category});
     try writer.interface.print("// - {s}\n", .{config.scripts});
     try writer.interface.print("// - {s}\n", .{config.property_value_aliases});
+    try writer.interface.print("// - {s}\n", .{config.emoji_data});
     try writer.interface.print("// Data source repository:\n", .{});
     try writer.interface.print("// - {s}\n", .{config.zg_root});
     try writer.interface.print("// - https://codeberg.org/atman/zg\n\n", .{});
@@ -1085,6 +1101,8 @@ fn writeOutput(
     try writeRangeList(&writer.interface, "xid_continue_ranges", xid_continue_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "default_ignorable_code_point_ranges", default_ignorable_code_point_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "emoji_ranges", emoji_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "latin_script_ranges", latin_script_ranges);
     try writer.interface.print("\n", .{});

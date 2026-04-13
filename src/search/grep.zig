@@ -2163,6 +2163,13 @@ test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     defer default_ignorable.deinit();
     try testing.expect((try default_ignorable.reportFirstMatch("sample.txt", "\xC2\xAD")) != null);
 
+    var emoji = try Searcher.init(testing.allocator, "\\p{Emoji}+", .{});
+    defer emoji.deinit();
+    try testing.expect((try emoji.reportFirstMatch("sample.txt", "😀")) != null);
+    const raw_not_emoji = (try emoji.reportFirstByteMatch("raw.bin", "\xff😀")).?;
+    defer raw_not_emoji.deinit(testing.allocator);
+    try testing.expectEqual(Span{ .start = 1, .end = 5 }, raw_not_emoji.match_span);
+
     var lowercase = try Searcher.init(testing.allocator, "\\p{Lowercase}+", .{});
     defer lowercase.deinit();
     try testing.expect((try lowercase.reportFirstMatch("sample.txt", "ß")) != null);

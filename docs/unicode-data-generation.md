@@ -37,6 +37,7 @@ Specifically, the current property generator reads:
 - `extracted/DerivedGeneralCategory.txt`
 - `Scripts.txt`
 - `PropertyValueAliases.txt`
+- `emoji/emoji-data.txt`
 - Unicode version `16.0.0`
 
 This is a generation-time input only.
@@ -68,6 +69,7 @@ zig run tools/gen_unicode_props.zig -- \
   --derived-general-category /path/to/DerivedGeneralCategory.txt \
   --scripts /path/to/Scripts.txt \
   --property-value-aliases /path/to/PropertyValueAliases.txt \
+  --emoji-data /path/to/emoji-data.txt \
   --output src/regex/unicode_props_generated.zig
 ```
 

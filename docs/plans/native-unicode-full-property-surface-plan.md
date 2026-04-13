@@ -93,7 +93,7 @@ This bucket also stays native if each property is just a scalar predicate over
   - [x] `Cased`
   - [x] `Case_Ignorable`
 
-- [ ] Evaluate other derived properties that are still good native-core fits:
+- [x] Evaluate other derived properties that are still good native-core fits:
   - [x] `ID_Start`
   - [x] `ID_Continue`
   - [x] `XID_Start`
@@ -142,10 +142,14 @@ Script matching is still native-core work if implemented as table lookup over a
 
 - [x] Consider `\p{ASCII}` as a special native-core property.
 
-- [ ] Decide whether binary-property-style names like `Emoji` are in scope.
-  Default recommendation:
-  - do not attempt all of them at once
-  - stage only the ones backed by clear user demand
+- [x] Add selected binary-property-style names that are already part of
+  ripgrep's default Unicode surface.
+  First staged target:
+  - [x] `Emoji`
+  Scope rule:
+  - do not attempt all binary properties at once
+  - add only properties backed by clear parity value and available Unicode data
+  - keep them in the native engine as scalar predicates over generated tables
 
 ## Phase 6: Bracket-Class Integration
 
@@ -165,17 +169,25 @@ Script matching is still native-core work if implemented as table lookup over a
 This is still native-core work, but it is a compatibility decision, not just
 table generation.
 
-- [ ] Decide whether to keep ASCII shorthand semantics forever or add an
+- [x] Decide whether to keep ASCII shorthand semantics forever or add an
   explicit Unicode mode switch.
+  Current decision:
+  - keep shorthand classes ASCII-only on the current roadmap
+  - keep word-boundary behavior ASCII-word based on the current roadmap
 
-- [ ] If parity with ripgrep is the goal, plan the migration for:
+- [x] If parity with ripgrep is the goal, plan the migration for:
   - Unicode-aware `\w`
   - Unicode-aware `\d`
   - Unicode-aware `\s`
   - Unicode-aware `\b` / `\B`
+  Current outcome:
+  - defer this migration to a separate compatibility plan
 
-- [ ] If shorthand semantics remain ASCII-only, consider explicit Unicode
+- [x] If shorthand semantics remain ASCII-only, consider explicit Unicode
   alternatives instead of widening current behavior silently.
+  Current outcome:
+  - explicit Unicode property/script syntax already covers the current native
+    roadmap without silently widening shorthand behavior
 
 ## Phase 8: Generator Strategy
 
@@ -223,6 +235,7 @@ table generation.
   Current decision:
   - do not widen shorthand semantics in this plan
   - leave ASCII shorthand and ASCII word-boundary behavior unchanged
+- [x] 6. Add selected high-value binary properties such as `Emoji`
 
 ## Explicit Non-Goals
 

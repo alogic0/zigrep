@@ -87,6 +87,7 @@ Current escape boundary:
   - `\p{XID_Start}` and `\P{XID_Start}`
   - `\p{XID_Continue}` and `\P{XID_Continue}`
   - `\p{Default_Ignorable_Code_Point}` and `\P{Default_Ignorable_Code_Point}`
+  - `\p{Emoji}` and `\P{Emoji}`
   - Script support is also available in these forms:
     - direct names like `\p{Greek}` and `\p{Hebrew}`
     - qualified names like `\p{Script=Greek}`

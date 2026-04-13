@@ -27,6 +27,7 @@ pub const Property = enum(u16) {
     xid_start,
     xid_continue,
     default_ignorable_code_point,
+    emoji,
     lowercase,
     uppercase,
     titlecase_letter,
@@ -163,6 +164,7 @@ pub const Strategy = struct {
         if (propertyNameEq(name, "xid_start")) return .xid_start;
         if (propertyNameEq(name, "xid_continue")) return .xid_continue;
         if (propertyNameEq(name, "default_ignorable_code_point")) return .default_ignorable_code_point;
+        if (propertyNameEq(name, "emoji")) return .emoji;
         if (propertyNameEq(name, "lowercase") or propertyNameEq(name, "lower") or propertyNameEq(name, "ll")) return .lowercase;
         if (propertyNameEq(name, "uppercase") or propertyNameEq(name, "upper") or propertyNameEq(name, "lu")) return .uppercase;
         if (propertyNameEq(name, "titlecase_letter") or propertyNameEq(name, "lt")) return .titlecase_letter;
@@ -227,6 +229,7 @@ pub const Strategy = struct {
             .xid_start => inRanges(cp, &generated.xid_start_ranges),
             .xid_continue => inRanges(cp, &generated.xid_continue_ranges),
             .default_ignorable_code_point => inRanges(cp, &generated.default_ignorable_code_point_ranges),
+            .emoji => inRanges(cp, &generated.emoji_ranges),
             .lowercase => inRanges(cp, &generated.lowercase_ranges),
             .uppercase => inRanges(cp, &generated.uppercase_ranges),
             .titlecase_letter => inRanges(cp, &generated.titlecase_letter_ranges),
@@ -541,6 +544,7 @@ test "Unicode strategy looks up named properties and aliases" {
     try testing.expectEqual(@as(?Property, .xid_start), Strategy.lookupProperty("XID_Start"));
     try testing.expectEqual(@as(?Property, .xid_continue), Strategy.lookupProperty("XID_Continue"));
     try testing.expectEqual(@as(?Property, .default_ignorable_code_point), Strategy.lookupProperty("Default_Ignorable_Code_Point"));
+    try testing.expectEqual(@as(?Property, .emoji), Strategy.lookupProperty("Emoji"));
     try testing.expectEqual(@as(?Property, .lowercase), Strategy.lookupProperty("Ll"));
     try testing.expectEqual(@as(?Property, .titlecase_letter), Strategy.lookupProperty("Lt"));
     try testing.expectEqual(@as(?Property, .modifier_letter), Strategy.lookupProperty("Lm"));
@@ -576,7 +580,6 @@ test "Unicode strategy looks up named properties and aliases" {
     try testing.expectEqual(@as(?Property, .private_use), Strategy.lookupProperty("Co"));
     try testing.expectEqual(@as(?Property, .unassigned), Strategy.lookupProperty("Cn"));
     try testing.expectEqual(@as(?Property, .uppercase), Strategy.lookupProperty("Uppercase"));
-    try testing.expectEqual(@as(?Property, null), Strategy.lookupProperty("Emoji"));
 }
 
 test "Unicode strategy evaluates property membership" {
@@ -604,6 +607,7 @@ test "Unicode strategy evaluates property membership" {
     try testing.expect(Strategy.hasProperty('A', .xid_start));
     try testing.expect(Strategy.hasProperty('0', .xid_continue));
     try testing.expect(Strategy.hasProperty(0x00AD, .default_ignorable_code_point));
+    try testing.expect(Strategy.hasProperty(0x1F600, .emoji));
     try testing.expect(Strategy.hasProperty('ß', .lowercase));
     try testing.expect(Strategy.hasProperty(0x01C5, .titlecase_letter));
     try testing.expect(Strategy.hasProperty(0x02B0, .modifier_letter));

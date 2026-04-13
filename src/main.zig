@@ -6187,7 +6187,30 @@ test "runCli rejects unsupported Unicode properties" {
     const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
     defer testing.allocator.free(root_path);
 
-    try testing.expectError(error.UnsupportedProperty, runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Emoji}", root_path }));
+    try testing.expectError(error.UnsupportedProperty, runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{NotARealProperty}", root_path }));
+}
+
+test "runCli supports Emoji Unicode properties" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "😀\n" ++
+            "A\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Emoji}+", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:😀"));
 }
 
 test "runCli rejects invalid Unicode escapes" {

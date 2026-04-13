@@ -309,6 +309,6 @@ test "Lexer rejects malformed and unsupported Unicode property escapes" {
     var empty = Lexer(u8).init("\\p{}");
     try testing.expectError(error.InvalidPropertyEscape, empty.next());
 
-    var unsupported = Lexer(u8).init("\\p{Emoji}");
+    var unsupported = Lexer(u8).init("\\p{NotARealProperty}");
     try testing.expectError(error.UnsupportedProperty, unsupported.next());
 }
