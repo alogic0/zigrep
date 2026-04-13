@@ -57,6 +57,10 @@ Current escape boundary:
 - word boundaries `\b` and `\B` are supported
   - boundary checks use ASCII wordness (`[A-Za-z0-9_]`) on valid text units
   - invalid bytes on the raw-byte path are treated as non-word units
+- shorthand and word-boundary migration note:
+  - the current release still uses ASCII shorthand and ASCII word-boundary semantics
+  - a follow-up compatibility plan is staged to migrate `\d`, `\s`, `\w`, `\b`, and `\B` toward Unicode-aware defaults
+  - explicit ASCII regexes such as `[0-9]` and `[A-Za-z0-9_]` remain the stable way to request ASCII-only behavior
 - Unicode property escapes are supported for:
   - `\p{Any}` and `\P{Any}`
   - `\p{ASCII}` and `\P{ASCII}`

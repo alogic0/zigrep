@@ -149,6 +149,22 @@ pub const Strategy = struct {
         return cp <= 0x7f and (std.ascii.isAlphanumeric(@intCast(cp)) or cp == '_');
     }
 
+    pub fn isUnicodeDigit(cp: u32) bool {
+        return hasProperty(cp, .decimal_number);
+    }
+
+    pub fn isUnicodeWhitespace(cp: u32) bool {
+        return hasProperty(cp, .whitespace);
+    }
+
+    pub fn isUnicodeWord(cp: u32) bool {
+        return hasProperty(cp, .alphabetic) or
+            hasProperty(cp, .mark) or
+            hasProperty(cp, .decimal_number) or
+            hasProperty(cp, .connector_punctuation) or
+            isJoinControl(cp);
+    }
+
     pub fn lookupProperty(name: []const u8) ?Property {
         if (propertyNameEq(name, "any")) return .any;
         if (propertyNameEq(name, "ascii")) return .ascii;
@@ -479,6 +495,10 @@ fn isUtf8Continuation(byte: u8) bool {
     return (byte & 0b1100_0000) == 0b1000_0000;
 }
 
+fn isJoinControl(cp: u32) bool {
+    return cp == 0x200C or cp == 0x200D;
+}
+
 test "Unicode strategy decodes incrementally without whole-input preprocessing" {
     const testing = std.testing;
 
@@ -512,6 +532,31 @@ test "Unicode strategy classifies properties and boundaries" {
     try testing.expect(Strategy.boundary(null, 'x', .word));
     try testing.expect(Strategy.boundary('\n', 'x', .line));
     try testing.expect(!Strategy.boundary('a', 'b', .word));
+}
+
+test "Unicode strategy exposes planned Unicode shorthand predicates" {
+    const testing = std.testing;
+
+    try testing.expect(Strategy.isUnicodeDigit('3'));
+    try testing.expect(Strategy.isUnicodeDigit('١'));
+    try testing.expect(!Strategy.isUnicodeDigit(0x00B2));
+
+    try testing.expect(Strategy.isUnicodeWhitespace(' '));
+    try testing.expect(Strategy.isUnicodeWhitespace('\t'));
+    try testing.expect(Strategy.isUnicodeWhitespace(0x00A0));
+    try testing.expect(Strategy.isUnicodeWhitespace('\n'));
+    try testing.expect(!Strategy.isUnicodeWhitespace('A'));
+
+    try testing.expect(Strategy.isUnicodeWord('A'));
+    try testing.expect(Strategy.isUnicodeWord('Ж'));
+    try testing.expect(Strategy.isUnicodeWord('β'));
+    try testing.expect(Strategy.isUnicodeWord('١'));
+    try testing.expect(Strategy.isUnicodeWord('_'));
+    try testing.expect(Strategy.isUnicodeWord(0x0345));
+    try testing.expect(Strategy.isUnicodeWord(0x200C));
+    try testing.expect(Strategy.isUnicodeWord(0x200D));
+    try testing.expect(!Strategy.isUnicodeWord('-'));
+    try testing.expect(!Strategy.isUnicodeWord(' '));
 }
 
 test "Unicode strategy looks up named properties and aliases" {
