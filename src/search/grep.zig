@@ -120,7 +120,9 @@ pub const Searcher = struct {
         var hir = try regex.compile(allocator, pattern, .{});
         defer hir.deinit(allocator);
 
-        if (shouldFoldCase(pattern, options.case_mode)) {
+        const fold_case = shouldFoldCase(pattern, options.case_mode);
+
+        if (fold_case) {
             regex.hir.applySimpleCaseFold(allocator, &hir) catch |err| switch (err) {
                 error.UnsupportedCaseInsensitivePattern => return error.UnsupportedCaseInsensitivePattern,
                 error.OutOfMemory => return error.OutOfMemory,
@@ -134,7 +136,13 @@ pub const Searcher = struct {
                 .multiline = options.multiline,
                 .multiline_dotall = options.multiline_dotall,
             }),
-            .byte_plan = try extractByteSearchPlan(allocator, hir),
+            // Case-folded patterns stay on the general VM path until planner
+            // equivalence is proven for folded classes and Unicode-aware case
+            // semantics.
+            .byte_plan = if (fold_case)
+                .none
+            else
+                try extractByteSearchPlan(allocator, hir),
         };
     }
 
@@ -321,18 +329,8 @@ fn patternHasUppercase(pattern: []const u8) bool {
 }
 
 fn isUppercaseCodePoint(cp: u32) bool {
-    if (cp <= 0x7f) return std.ascii.isUpper(@as(u8, @intCast(cp)));
-    if (cp > 0xFFFF) return false;
-
-    const upper = std.os.windows.nls.upcaseW(@as(u16, @intCast(cp)));
-    if (upper != cp) return false;
-
-    var candidate: u32 = 0;
-    while (candidate <= 0xFFFF) : (candidate += 1) {
-        if (candidate == cp) continue;
-        if (std.os.windows.nls.upcaseW(@as(u16, @intCast(candidate))) == upper) return true;
-    }
-    return false;
+    return regex.unicode.Strategy.hasProperty(cp, .uppercase) or
+        regex.unicode.Strategy.hasProperty(cp, .titlecase_letter);
 }
 
 pub fn reportFirstMatch(
@@ -1598,6 +1596,17 @@ test "reportFirstMatch supports ignore-case literals" {
 
     try testing.expectEqualStrings("ABC", report.line);
     try testing.expectEqual(Span{ .start = 0, .end = 3 }, report.match_span);
+
+    const prefixed = (try reportFirstMatch(
+        testing.allocator,
+        "needle",
+        "sample.txt",
+        "Needle one\n",
+        .{ .case_mode = .insensitive },
+    )).?;
+    defer prefixed.deinit(testing.allocator);
+    try testing.expectEqualStrings("Needle one", prefixed.line);
+    try testing.expectEqual(Span{ .start = 0, .end = 6 }, prefixed.match_span);
 }
 
 test "reportFirstMatch supports ignore-case Unicode literals" {
@@ -1650,6 +1659,40 @@ test "reportFirstMatch smart-case keeps uppercase patterns case-sensitive" {
     )).?;
     defer report.deinit(testing.allocator);
     try testing.expectEqualStrings("ABC", report.line);
+}
+
+test "reportFirstMatch smart-case keeps uppercase Unicode patterns case-sensitive" {
+    const testing = std.testing;
+
+    try testing.expect((try reportFirstMatch(
+        testing.allocator,
+        "Жар",
+        "sample.txt",
+        "жар",
+        .{ .case_mode = .smart },
+    )) == null);
+
+    const report = (try reportFirstMatch(
+        testing.allocator,
+        "жар",
+        "sample.txt",
+        "ЖАР",
+        .{ .case_mode = .smart },
+    )).?;
+    defer report.deinit(testing.allocator);
+    try testing.expectEqualStrings("ЖАР", report.line);
+}
+
+test "reportFirstMatch smart-case treats titlecase patterns as case-sensitive" {
+    const testing = std.testing;
+
+    try testing.expect((try reportFirstMatch(
+        testing.allocator,
+        "ǅar",
+        "sample.txt",
+        "ǆar",
+        .{ .case_mode = .smart },
+    )) == null);
 }
 
 test "reportFirstMatch rejects oversized case-insensitive ranges" {

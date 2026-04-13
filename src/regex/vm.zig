@@ -512,6 +512,20 @@ fn compileProgram(allocator: std.mem.Allocator, pattern: []const u8, options: @i
     });
 }
 
+fn compileFoldedProgram(allocator: std.mem.Allocator, pattern: []const u8, options: @import("root.zig").CompileOptions) !nfa.Program {
+    const regex = @import("root.zig");
+
+    var lowered = try regex.compile(allocator, pattern, options);
+    defer lowered.deinit(allocator);
+
+    try regex.hir.applySimpleCaseFold(allocator, &lowered);
+
+    return nfa.compile(allocator, lowered, .{
+        .multiline = options.multiline,
+        .multiline_dotall = options.multiline_dotall,
+    });
+}
+
 fn expectMatch(pattern: []const u8, haystack: []const u8) !void {
     const testing = std.testing;
 
@@ -706,6 +720,22 @@ test "VM handles negated classes and class edge literals" {
     try expectMatch("[^-\\]]+", "abc");
     try expectNoMatch("[^a-c]+", "cab");
     try expectMatch("[]-^]+", "]^-");
+}
+
+test "VM handles explicit char-class sequences inside longer haystacks" {
+    try expectMatch("[Nn][Ee][Ee][Dd][Ll][Ee]", "Needle one");
+}
+
+test "VM handles folded literal class sequences inside longer haystacks" {
+    const testing = std.testing;
+
+    const program = try compileFoldedProgram(testing.allocator, "needle", .{});
+    defer program.deinit(testing.allocator);
+
+    var engine = MatchEngine.init(testing.allocator);
+    const found = (try engine.firstMatch(program, "Needle one")).?;
+    defer found.deinit(testing.allocator);
+    try testing.expectEqual(Capture{ .start = 0, .end = 6 }, found.span);
 }
 
 test "VM handles Unicode digit and whitespace shorthands" {

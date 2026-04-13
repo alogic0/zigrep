@@ -3496,6 +3496,50 @@ test "runCli smart-case uses ignore-case for lowercase patterns" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:Needle one"));
 }
 
+test "runCli smart-case keeps uppercase Unicode patterns case-sensitive" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "жар lower\nЖар upper\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--smart-case", "Жар", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:жар lower"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:Жар upper"));
+}
+
+test "runCli smart-case treats titlecase Unicode patterns as case-sensitive" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "ǆar lower\nǅar title\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--smart-case", "ǅar", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:ǆar lower"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:ǅar title"));
+}
+
 test "runCli returns 1 when nothing matches" {
     const testing = std.testing;
 
@@ -6865,6 +6909,48 @@ test "reportFileMatch supports Unicode decimal property inside concatenation" {
 
     try testing.expectEqualStrings("a5b", report.line);
     try testing.expectEqual(@as(usize, 1), report.line_number);
+}
+
+test "reportFileMatch supports ignore-case literals on full file contents" {
+    const testing = std.testing;
+
+    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{
+        .case_mode = .insensitive,
+    });
+    defer searcher.deinit();
+
+    const maybe_report = try reportFileMatch(
+        testing.allocator,
+        &searcher,
+        "sample.txt",
+        "Needle one\n",
+        .auto,
+    );
+    try testing.expect(maybe_report != null);
+    const report = maybe_report.?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("Needle one", report.line);
+    try testing.expectEqual(@as(usize, 1), report.line_number);
+    try testing.expectEqual(zigrep.search.grep.Span{ .start = 0, .end = 6 }, report.match_span);
+}
+
+test "Searcher.reportFirstMatch supports ignore-case literals on full file contents" {
+    const testing = std.testing;
+
+    var searcher = try zigrep.search.grep.Searcher.init(testing.allocator, "needle", .{
+        .case_mode = .insensitive,
+    });
+    defer searcher.deinit();
+
+    const maybe_report = try searcher.reportFirstMatch("sample.txt", "Needle one\n");
+    try testing.expect(maybe_report != null);
+    const report = maybe_report.?;
+    defer report.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("Needle one", report.line);
+    try testing.expectEqual(@as(usize, 1), report.line_number);
+    try testing.expectEqual(zigrep.search.grep.Span{ .start = 0, .end = 6 }, report.match_span);
 }
 
 test "runCli output toggles apply across the end-to-end path" {

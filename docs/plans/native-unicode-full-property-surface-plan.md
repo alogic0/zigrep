@@ -11,6 +11,27 @@ It is intentionally broader than:
 The goal is to define a complete native-core Unicode property roadmap without
 crossing into fallback-engine territory.
 
+## Status
+
+This plan is complete for its intended scope.
+
+Implemented result:
+
+- full general-category families and subgroup aliases in the native engine
+- generated derived boolean property support for the staged high-value set
+- generated `Script` support with `sc=` aliases
+- matcher-level `Any` and `ASCII`
+- selected high-value binary-property-style support via `Emoji`
+- bracket-class integration across the supported property surface
+
+Follow-up work, if any, should use a separate plan. In particular:
+
+- Unicode-aware shorthand and boundary compatibility should use a dedicated
+  compatibility plan
+- `Script_Extensions` should use a separate script-expansion plan if we decide
+  to add it
+- additional binary properties should use a separate targeted follow-up plan
+
 ## Core Boundary
 
 This plan stays inside the native engine when a property feature is:
