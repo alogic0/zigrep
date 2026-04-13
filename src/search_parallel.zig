@@ -8,6 +8,10 @@ const search_execution = @import("search_execution.zig");
 const search_output = @import("search_output.zig");
 const search_result = @import("search_result.zig");
 
+// Parallel search execution.
+// This module owns worker-pool execution and aggregation for already-filtered
+// entries. It does not own traversal or per-file search policy.
+
 pub const CliOptions = command.CliOptions;
 pub const SearchResult = search_result.SearchResult;
 

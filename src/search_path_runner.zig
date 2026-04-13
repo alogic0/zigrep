@@ -7,6 +7,10 @@ const search_execution = @import("search_execution.zig");
 const search_filtering = @import("search_filtering.zig");
 const search_result = @import("search_result.zig");
 
+// Path-level search orchestration.
+// This module owns directory traversal, ignore loading, entry filtering, and
+// schedule selection for one root path.
+
 pub const CliOptions = command.CliOptions;
 pub const SearchResult = search_result.SearchResult;
 

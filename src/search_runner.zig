@@ -10,6 +10,11 @@ const search_path_runner = @import("search_path_runner.zig");
 const search_reporting = @import("search_reporting.zig");
 const search_result = @import("search_result.zig");
 
+// Top-level search coordination.
+// This module owns high-level run coordination and the sequential entry loop,
+// while delegating path traversal, parallel execution, per-file execution, and
+// reporting to narrower modules.
+
 pub const OutputOptions = command.OutputOptions;
 pub const OutputFormat = command.OutputFormat;
 pub const BinaryMode = command.BinaryMode;

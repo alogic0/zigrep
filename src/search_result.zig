@@ -1,3 +1,4 @@
+// Shared search result and stats types used across the decomposed search stack.
 pub const SearchStats = struct {
     searched_files: usize = 0,
     matched_files: usize = 0,

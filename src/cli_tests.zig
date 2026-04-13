@@ -1,13 +1,14 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
 const cli = zigrep.cli;
+const cli_entry = zigrep.cli_entry;
 const search = zigrep.search;
 
 const OutputFormat = cli.OutputFormat;
 const BinaryMode = cli.BinaryMode;
 const ReportMode = cli.ReportMode;
 const parseArgs = cli.parseArgs;
-const writeFatalError = cli.writeFatalError;
+const writeFatalError = cli_entry.writeFatalError;
 
 test "parseArgs defaults to current directory search" {
     const testing = std.testing;
@@ -402,7 +403,7 @@ test "runCli rejects unsupported multiline output combinations for now" {
     var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
     defer stderr_capture.deinit();
 
-    try testing.expectError(error.InvalidFlagCombination, cli.runCli(
+    try testing.expectError(error.InvalidFlagCombination, cli_entry.runCli(
         testing.allocator,
         &stdout_capture.writer,
         &stderr_capture.writer,

@@ -45,5 +45,5 @@ pub fn runCliCaptured(
     allocator: std.mem.Allocator,
     argv: []const []const u8,
 ) !CapturedCliRun {
-    return runCliCapturedWith(allocator, zigrep.cli.runCli, argv);
+    return runCliCapturedWith(allocator, zigrep.cli_entry.runCli, argv);
 }

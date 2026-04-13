@@ -6,6 +6,10 @@ const command = @import("command.zig");
 const search_reporting = @import("search_reporting.zig");
 const search_execution = @import("search_execution.zig");
 
+// Per-file search execution.
+// This module owns file reads, preprocessing/decoding preparation, binary
+// behavior, and producing owned output for one entry.
+
 pub const CliOptions = command.CliOptions;
 
 pub const EntryOutput = struct {

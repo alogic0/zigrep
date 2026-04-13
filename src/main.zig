@@ -1,6 +1,6 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
-const cli = zigrep.cli;
+const cli_entry = zigrep.cli_entry;
 
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
@@ -20,8 +20,8 @@ pub fn main() !void {
     var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
     const stderr = &stderr_writer.interface;
 
-    const exit_code = cli.runCli(allocator, stdout, stderr, argv) catch |err| {
-        try cli.writeFatalError(stderr, argv[0], err);
+    const exit_code = cli_entry.runCli(allocator, stdout, stderr, argv) catch |err| {
+        try cli_entry.writeFatalError(stderr, argv[0], err);
         try stderr.flush();
         std.process.exit(2);
     };

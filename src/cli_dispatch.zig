@@ -3,6 +3,10 @@ const command = @import("command.zig");
 const search = @import("search/root.zig");
 const runner = @import("search_runner.zig");
 
+// Execution of parsed CLI command variants.
+// This keeps command dispatch separate from parsing and from process-level
+// entrypoint concerns.
+
 pub const CliOptions = command.CliOptions;
 
 pub const ParseResult = union(enum) {
