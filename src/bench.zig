@@ -39,6 +39,11 @@ const Result = struct {
     bytes: usize = 0,
 };
 
+const BenchMode = enum {
+    full,
+    smoke,
+};
+
 const CorpusRunResult = struct {
     matched: bool,
     files: usize,
@@ -47,6 +52,7 @@ const CorpusRunResult = struct {
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
+    const mode = parseBenchMode();
     const synthetic_cases = try buildSyntheticCases(allocator);
     defer {
         for (synthetic_cases) |bench_case| allocator.free(bench_case.haystack);
@@ -67,7 +73,7 @@ pub fn main() !void {
     const stdout = &stdout_writer.interface;
 
     try stdout.print("kind,name,iterations,total_ns,ns_per_iter,matched,files,bytes\n", .{});
-    for (synthetic_cases) |bench_case| {
+    for (syntheticCasesForMode(synthetic_cases, mode)) |bench_case| {
         const result = try runSyntheticCase(allocator, bench_case);
         try stdout.print("synthetic,{s},{d},{d},{d},{},{d},{d}\n", .{
             bench_case.name,
@@ -79,7 +85,7 @@ pub fn main() !void {
             result.bytes,
         });
     }
-    for (corpus_cases) |bench_case| {
+    for (corpusCasesForMode(corpus_cases, mode)) |bench_case| {
         const result = try runCorpusCase(allocator, bench_case);
         try stdout.print("corpus,{s},{d},{d},{d},{},{d},{d}\n", .{
             bench_case.name,
@@ -91,7 +97,7 @@ pub fn main() !void {
             result.bytes,
         });
     }
-    for (output_cases) |bench_case| {
+    for (outputCasesForMode(output_cases, mode)) |bench_case| {
         const result = try runOutputCase(allocator, bench_case);
         try stdout.print("output,{s},{d},{d},{d},{},{d},{d}\n", .{
             bench_case.name,
@@ -104,6 +110,36 @@ pub fn main() !void {
         });
     }
     try stdout.flush();
+}
+
+fn parseBenchMode() BenchMode {
+    var args = std.process.args();
+    _ = args.next();
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--smoke")) return .smoke;
+    }
+    return .full;
+}
+
+fn syntheticCasesForMode(cases: []const SyntheticBenchCase, mode: BenchMode) []const SyntheticBenchCase {
+    return switch (mode) {
+        .full => cases,
+        .smoke => cases[0..1],
+    };
+}
+
+fn corpusCasesForMode(cases: []const CorpusBenchCase, mode: BenchMode) []const CorpusBenchCase {
+    return switch (mode) {
+        .full => cases,
+        .smoke => cases[0..1],
+    };
+}
+
+fn outputCasesForMode(cases: []const OutputBenchCase, mode: BenchMode) []const OutputBenchCase {
+    return switch (mode) {
+        .full => cases,
+        .smoke => cases[0..2],
+    };
 }
 
 fn runSyntheticCase(allocator: std.mem.Allocator, bench_case: SyntheticBenchCase) !Result {

@@ -141,6 +141,11 @@ pub fn build(b: *std.Build) void {
     const run_bench = b.addRunArtifact(bench_exe);
     bench_step.dependOn(&run_bench.step);
 
+    const bench_smoke_step = b.step("bench-smoke", "Run a small benchmark smoke subset");
+    const run_bench_smoke = b.addRunArtifact(bench_exe);
+    run_bench_smoke.addArg("--smoke");
+    bench_smoke_step.dependOn(&run_bench_smoke.step);
+
     // Creates an executable that will run `test` blocks from the provided module.
     // Here `mod` needs to define a target, which is why earlier we made sure to
     // set the releative field.
