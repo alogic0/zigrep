@@ -85,11 +85,12 @@ The goal is:
 
   Decision:
   - first property set is:
+    - `Alphabetic`
     - `Letter`
     - `Number`
     - `Whitespace`
-  - defer `Alphabetic` until there is a clearer reason to distinguish it from
-    `Letter` in the user-visible surface
+  - `Alphabetic` is now included explicitly as a distinct property surface
+    alongside `Letter`
 
 ## Phase 2: Choose A Unicode Data Strategy
 

@@ -9,6 +9,7 @@ const Config = struct {
     zg_root: []const u8,
     unicode_data: []const u8,
     prop_list: []const u8,
+    derived_core_properties: []const u8,
     output: []const u8,
 };
 
@@ -28,10 +29,14 @@ pub fn main() !void {
     var whitespace_ranges: std.ArrayList(Range) = .empty;
     defer whitespace_ranges.deinit(arena);
 
+    var alphabetic_ranges: std.ArrayList(Range) = .empty;
+    defer alphabetic_ranges.deinit(arena);
+
     try loadUnicodeData(arena, config.unicode_data, &letter_ranges, &number_ranges);
     try loadWhitespaceData(arena, config.prop_list, &whitespace_ranges);
+    try loadNamedPropertyData(arena, config.derived_core_properties, "Alphabetic", &alphabetic_ranges);
 
-    try writeOutput(config, letter_ranges.items, number_ranges.items, whitespace_ranges.items);
+    try writeOutput(config, letter_ranges.items, number_ranges.items, whitespace_ranges.items, alphabetic_ranges.items);
 }
 
 fn parseArgs(allocator: std.mem.Allocator) !Config {
@@ -44,11 +49,13 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     const default_zg_root = try std.fs.path.join(allocator, &.{ "..", "zig-libs", "zg" });
     const default_unicode_data = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "UnicodeData.txt" });
     const default_prop_list = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "PropList.txt" });
+    const default_derived_core_properties = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "DerivedCoreProperties.txt" });
 
     var config = Config{
         .zg_root = default_zg_root,
         .unicode_data = default_unicode_data,
         .prop_list = default_prop_list,
+        .derived_core_properties = default_derived_core_properties,
         .output = "",
     };
 
@@ -61,6 +68,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             config.zg_root = args[i];
             config.unicode_data = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "UnicodeData.txt" });
             config.prop_list = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "PropList.txt" });
+            config.derived_core_properties = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "DerivedCoreProperties.txt" });
         } else if (std.mem.eql(u8, arg, "--unicode-data")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -69,6 +77,10 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
             config.prop_list = args[i];
+        } else if (std.mem.eql(u8, arg, "--derived-core-properties")) {
+            i += 1;
+            if (i >= args.len) return error.MissingArgument;
+            config.derived_core_properties = args[i];
         } else if (std.mem.eql(u8, arg, "--output")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -82,6 +94,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
 
     try ensureFileExists(config.unicode_data);
     try ensureFileExists(config.prop_list);
+    try ensureFileExists(config.derived_core_properties);
 
     return config;
 }
@@ -95,14 +108,14 @@ fn hasHelpFlag(args: []const []const u8) bool {
 
 fn writeUsage() !void {
     std.debug.print(
-        \\usage: gen_unicode_props.zig [--zg-root PATH] [--unicode-data PATH] [--prop-list PATH] --output PATH
+        \\usage: gen_unicode_props.zig [--zg-root PATH] [--unicode-data PATH] [--prop-list PATH] [--derived-core-properties PATH] --output PATH
         \\
         \\Default data source:
         \\  ../zig-libs/zg/data/unicode relative to the zigrep repo root
         \\
         \\Examples:
         \\  zig run tools/gen_unicode_props.zig -- --zg-root ../zig-libs/zg --output src/regex/unicode_props_generated.zig
-        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --output src/regex/unicode_props_generated.zig
+        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --output src/regex/unicode_props_generated.zig
         \\
     , .{});
 }
@@ -215,6 +228,44 @@ fn loadWhitespaceData(
     }
 }
 
+fn loadNamedPropertyData(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    property_name: []const u8,
+    ranges: *std.ArrayList(Range),
+) !void {
+    const bytes = try std.fs.cwd().readFileAlloc(allocator, path, 32 * 1024 * 1024);
+
+    var lines = std.mem.tokenizeScalar(u8, bytes, '\n');
+    while (lines.next()) |line_raw| {
+        const line_trimmed = std.mem.trimRight(u8, line_raw, "\r");
+        const line = if (std.mem.indexOfScalar(u8, line_trimmed, '#')) |index|
+            std.mem.trim(u8, line_trimmed[0..index], " \t")
+        else
+            std.mem.trim(u8, line_trimmed, " \t");
+
+        if (line.len == 0) continue;
+
+        const sep = std.mem.indexOfScalar(u8, line, ';') orelse continue;
+        const lhs = std.mem.trim(u8, line[0..sep], " \t");
+        const rhs = std.mem.trim(u8, line[sep + 1 ..], " \t");
+        if (!std.mem.eql(u8, rhs, property_name)) continue;
+
+        const range = if (std.mem.indexOf(u8, lhs, "..")) |dots|
+            Range{
+                .start = try std.fmt.parseInt(u32, lhs[0..dots], 16),
+                .end = try std.fmt.parseInt(u32, lhs[dots + 2 ..], 16),
+            }
+        else
+            blk: {
+                const cp = try std.fmt.parseInt(u32, lhs, 16);
+                break :blk Range{ .start = cp, .end = cp };
+            };
+
+        try appendMergedRange(allocator, ranges, range);
+    }
+}
+
 fn appendMergedRange(
     allocator: std.mem.Allocator,
     ranges: *std.ArrayList(Range),
@@ -234,7 +285,13 @@ fn appendMergedRange(
     try ranges.append(allocator, range);
 }
 
-fn writeOutput(config: Config, letter_ranges: []const Range, number_ranges: []const Range, whitespace_ranges: []const Range) !void {
+fn writeOutput(
+    config: Config,
+    letter_ranges: []const Range,
+    number_ranges: []const Range,
+    whitespace_ranges: []const Range,
+    alphabetic_ranges: []const Range,
+) !void {
     const output_path = config.output;
     if (std.fs.path.dirname(output_path)) |dir_path| {
         try std.fs.cwd().makePath(dir_path);
@@ -250,6 +307,7 @@ fn writeOutput(config: Config, letter_ranges: []const Range, number_ranges: []co
     try writer.interface.print("// Source inputs:\n", .{});
     try writer.interface.print("// - {s}\n", .{config.unicode_data});
     try writer.interface.print("// - {s}\n", .{config.prop_list});
+    try writer.interface.print("// - {s}\n", .{config.derived_core_properties});
     try writer.interface.print("// Data source repository:\n", .{});
     try writer.interface.print("// - {s}\n", .{config.zg_root});
     try writer.interface.print("// - https://codeberg.org/atman/zg\n\n", .{});
@@ -263,6 +321,8 @@ fn writeOutput(config: Config, letter_ranges: []const Range, number_ranges: []co
     try writeRangeList(&writer.interface, "number_ranges", number_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "whitespace_ranges", whitespace_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "alphabetic_ranges", alphabetic_ranges);
     try writer.interface.flush();
 }
 

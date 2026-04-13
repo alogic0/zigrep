@@ -15,6 +15,7 @@ pub const Property = enum {
     letter,
     number,
     whitespace,
+    alphabetic,
 };
 
 pub const GeneralCategory = enum {
@@ -103,6 +104,7 @@ pub const Strategy = struct {
         if (propertyNameEq(name, "letter") or propertyNameEq(name, "l")) return .letter;
         if (propertyNameEq(name, "number") or propertyNameEq(name, "n")) return .number;
         if (propertyNameEq(name, "whitespace") or propertyNameEq(name, "space") or propertyNameEq(name, "white_space")) return .whitespace;
+        if (propertyNameEq(name, "alphabetic") or propertyNameEq(name, "alpha")) return .alphabetic;
         return null;
     }
 
@@ -111,6 +113,7 @@ pub const Strategy = struct {
             .letter => inRanges(cp, &generated.letter_ranges),
             .number => inRanges(cp, &generated.number_ranges),
             .whitespace => inRanges(cp, &generated.whitespace_ranges),
+            .alphabetic => inRanges(cp, &generated.alphabetic_ranges),
         };
     }
 
@@ -338,6 +341,8 @@ test "Unicode strategy looks up named properties and aliases" {
     try testing.expectEqual(@as(?Property, .letter), Strategy.lookupProperty("L"));
     try testing.expectEqual(@as(?Property, .number), Strategy.lookupProperty("Number"));
     try testing.expectEqual(@as(?Property, .whitespace), Strategy.lookupProperty("White_Space"));
+    try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("Alphabetic"));
+    try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("alpha"));
     try testing.expectEqual(@as(?Property, null), Strategy.lookupProperty("Emoji"));
 }
 
@@ -348,6 +353,7 @@ test "Unicode strategy evaluates property membership" {
     try testing.expect(Strategy.hasProperty('ß', .letter));
     try testing.expect(Strategy.hasProperty('7', .number));
     try testing.expect(Strategy.hasProperty(' ', .whitespace));
+    try testing.expect(Strategy.hasProperty(0x0345, .alphabetic));
     try testing.expect(!Strategy.hasProperty('-', .letter));
 }
 

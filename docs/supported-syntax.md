@@ -58,12 +58,13 @@ Current escape boundary:
   - boundary checks use ASCII wordness (`[A-Za-z0-9_]`) on valid text units
   - invalid bytes on the raw-byte path are treated as non-word units
 - Unicode property escapes are supported for:
+  - `\p{Alphabetic}` and `\P{Alphabetic}`
   - `\p{Letter}` and `\P{Letter}`
   - `\p{Number}` and `\P{Number}`
   - `\p{Whitespace}` and `\P{Whitespace}`
   - the same property items may also appear inside bracket classes
     - for example `[\p{Letter}\P{Whitespace}]`
-  - accepted aliases currently include `L`, `N`, and `White_Space`
+  - accepted aliases currently include `alpha`, `L`, `N`, and `White_Space`
   - invalid raw bytes do not match positive Unicode properties and do match
     negated Unicode properties
 - `\u{...}` accepts 1 to 6 hex digits and rejects surrogate code points and values above `U+10FFFF`

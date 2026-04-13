@@ -2097,6 +2097,10 @@ test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     const raw_not_letter = (try not_letter.reportFirstByteMatch("raw.bin", "\xff")).?;
     defer raw_not_letter.deinit(testing.allocator);
     try testing.expectEqual(Span{ .start = 0, .end = 1 }, raw_not_letter.match_span);
+
+    var alphabetic = try Searcher.init(testing.allocator, "\\p{Alphabetic}+", .{});
+    defer alphabetic.deinit();
+    try testing.expect((try alphabetic.reportFirstMatch("sample.txt", "\xCD\x85")) != null);
 }
 
 test "Searcher handles Unicode property items inside character classes" {

@@ -33,6 +33,7 @@ Specifically, the current property generator reads:
 
 - `UnicodeData.txt`
 - `PropList.txt`
+- `DerivedCoreProperties.txt`
 - Unicode version `16.0.0`
 
 This is a generation-time input only.
@@ -60,6 +61,7 @@ Explicit Unicode data files:
 zig run tools/gen_unicode_props.zig -- \
   --unicode-data /path/to/UnicodeData.txt \
   --prop-list /path/to/PropList.txt \
+  --derived-core-properties /path/to/DerivedCoreProperties.txt \
   --output src/regex/unicode_props_generated.zig
 ```
 
