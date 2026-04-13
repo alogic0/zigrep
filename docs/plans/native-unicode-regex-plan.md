@@ -87,7 +87,9 @@ The goal is:
   - first property set is:
     - `Alphabetic`
     - `Letter`
+    - `Lowercase`
     - `Number`
+    - `Uppercase`
     - `Whitespace`
   - `Alphabetic` is now included explicitly as a distinct property surface
     alongside `Letter`

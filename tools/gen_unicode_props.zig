@@ -5,6 +5,13 @@ const Range = struct {
     end: u32,
 };
 
+const CategoryKind = enum {
+    letter,
+    number,
+    lowercase,
+    uppercase,
+};
+
 const Config = struct {
     zg_root: []const u8,
     unicode_data: []const u8,
@@ -32,11 +39,25 @@ pub fn main() !void {
     var alphabetic_ranges: std.ArrayList(Range) = .empty;
     defer alphabetic_ranges.deinit(arena);
 
-    try loadUnicodeData(arena, config.unicode_data, &letter_ranges, &number_ranges);
+    var lowercase_ranges: std.ArrayList(Range) = .empty;
+    defer lowercase_ranges.deinit(arena);
+
+    var uppercase_ranges: std.ArrayList(Range) = .empty;
+    defer uppercase_ranges.deinit(arena);
+
+    try loadUnicodeData(arena, config.unicode_data, &letter_ranges, &number_ranges, &lowercase_ranges, &uppercase_ranges);
     try loadWhitespaceData(arena, config.prop_list, &whitespace_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "Alphabetic", &alphabetic_ranges);
 
-    try writeOutput(config, letter_ranges.items, number_ranges.items, whitespace_ranges.items, alphabetic_ranges.items);
+    try writeOutput(
+        config,
+        letter_ranges.items,
+        number_ranges.items,
+        whitespace_ranges.items,
+        alphabetic_ranges.items,
+        lowercase_ranges.items,
+        uppercase_ranges.items,
+    );
 }
 
 fn parseArgs(allocator: std.mem.Allocator) !Config {
@@ -129,12 +150,14 @@ fn loadUnicodeData(
     path: []const u8,
     letter_ranges: *std.ArrayList(Range),
     number_ranges: *std.ArrayList(Range),
+    lowercase_ranges: *std.ArrayList(Range),
+    uppercase_ranges: *std.ArrayList(Range),
 ) !void {
     const bytes = try std.fs.cwd().readFileAlloc(allocator, path, 64 * 1024 * 1024);
 
     var lines = std.mem.tokenizeScalar(u8, bytes, '\n');
     var range_start: ?u32 = null;
-    var range_kind: ?u8 = null;
+    var range_kind: ?CategoryKind = null;
 
     while (lines.next()) |line_raw| {
         const line = std.mem.trimRight(u8, line_raw, "\r");
@@ -154,7 +177,7 @@ fn loadUnicodeData(
         if (std.mem.endsWith(u8, name_field, ", Last>")) {
             if (range_start) |start| {
                 if (range_kind) |kind| {
-                    try appendCategoryRange(allocator, kind, start, cp, letter_ranges, number_ranges);
+                    try appendCategoryRange(allocator, kind, start, cp, letter_ranges, number_ranges, lowercase_ranges, uppercase_ranges);
                 }
             }
             range_start = null;
@@ -163,31 +186,43 @@ fn loadUnicodeData(
         }
 
         if (categoryKind(category_field)) |kind| {
-            try appendCategoryRange(allocator, kind, cp, cp, letter_ranges, number_ranges);
+            try appendCategoryRange(allocator, kind, cp, cp, letter_ranges, number_ranges, lowercase_ranges, uppercase_ranges);
         }
     }
 }
 
-fn categoryKind(category: []const u8) ?u8 {
+fn categoryKind(category: []const u8) ?CategoryKind {
     if (category.len == 0) return null;
+    if (std.mem.eql(u8, category, "Ll")) return .lowercase;
+    if (std.mem.eql(u8, category, "Lu")) return .uppercase;
     return switch (category[0]) {
-        'L', 'N' => category[0],
+        'L' => .letter,
+        'N' => .number,
         else => null,
     };
 }
 
 fn appendCategoryRange(
     allocator: std.mem.Allocator,
-    kind: u8,
+    kind: CategoryKind,
     start: u32,
     end: u32,
     letter_ranges: *std.ArrayList(Range),
     number_ranges: *std.ArrayList(Range),
+    lowercase_ranges: *std.ArrayList(Range),
+    uppercase_ranges: *std.ArrayList(Range),
 ) !void {
     switch (kind) {
-        'L' => try appendMergedRange(allocator, letter_ranges, .{ .start = start, .end = end }),
-        'N' => try appendMergedRange(allocator, number_ranges, .{ .start = start, .end = end }),
-        else => {},
+        .letter => try appendMergedRange(allocator, letter_ranges, .{ .start = start, .end = end }),
+        .number => try appendMergedRange(allocator, number_ranges, .{ .start = start, .end = end }),
+        .lowercase => {
+            try appendMergedRange(allocator, letter_ranges, .{ .start = start, .end = end });
+            try appendMergedRange(allocator, lowercase_ranges, .{ .start = start, .end = end });
+        },
+        .uppercase => {
+            try appendMergedRange(allocator, letter_ranges, .{ .start = start, .end = end });
+            try appendMergedRange(allocator, uppercase_ranges, .{ .start = start, .end = end });
+        },
     }
 }
 
@@ -291,6 +326,8 @@ fn writeOutput(
     number_ranges: []const Range,
     whitespace_ranges: []const Range,
     alphabetic_ranges: []const Range,
+    lowercase_ranges: []const Range,
+    uppercase_ranges: []const Range,
 ) !void {
     const output_path = config.output;
     if (std.fs.path.dirname(output_path)) |dir_path| {
@@ -323,6 +360,10 @@ fn writeOutput(
     try writeRangeList(&writer.interface, "whitespace_ranges", whitespace_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "alphabetic_ranges", alphabetic_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "lowercase_ranges", lowercase_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "uppercase_ranges", uppercase_ranges);
     try writer.interface.flush();
 }
 

@@ -16,6 +16,8 @@ pub const Property = enum {
     number,
     whitespace,
     alphabetic,
+    lowercase,
+    uppercase,
 };
 
 pub const GeneralCategory = enum {
@@ -105,6 +107,8 @@ pub const Strategy = struct {
         if (propertyNameEq(name, "number") or propertyNameEq(name, "n")) return .number;
         if (propertyNameEq(name, "whitespace") or propertyNameEq(name, "space") or propertyNameEq(name, "white_space")) return .whitespace;
         if (propertyNameEq(name, "alphabetic") or propertyNameEq(name, "alpha")) return .alphabetic;
+        if (propertyNameEq(name, "lowercase") or propertyNameEq(name, "lower") or propertyNameEq(name, "ll")) return .lowercase;
+        if (propertyNameEq(name, "uppercase") or propertyNameEq(name, "upper") or propertyNameEq(name, "lu")) return .uppercase;
         return null;
     }
 
@@ -114,6 +118,8 @@ pub const Strategy = struct {
             .number => inRanges(cp, &generated.number_ranges),
             .whitespace => inRanges(cp, &generated.whitespace_ranges),
             .alphabetic => inRanges(cp, &generated.alphabetic_ranges),
+            .lowercase => inRanges(cp, &generated.lowercase_ranges),
+            .uppercase => inRanges(cp, &generated.uppercase_ranges),
         };
     }
 
@@ -343,6 +349,8 @@ test "Unicode strategy looks up named properties and aliases" {
     try testing.expectEqual(@as(?Property, .whitespace), Strategy.lookupProperty("White_Space"));
     try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("Alphabetic"));
     try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("alpha"));
+    try testing.expectEqual(@as(?Property, .lowercase), Strategy.lookupProperty("Ll"));
+    try testing.expectEqual(@as(?Property, .uppercase), Strategy.lookupProperty("Uppercase"));
     try testing.expectEqual(@as(?Property, null), Strategy.lookupProperty("Emoji"));
 }
 
@@ -354,6 +362,8 @@ test "Unicode strategy evaluates property membership" {
     try testing.expect(Strategy.hasProperty('7', .number));
     try testing.expect(Strategy.hasProperty(' ', .whitespace));
     try testing.expect(Strategy.hasProperty(0x0345, .alphabetic));
+    try testing.expect(Strategy.hasProperty('ß', .lowercase));
+    try testing.expect(Strategy.hasProperty('Σ', .uppercase));
     try testing.expect(!Strategy.hasProperty('-', .letter));
 }
 

@@ -60,11 +60,13 @@ Current escape boundary:
 - Unicode property escapes are supported for:
   - `\p{Alphabetic}` and `\P{Alphabetic}`
   - `\p{Letter}` and `\P{Letter}`
+  - `\p{Lowercase}` and `\P{Lowercase}`
   - `\p{Number}` and `\P{Number}`
+  - `\p{Uppercase}` and `\P{Uppercase}`
   - `\p{Whitespace}` and `\P{Whitespace}`
   - the same property items may also appear inside bracket classes
     - for example `[\p{Letter}\P{Whitespace}]`
-  - accepted aliases currently include `alpha`, `L`, `N`, and `White_Space`
+  - accepted aliases currently include `alpha`, `L`, `Ll`, `Lu`, `N`, `White_Space`, `lower`, and `upper`
   - invalid raw bytes do not match positive Unicode properties and do match
     negated Unicode properties
 - `\u{...}` accepts 1 to 6 hex digits and rejects surrogate code points and values above `U+10FFFF`

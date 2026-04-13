@@ -5883,6 +5883,33 @@ test "runCli supports the Alphabetic Unicode property" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:"));
 }
 
+test "runCli supports Lowercase and Uppercase Unicode properties" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "ß\n" ++
+            "Σ\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const lower_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Lowercase}+", root_path });
+    defer lower_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), lower_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, lower_run.stdout, 1, "sample.txt:1:1:ß"));
+
+    const upper_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Uppercase}+", root_path });
+    defer upper_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), upper_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, upper_run.stdout, 1, "sample.txt:2:1:Σ"));
+}
+
 test "runCli supports Unicode property items inside character classes" {
     const testing = std.testing;
 
