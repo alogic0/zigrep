@@ -40,3 +40,8 @@ These rules are the current working contract for the `zigrep` codebase.
 
 - Treat [src/root.zig](../src/root.zig) as the app-facing surface, not as a dump of internal modules.
 - Do not reintroduce convenience exports in [src/root.zig](../src/root.zig) just to satisfy local test or build wiring.
+- The remaining deliberate root exports in this area are
+  [src/search_runner.zig](../src/search_runner.zig) and
+  [src/search_reporting.zig](../src/search_reporting.zig), because bench and
+  runner/report tests still use them directly and there is no narrow
+  lower-risk wiring cleanup that clearly improves that boundary today.

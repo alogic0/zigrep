@@ -43,6 +43,10 @@ enough that another layer would mostly add indirection.
 
 `src/root.zig` exposes the app-facing surface and intentionally does not re-export the internal decomposition modules.
 
+The remaining exported search helpers are `search_runner` and
+`search_reporting`. They are kept for the current bench and runner/report test
+surface, not because the internal search stack needs another public wrapper.
+
 See also:
 - [docs/module-boundary-rules.md](module-boundary-rules.md)
 

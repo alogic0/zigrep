@@ -63,10 +63,12 @@ The main issues to address are:
 
 ## Phase 4: Build And Test Coupling Review
 
-- [ ] review which remaining imports are shaped by build/test wiring instead of
+- [x] review which remaining imports are shaped by build/test wiring instead of
   ownership
-- [ ] remove convenience-only wiring where the fix is narrow and low-risk
-- [ ] document any remaining deliberate exceptions instead of leaving them
+- [x] decide not to remove `search_runner` and `search_reporting` from
+  `src/root.zig` in this plan, because the remaining coupling is mostly in
+  bench and runner/report tests and there is no comparably small wiring fix
+- [x] document those remaining deliberate exceptions instead of leaving them
   implicit
 
 ## Validation
@@ -80,7 +82,7 @@ The main issues to address are:
 - [x] 1. Remove the remaining `cli_dispatch` root export
 - [x] 2. Review whether the search stack needs a smaller internal facade
 - [x] 3. Decide sequential versus parallel execution ownership
-- [ ] 4. Clean up the remaining build/test-driven boundary compromises
+- [x] 4. Clean up the remaining build/test-driven boundary compromises
 
 ## Explicit Non-Goals
 
