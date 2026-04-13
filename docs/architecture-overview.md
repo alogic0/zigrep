@@ -35,6 +35,10 @@
 - `src/search_result.zig`
   - shared `SearchStats` and `SearchResult` types
 
+This stack is intentionally left as a set of narrow modules rather than being
+wrapped in another internal facade. The current split is already specific
+enough that another layer would mostly add indirection.
+
 ## Public root
 
 `src/root.zig` exposes the app-facing surface and intentionally does not re-export the internal decomposition modules.

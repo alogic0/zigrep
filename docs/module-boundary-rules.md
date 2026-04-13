@@ -25,11 +25,16 @@ These rules are the current working contract for the `zigrep` codebase.
 
 ## Search rules
 
+- [src/search_runner.zig](../src/search_runner.zig) remains the top-level
+  coordinator and intentionally keeps the sequential execution path.
 - [src/search_path_runner.zig](../src/search_path_runner.zig) owns traversal, filtering, and schedule selection.
 - [src/search_parallel.zig](../src/search_parallel.zig) owns parallel execution.
 - [src/search_entry_runner.zig](../src/search_entry_runner.zig) owns per-file execution.
 - [src/search_reporting.zig](../src/search_reporting.zig) owns report and output shaping.
 - [src/search_result.zig](../src/search_result.zig) owns shared result types.
+- Do not add a search facade layer unless it removes real coupling; a thin
+  wrapper over the current search modules is not enough justification on its
+  own.
 
 ## Root surface rules
 

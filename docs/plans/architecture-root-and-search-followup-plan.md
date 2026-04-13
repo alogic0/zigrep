@@ -21,8 +21,6 @@ Improve the architecture further by:
 
 The main issues to address are:
 
-- `src/root.zig` still exports `cli_dispatch` as a supporting exception for the
-  separately wired `cli_entry` module
 - the search stack is decomposed, but internal callers still need to know
   several modules directly
 - `src/search_runner.zig` still owns the sequential execution path while
@@ -41,25 +39,27 @@ The main issues to address are:
 
 ## Phase 2: Search Surface Review
 
-- [ ] review the current search module call graph:
+- [x] review the current search module call graph:
   - `src/search_runner.zig`
   - `src/search_path_runner.zig`
   - `src/search_parallel.zig`
   - `src/search_entry_runner.zig`
   - `src/search_reporting.zig`
   - `src/search_result.zig`
-- [ ] decide whether the current module set is already the right boundary
-- [ ] if it is not, define the smallest internal facade that reduces coupling
-  without recreating the old monolith
+- [x] decide whether the current module set is already the right boundary
+- [x] decide not to add another facade layer, because the current modules are
+  already narrow and a new wrapper would mostly add indirection without
+  reducing coupling materially
 
 ## Phase 3: Execution Ownership Decision
 
-- [ ] decide whether sequential execution should stay in
+- [x] decide whether sequential execution should stay in
   `src/search_runner.zig`
-- [ ] decide whether sequential and parallel execution belong together under one
+- [x] decide whether sequential and parallel execution belong together under one
   execution layer
-- [ ] only implement a move if the resulting ownership is clearly simpler than
-  the current split
+- [x] keep the current split, because `src/search_runner.zig` is the top-level
+  coordinator and the sequential path is now small enough to fit there without
+  competing with the parallel worker implementation in `src/search_parallel.zig`
 
 ## Phase 4: Build And Test Coupling Review
 
@@ -78,8 +78,8 @@ The main issues to address are:
 ## Recommended Order
 
 - [x] 1. Remove the remaining `cli_dispatch` root export
-- [ ] 2. Review whether the search stack needs a smaller internal facade
-- [ ] 3. Decide sequential versus parallel execution ownership
+- [x] 2. Review whether the search stack needs a smaller internal facade
+- [x] 3. Decide sequential versus parallel execution ownership
 - [ ] 4. Clean up the remaining build/test-driven boundary compromises
 
 ## Explicit Non-Goals
