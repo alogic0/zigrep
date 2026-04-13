@@ -132,7 +132,9 @@ Non-goal for this plan:
   - Unicode literals inside bracket classes
   - property-containing classes under ignore-case
   - current result: representative sigma and accented-latin class regressions
-    are now covered; property-containing classes under ignore-case remain open
+    are now covered, and case-related Unicode properties such as
+    `Lowercase`, `Uppercase`, and `Titlecase_Letter` now fold under `-i` in
+    both top-level property atoms and bracket classes
 
 - [ ] Tighten the behavior of explicit rejection cases so they are:
   - deterministic

@@ -3507,6 +3507,48 @@ test "runCli ignore-case matches Unicode class folding cases" {
     try testing.expect(std.mem.containsAtLeast(u8, accented_run.stdout, 1, "sample.txt:2:1:Éé"));
 }
 
+test "runCli ignore-case folds case-related Unicode properties" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "É\n" ++
+            "ς\n" ++
+            "中\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "other.txt",
+        .data = "中\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const lower_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "\\p{Lowercase}+", root_path });
+    defer lower_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), lower_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, lower_run.stdout, 1, "sample.txt:1:1:É"));
+    try testing.expect(std.mem.containsAtLeast(u8, lower_run.stdout, 1, "sample.txt:2:1:ς"));
+
+    const class_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "[\\p{Uppercase}]+", root_path });
+    defer class_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), class_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, class_run.stdout, 1, "sample.txt:1:1:É"));
+    try testing.expect(std.mem.containsAtLeast(u8, class_run.stdout, 1, "sample.txt:2:1:ς"));
+
+    const other_path = try tmp.dir.realpathAlloc(testing.allocator, "other.txt");
+    defer testing.allocator.free(other_path);
+
+    const negated_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "\\P{Lowercase}+", other_path });
+    defer negated_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), negated_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, negated_run.stdout, 1, "other.txt:1:1:中"));
+}
+
 test "runCli smart-case keeps uppercase patterns case-sensitive" {
     const testing = std.testing;
 

@@ -295,6 +295,9 @@ Case-mode note:
 - case-insensitive matching works through a folded regex rewrite instead of a separate VM mode
 - the current rewrite uses generated simple case-fold data for Unicode literal and
   class folding, including cases like Greek sigma and accented Latin literals
+- under `-i`, case-related Unicode properties such as `Lowercase`,
+  `Uppercase`, and `Titlecase_Letter` are folded through the same simple
+  case-fold closure in both top-level `\p{...}` atoms and bracket classes
 - smart-case uppercase detection is Unicode-aware and treats `Uppercase` and
   `Titlecase_Letter` code points as case-sensitive triggers
 - case-folded patterns currently stay off the raw-byte planner and use the

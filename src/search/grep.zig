@@ -1691,6 +1691,38 @@ test "reportFirstMatch supports ignore-case Unicode classes" {
     try testing.expectEqual(Span{ .start = 0, .end = "Éé".len }, accented.match_span);
 }
 
+test "reportFirstMatch supports ignore-case case-related Unicode properties" {
+    const testing = std.testing;
+
+    const top_level = (try reportFirstMatch(
+        testing.allocator,
+        "\\p{Lowercase}+",
+        "sample.txt",
+        "É",
+        .{ .case_mode = .insensitive },
+    )).?;
+    defer top_level.deinit(testing.allocator);
+    try testing.expectEqualStrings("É", top_level.line);
+
+    const class_level = (try reportFirstMatch(
+        testing.allocator,
+        "[\\p{Uppercase}]+",
+        "sample.txt",
+        "ς",
+        .{ .case_mode = .insensitive },
+    )).?;
+    defer class_level.deinit(testing.allocator);
+    try testing.expectEqualStrings("ς", class_level.line);
+
+    try testing.expect((try reportFirstMatch(
+        testing.allocator,
+        "\\P{Lowercase}+",
+        "sample.txt",
+        "É",
+        .{ .case_mode = .insensitive },
+    )) == null);
+}
+
 test "reportFirstMatch smart-case keeps uppercase patterns case-sensitive" {
     const testing = std.testing;
 

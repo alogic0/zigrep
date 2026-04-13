@@ -123,6 +123,12 @@ pub fn applySimpleCaseFold(allocator: std.mem.Allocator, hir: *Hir) CaseFoldErro
             .literal => |cp| {
                 node.* = .{ .char_class = try foldedLiteralClass(allocator, cp) };
             },
+            .unicode_property => |property| {
+                node.* = .{ .unicode_property = .{
+                    .property = foldCaseProperty(property.property),
+                    .negated = property.negated,
+                } };
+            },
             .char_class => |class| {
                 const folded = try foldedCharacterClass(allocator, class);
                 allocator.free(class.items);
@@ -321,7 +327,12 @@ fn foldedCharacterClass(allocator: std.mem.Allocator, class: CharacterClass) Cas
                     try appendFoldedCodePointItems(allocator, &items, cp);
                 }
             },
-            .unicode_property => |property| try items.append(allocator, .{ .unicode_property = property }),
+            .unicode_property => |property| try items.append(allocator, .{
+                .unicode_property = .{
+                    .property = foldCaseProperty(property.property),
+                    .negated = property.negated,
+                },
+            }),
         }
     }
 
@@ -363,6 +374,13 @@ fn simpleCaseFoldSetAlloc(allocator: std.mem.Allocator, cp: u32) CaseFoldError![
     const fold = try unicode.Strategy.foldSet(allocator, cp, .simple);
     defer fold.deinit(allocator);
     return allocator.dupe(u32, fold.equivalents);
+}
+
+fn foldCaseProperty(property: unicode.Property) unicode.Property {
+    return switch (property) {
+        .lowercase, .uppercase, .titlecase_letter => .casefolded_case_letter,
+        else => property,
+    };
 }
 
 test "HIR lowering preserves shape and extracts prefix analysis" {
