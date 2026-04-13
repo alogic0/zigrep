@@ -10,10 +10,39 @@ const CategoryKind = enum {
     number,
     lowercase,
     uppercase,
+    titlecase_letter,
+    modifier_letter,
+    other_letter,
     mark,
+    nonspacing_mark,
+    spacing_mark,
+    enclosing_mark,
+    decimal_number,
+    letter_number,
+    other_number,
     punctuation,
+    connector_punctuation,
+    dash_punctuation,
+    open_punctuation,
+    close_punctuation,
+    initial_punctuation,
+    final_punctuation,
+    other_punctuation,
     symbol,
+    math_symbol,
+    currency_symbol,
+    modifier_symbol,
+    other_symbol,
     separator,
+    space_separator,
+    line_separator,
+    paragraph_separator,
+    other,
+    control,
+    format,
+    surrogate,
+    private_use,
+    unassigned,
 };
 
 const Config = struct {
@@ -21,6 +50,7 @@ const Config = struct {
     unicode_data: []const u8,
     prop_list: []const u8,
     derived_core_properties: []const u8,
+    derived_general_category: []const u8,
     output: []const u8,
 };
 
@@ -61,6 +91,93 @@ pub fn main() !void {
     var separator_ranges: std.ArrayList(Range) = .empty;
     defer separator_ranges.deinit(arena);
 
+    var other_ranges: std.ArrayList(Range) = .empty;
+    defer other_ranges.deinit(arena);
+
+    var titlecase_letter_ranges: std.ArrayList(Range) = .empty;
+    defer titlecase_letter_ranges.deinit(arena);
+
+    var modifier_letter_ranges: std.ArrayList(Range) = .empty;
+    defer modifier_letter_ranges.deinit(arena);
+
+    var other_letter_ranges: std.ArrayList(Range) = .empty;
+    defer other_letter_ranges.deinit(arena);
+
+    var nonspacing_mark_ranges: std.ArrayList(Range) = .empty;
+    defer nonspacing_mark_ranges.deinit(arena);
+
+    var spacing_mark_ranges: std.ArrayList(Range) = .empty;
+    defer spacing_mark_ranges.deinit(arena);
+
+    var enclosing_mark_ranges: std.ArrayList(Range) = .empty;
+    defer enclosing_mark_ranges.deinit(arena);
+
+    var decimal_number_ranges: std.ArrayList(Range) = .empty;
+    defer decimal_number_ranges.deinit(arena);
+
+    var letter_number_ranges: std.ArrayList(Range) = .empty;
+    defer letter_number_ranges.deinit(arena);
+
+    var other_number_ranges: std.ArrayList(Range) = .empty;
+    defer other_number_ranges.deinit(arena);
+
+    var connector_punctuation_ranges: std.ArrayList(Range) = .empty;
+    defer connector_punctuation_ranges.deinit(arena);
+
+    var dash_punctuation_ranges: std.ArrayList(Range) = .empty;
+    defer dash_punctuation_ranges.deinit(arena);
+
+    var open_punctuation_ranges: std.ArrayList(Range) = .empty;
+    defer open_punctuation_ranges.deinit(arena);
+
+    var close_punctuation_ranges: std.ArrayList(Range) = .empty;
+    defer close_punctuation_ranges.deinit(arena);
+
+    var initial_punctuation_ranges: std.ArrayList(Range) = .empty;
+    defer initial_punctuation_ranges.deinit(arena);
+
+    var final_punctuation_ranges: std.ArrayList(Range) = .empty;
+    defer final_punctuation_ranges.deinit(arena);
+
+    var other_punctuation_ranges: std.ArrayList(Range) = .empty;
+    defer other_punctuation_ranges.deinit(arena);
+
+    var math_symbol_ranges: std.ArrayList(Range) = .empty;
+    defer math_symbol_ranges.deinit(arena);
+
+    var currency_symbol_ranges: std.ArrayList(Range) = .empty;
+    defer currency_symbol_ranges.deinit(arena);
+
+    var modifier_symbol_ranges: std.ArrayList(Range) = .empty;
+    defer modifier_symbol_ranges.deinit(arena);
+
+    var other_symbol_ranges: std.ArrayList(Range) = .empty;
+    defer other_symbol_ranges.deinit(arena);
+
+    var space_separator_ranges: std.ArrayList(Range) = .empty;
+    defer space_separator_ranges.deinit(arena);
+
+    var line_separator_ranges: std.ArrayList(Range) = .empty;
+    defer line_separator_ranges.deinit(arena);
+
+    var paragraph_separator_ranges: std.ArrayList(Range) = .empty;
+    defer paragraph_separator_ranges.deinit(arena);
+
+    var control_ranges: std.ArrayList(Range) = .empty;
+    defer control_ranges.deinit(arena);
+
+    var format_ranges: std.ArrayList(Range) = .empty;
+    defer format_ranges.deinit(arena);
+
+    var surrogate_ranges: std.ArrayList(Range) = .empty;
+    defer surrogate_ranges.deinit(arena);
+
+    var private_use_ranges: std.ArrayList(Range) = .empty;
+    defer private_use_ranges.deinit(arena);
+
+    var unassigned_ranges: std.ArrayList(Range) = .empty;
+    defer unassigned_ranges.deinit(arena);
+
     try loadUnicodeData(
         arena,
         config.unicode_data,
@@ -75,6 +192,39 @@ pub fn main() !void {
     );
     try loadWhitespaceData(arena, config.prop_list, &whitespace_ranges);
     try loadNamedPropertyData(arena, config.derived_core_properties, "Alphabetic", &alphabetic_ranges);
+    try loadGeneralCategoryData(
+        arena,
+        config.derived_general_category,
+        &titlecase_letter_ranges,
+        &modifier_letter_ranges,
+        &other_letter_ranges,
+        &nonspacing_mark_ranges,
+        &spacing_mark_ranges,
+        &enclosing_mark_ranges,
+        &decimal_number_ranges,
+        &letter_number_ranges,
+        &other_number_ranges,
+        &connector_punctuation_ranges,
+        &dash_punctuation_ranges,
+        &open_punctuation_ranges,
+        &close_punctuation_ranges,
+        &initial_punctuation_ranges,
+        &final_punctuation_ranges,
+        &other_punctuation_ranges,
+        &math_symbol_ranges,
+        &currency_symbol_ranges,
+        &modifier_symbol_ranges,
+        &other_symbol_ranges,
+        &space_separator_ranges,
+        &line_separator_ranges,
+        &paragraph_separator_ranges,
+        &control_ranges,
+        &format_ranges,
+        &surrogate_ranges,
+        &private_use_ranges,
+        &unassigned_ranges,
+        &other_ranges,
+    );
 
     try writeOutput(
         config,
@@ -88,6 +238,35 @@ pub fn main() !void {
         punctuation_ranges.items,
         symbol_ranges.items,
         separator_ranges.items,
+        other_ranges.items,
+        titlecase_letter_ranges.items,
+        modifier_letter_ranges.items,
+        other_letter_ranges.items,
+        nonspacing_mark_ranges.items,
+        spacing_mark_ranges.items,
+        enclosing_mark_ranges.items,
+        decimal_number_ranges.items,
+        letter_number_ranges.items,
+        other_number_ranges.items,
+        connector_punctuation_ranges.items,
+        dash_punctuation_ranges.items,
+        open_punctuation_ranges.items,
+        close_punctuation_ranges.items,
+        initial_punctuation_ranges.items,
+        final_punctuation_ranges.items,
+        other_punctuation_ranges.items,
+        math_symbol_ranges.items,
+        currency_symbol_ranges.items,
+        modifier_symbol_ranges.items,
+        other_symbol_ranges.items,
+        space_separator_ranges.items,
+        line_separator_ranges.items,
+        paragraph_separator_ranges.items,
+        control_ranges.items,
+        format_ranges.items,
+        surrogate_ranges.items,
+        private_use_ranges.items,
+        unassigned_ranges.items,
     );
 }
 
@@ -102,12 +281,14 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     const default_unicode_data = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "UnicodeData.txt" });
     const default_prop_list = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "PropList.txt" });
     const default_derived_core_properties = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "DerivedCoreProperties.txt" });
+    const default_derived_general_category = try std.fs.path.join(allocator, &.{ default_zg_root, "data", "unicode", "extracted", "DerivedGeneralCategory.txt" });
 
     var config = Config{
         .zg_root = default_zg_root,
         .unicode_data = default_unicode_data,
         .prop_list = default_prop_list,
         .derived_core_properties = default_derived_core_properties,
+        .derived_general_category = default_derived_general_category,
         .output = "",
     };
 
@@ -121,6 +302,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             config.unicode_data = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "UnicodeData.txt" });
             config.prop_list = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "PropList.txt" });
             config.derived_core_properties = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "DerivedCoreProperties.txt" });
+            config.derived_general_category = try std.fs.path.join(allocator, &.{ config.zg_root, "data", "unicode", "extracted", "DerivedGeneralCategory.txt" });
         } else if (std.mem.eql(u8, arg, "--unicode-data")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -133,6 +315,10 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
             config.derived_core_properties = args[i];
+        } else if (std.mem.eql(u8, arg, "--derived-general-category")) {
+            i += 1;
+            if (i >= args.len) return error.MissingArgument;
+            config.derived_general_category = args[i];
         } else if (std.mem.eql(u8, arg, "--output")) {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
@@ -147,6 +333,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Config {
     try ensureFileExists(config.unicode_data);
     try ensureFileExists(config.prop_list);
     try ensureFileExists(config.derived_core_properties);
+    try ensureFileExists(config.derived_general_category);
 
     return config;
 }
@@ -161,13 +348,14 @@ fn hasHelpFlag(args: []const []const u8) bool {
 fn writeUsage() !void {
     std.debug.print(
         \\usage: gen_unicode_props.zig [--zg-root PATH] [--unicode-data PATH] [--prop-list PATH] [--derived-core-properties PATH] --output PATH
+        \\                             [--derived-general-category PATH]
         \\
         \\Default data source:
         \\  ../zig-libs/zg/data/unicode relative to the zigrep repo root
         \\
         \\Examples:
         \\  zig run tools/gen_unicode_props.zig -- --zg-root ../zig-libs/zg --output src/regex/unicode_props_generated.zig
-        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --output src/regex/unicode_props_generated.zig
+        \\  zig run tools/gen_unicode_props.zig -- --unicode-data /path/to/UnicodeData.txt --prop-list /path/to/PropList.txt --derived-core-properties /path/to/DerivedCoreProperties.txt --derived-general-category /path/to/DerivedGeneralCategory.txt --output src/regex/unicode_props_generated.zig
         \\
     , .{});
 }
@@ -296,6 +484,7 @@ fn appendCategoryRange(
             try appendMergedRange(allocator, letter_ranges, .{ .start = start, .end = end });
             try appendMergedRange(allocator, uppercase_ranges, .{ .start = start, .end = end });
         },
+        else => unreachable,
     }
 }
 
@@ -374,23 +563,175 @@ fn loadNamedPropertyData(
     }
 }
 
+fn loadGeneralCategoryData(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    titlecase_letter_ranges: *std.ArrayList(Range),
+    modifier_letter_ranges: *std.ArrayList(Range),
+    other_letter_ranges: *std.ArrayList(Range),
+    nonspacing_mark_ranges: *std.ArrayList(Range),
+    spacing_mark_ranges: *std.ArrayList(Range),
+    enclosing_mark_ranges: *std.ArrayList(Range),
+    decimal_number_ranges: *std.ArrayList(Range),
+    letter_number_ranges: *std.ArrayList(Range),
+    other_number_ranges: *std.ArrayList(Range),
+    connector_punctuation_ranges: *std.ArrayList(Range),
+    dash_punctuation_ranges: *std.ArrayList(Range),
+    open_punctuation_ranges: *std.ArrayList(Range),
+    close_punctuation_ranges: *std.ArrayList(Range),
+    initial_punctuation_ranges: *std.ArrayList(Range),
+    final_punctuation_ranges: *std.ArrayList(Range),
+    other_punctuation_ranges: *std.ArrayList(Range),
+    math_symbol_ranges: *std.ArrayList(Range),
+    currency_symbol_ranges: *std.ArrayList(Range),
+    modifier_symbol_ranges: *std.ArrayList(Range),
+    other_symbol_ranges: *std.ArrayList(Range),
+    space_separator_ranges: *std.ArrayList(Range),
+    line_separator_ranges: *std.ArrayList(Range),
+    paragraph_separator_ranges: *std.ArrayList(Range),
+    control_ranges: *std.ArrayList(Range),
+    format_ranges: *std.ArrayList(Range),
+    surrogate_ranges: *std.ArrayList(Range),
+    private_use_ranges: *std.ArrayList(Range),
+    unassigned_ranges: *std.ArrayList(Range),
+    other_ranges: *std.ArrayList(Range),
+) !void {
+    const bytes = try std.fs.cwd().readFileAlloc(allocator, path, 32 * 1024 * 1024);
+
+    var lines = std.mem.tokenizeScalar(u8, bytes, '\n');
+    while (lines.next()) |line_raw| {
+        const line_trimmed = std.mem.trimRight(u8, line_raw, "\r");
+        const line = if (std.mem.indexOfScalar(u8, line_trimmed, '#')) |index|
+            std.mem.trim(u8, line_trimmed[0..index], " \t")
+        else
+            std.mem.trim(u8, line_trimmed, " \t");
+
+        if (line.len == 0) continue;
+
+        const sep = std.mem.indexOfScalar(u8, line, ';') orelse continue;
+        const lhs = std.mem.trim(u8, line[0..sep], " \t");
+        const rhs = std.mem.trim(u8, line[sep + 1 ..], " \t");
+        const kind = generalCategoryKind(rhs) orelse continue;
+
+        const range = if (std.mem.indexOf(u8, lhs, "..")) |dots|
+            Range{
+                .start = try std.fmt.parseInt(u32, lhs[0..dots], 16),
+                .end = try std.fmt.parseInt(u32, lhs[dots + 2 ..], 16),
+            }
+        else
+            blk: {
+                const cp = try std.fmt.parseInt(u32, lhs, 16);
+                break :blk Range{ .start = cp, .end = cp };
+            };
+
+        switch (kind) {
+            .titlecase_letter => try appendMergedRange(allocator, titlecase_letter_ranges, range),
+            .modifier_letter => try appendMergedRange(allocator, modifier_letter_ranges, range),
+            .other_letter => try appendMergedRange(allocator, other_letter_ranges, range),
+            .nonspacing_mark => try appendMergedRange(allocator, nonspacing_mark_ranges, range),
+            .spacing_mark => try appendMergedRange(allocator, spacing_mark_ranges, range),
+            .enclosing_mark => try appendMergedRange(allocator, enclosing_mark_ranges, range),
+            .decimal_number => try appendMergedRange(allocator, decimal_number_ranges, range),
+            .letter_number => try appendMergedRange(allocator, letter_number_ranges, range),
+            .other_number => try appendMergedRange(allocator, other_number_ranges, range),
+            .connector_punctuation => try appendMergedRange(allocator, connector_punctuation_ranges, range),
+            .dash_punctuation => try appendMergedRange(allocator, dash_punctuation_ranges, range),
+            .open_punctuation => try appendMergedRange(allocator, open_punctuation_ranges, range),
+            .close_punctuation => try appendMergedRange(allocator, close_punctuation_ranges, range),
+            .initial_punctuation => try appendMergedRange(allocator, initial_punctuation_ranges, range),
+            .final_punctuation => try appendMergedRange(allocator, final_punctuation_ranges, range),
+            .other_punctuation => try appendMergedRange(allocator, other_punctuation_ranges, range),
+            .math_symbol => try appendMergedRange(allocator, math_symbol_ranges, range),
+            .currency_symbol => try appendMergedRange(allocator, currency_symbol_ranges, range),
+            .modifier_symbol => try appendMergedRange(allocator, modifier_symbol_ranges, range),
+            .other_symbol => try appendMergedRange(allocator, other_symbol_ranges, range),
+            .space_separator => try appendMergedRange(allocator, space_separator_ranges, range),
+            .line_separator => try appendMergedRange(allocator, line_separator_ranges, range),
+            .paragraph_separator => try appendMergedRange(allocator, paragraph_separator_ranges, range),
+            .control => {
+                try appendMergedRange(allocator, control_ranges, range);
+                try appendMergedRange(allocator, other_ranges, range);
+            },
+            .format => {
+                try appendMergedRange(allocator, format_ranges, range);
+                try appendMergedRange(allocator, other_ranges, range);
+            },
+            .surrogate => {
+                try appendMergedRange(allocator, surrogate_ranges, range);
+                try appendMergedRange(allocator, other_ranges, range);
+            },
+            .private_use => {
+                try appendMergedRange(allocator, private_use_ranges, range);
+                try appendMergedRange(allocator, other_ranges, range);
+            },
+            .unassigned => {
+                try appendMergedRange(allocator, unassigned_ranges, range);
+                try appendMergedRange(allocator, other_ranges, range);
+            },
+            else => unreachable,
+        }
+    }
+}
+
+fn generalCategoryKind(name: []const u8) ?CategoryKind {
+    if (std.mem.eql(u8, name, "Lt")) return .titlecase_letter;
+    if (std.mem.eql(u8, name, "Lm")) return .modifier_letter;
+    if (std.mem.eql(u8, name, "Lo")) return .other_letter;
+    if (std.mem.eql(u8, name, "Mn")) return .nonspacing_mark;
+    if (std.mem.eql(u8, name, "Mc")) return .spacing_mark;
+    if (std.mem.eql(u8, name, "Me")) return .enclosing_mark;
+    if (std.mem.eql(u8, name, "Nd")) return .decimal_number;
+    if (std.mem.eql(u8, name, "Nl")) return .letter_number;
+    if (std.mem.eql(u8, name, "No")) return .other_number;
+    if (std.mem.eql(u8, name, "Pc")) return .connector_punctuation;
+    if (std.mem.eql(u8, name, "Pd")) return .dash_punctuation;
+    if (std.mem.eql(u8, name, "Ps")) return .open_punctuation;
+    if (std.mem.eql(u8, name, "Pe")) return .close_punctuation;
+    if (std.mem.eql(u8, name, "Pi")) return .initial_punctuation;
+    if (std.mem.eql(u8, name, "Pf")) return .final_punctuation;
+    if (std.mem.eql(u8, name, "Po")) return .other_punctuation;
+    if (std.mem.eql(u8, name, "Sm")) return .math_symbol;
+    if (std.mem.eql(u8, name, "Sc")) return .currency_symbol;
+    if (std.mem.eql(u8, name, "Sk")) return .modifier_symbol;
+    if (std.mem.eql(u8, name, "So")) return .other_symbol;
+    if (std.mem.eql(u8, name, "Zs")) return .space_separator;
+    if (std.mem.eql(u8, name, "Zl")) return .line_separator;
+    if (std.mem.eql(u8, name, "Zp")) return .paragraph_separator;
+    if (std.mem.eql(u8, name, "Cc")) return .control;
+    if (std.mem.eql(u8, name, "Cf")) return .format;
+    if (std.mem.eql(u8, name, "Cs")) return .surrogate;
+    if (std.mem.eql(u8, name, "Co")) return .private_use;
+    if (std.mem.eql(u8, name, "Cn")) return .unassigned;
+    return null;
+}
+
 fn appendMergedRange(
     allocator: std.mem.Allocator,
     ranges: *std.ArrayList(Range),
     range: Range,
 ) !void {
-    if (ranges.items.len == 0) {
-        try ranges.append(allocator, range);
-        return;
+    var insert_at: usize = 0;
+    while (insert_at < ranges.items.len and ranges.items[insert_at].start < range.start) : (insert_at += 1) {}
+
+    try ranges.insert(allocator, insert_at, range);
+
+    if (insert_at > 0) {
+        const prev = &ranges.items[insert_at - 1];
+        const curr = &ranges.items[insert_at];
+        if (curr.start <= prev.end + 1) {
+            if (curr.end > prev.end) prev.end = curr.end;
+            _ = ranges.orderedRemove(insert_at);
+            insert_at -= 1;
+        }
     }
 
-    const last = &ranges.items[ranges.items.len - 1];
-    if (range.start <= last.end + 1) {
-        if (range.end > last.end) last.end = range.end;
-        return;
+    while (insert_at + 1 < ranges.items.len) {
+        const curr = &ranges.items[insert_at];
+        const next = ranges.items[insert_at + 1];
+        if (next.start > curr.end + 1) break;
+        if (next.end > curr.end) curr.end = next.end;
+        _ = ranges.orderedRemove(insert_at + 1);
     }
-
-    try ranges.append(allocator, range);
 }
 
 fn writeOutput(
@@ -405,6 +746,35 @@ fn writeOutput(
     punctuation_ranges: []const Range,
     symbol_ranges: []const Range,
     separator_ranges: []const Range,
+    other_ranges: []const Range,
+    titlecase_letter_ranges: []const Range,
+    modifier_letter_ranges: []const Range,
+    other_letter_ranges: []const Range,
+    nonspacing_mark_ranges: []const Range,
+    spacing_mark_ranges: []const Range,
+    enclosing_mark_ranges: []const Range,
+    decimal_number_ranges: []const Range,
+    letter_number_ranges: []const Range,
+    other_number_ranges: []const Range,
+    connector_punctuation_ranges: []const Range,
+    dash_punctuation_ranges: []const Range,
+    open_punctuation_ranges: []const Range,
+    close_punctuation_ranges: []const Range,
+    initial_punctuation_ranges: []const Range,
+    final_punctuation_ranges: []const Range,
+    other_punctuation_ranges: []const Range,
+    math_symbol_ranges: []const Range,
+    currency_symbol_ranges: []const Range,
+    modifier_symbol_ranges: []const Range,
+    other_symbol_ranges: []const Range,
+    space_separator_ranges: []const Range,
+    line_separator_ranges: []const Range,
+    paragraph_separator_ranges: []const Range,
+    control_ranges: []const Range,
+    format_ranges: []const Range,
+    surrogate_ranges: []const Range,
+    private_use_ranges: []const Range,
+    unassigned_ranges: []const Range,
 ) !void {
     const output_path = config.output;
     if (std.fs.path.dirname(output_path)) |dir_path| {
@@ -422,6 +792,7 @@ fn writeOutput(
     try writer.interface.print("// - {s}\n", .{config.unicode_data});
     try writer.interface.print("// - {s}\n", .{config.prop_list});
     try writer.interface.print("// - {s}\n", .{config.derived_core_properties});
+    try writer.interface.print("// - {s}\n", .{config.derived_general_category});
     try writer.interface.print("// Data source repository:\n", .{});
     try writer.interface.print("// - {s}\n", .{config.zg_root});
     try writer.interface.print("// - https://codeberg.org/atman/zg\n\n", .{});
@@ -449,6 +820,64 @@ fn writeOutput(
     try writeRangeList(&writer.interface, "symbol_ranges", symbol_ranges);
     try writer.interface.print("\n", .{});
     try writeRangeList(&writer.interface, "separator_ranges", separator_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "other_ranges", other_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "titlecase_letter_ranges", titlecase_letter_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "modifier_letter_ranges", modifier_letter_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "other_letter_ranges", other_letter_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "nonspacing_mark_ranges", nonspacing_mark_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "spacing_mark_ranges", spacing_mark_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "enclosing_mark_ranges", enclosing_mark_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "decimal_number_ranges", decimal_number_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "letter_number_ranges", letter_number_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "other_number_ranges", other_number_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "connector_punctuation_ranges", connector_punctuation_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "dash_punctuation_ranges", dash_punctuation_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "open_punctuation_ranges", open_punctuation_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "close_punctuation_ranges", close_punctuation_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "initial_punctuation_ranges", initial_punctuation_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "final_punctuation_ranges", final_punctuation_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "other_punctuation_ranges", other_punctuation_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "math_symbol_ranges", math_symbol_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "currency_symbol_ranges", currency_symbol_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "modifier_symbol_ranges", modifier_symbol_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "other_symbol_ranges", other_symbol_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "space_separator_ranges", space_separator_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "line_separator_ranges", line_separator_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "paragraph_separator_ranges", paragraph_separator_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "control_ranges", control_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "format_ranges", format_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "surrogate_ranges", surrogate_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "private_use_ranges", private_use_ranges);
+    try writer.interface.print("\n", .{});
+    try writeRangeList(&writer.interface, "unassigned_ranges", unassigned_ranges);
     try writer.interface.flush();
 }
 

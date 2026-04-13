@@ -18,10 +18,39 @@ pub const Property = enum {
     alphabetic,
     lowercase,
     uppercase,
+    titlecase_letter,
+    modifier_letter,
+    other_letter,
     mark,
+    nonspacing_mark,
+    spacing_mark,
+    enclosing_mark,
+    decimal_number,
+    letter_number,
+    other_number,
     punctuation,
+    connector_punctuation,
+    dash_punctuation,
+    open_punctuation,
+    close_punctuation,
+    initial_punctuation,
+    final_punctuation,
+    other_punctuation,
     separator,
+    space_separator,
+    line_separator,
+    paragraph_separator,
     symbol,
+    math_symbol,
+    currency_symbol,
+    modifier_symbol,
+    other_symbol,
+    other,
+    control,
+    format,
+    surrogate,
+    private_use,
+    unassigned,
 };
 
 pub const GeneralCategory = enum {
@@ -112,11 +141,40 @@ pub const Strategy = struct {
         if (propertyNameEq(name, "whitespace") or propertyNameEq(name, "space") or propertyNameEq(name, "white_space")) return .whitespace;
         if (propertyNameEq(name, "alphabetic") or propertyNameEq(name, "alpha")) return .alphabetic;
         if (propertyNameEq(name, "lowercase") or propertyNameEq(name, "lower") or propertyNameEq(name, "ll")) return .lowercase;
-        if (propertyNameEq(name, "mark") or propertyNameEq(name, "m")) return .mark;
-        if (propertyNameEq(name, "punctuation") or propertyNameEq(name, "punct") or propertyNameEq(name, "p")) return .punctuation;
-        if (propertyNameEq(name, "separator") or propertyNameEq(name, "z")) return .separator;
-        if (propertyNameEq(name, "symbol") or propertyNameEq(name, "s")) return .symbol;
         if (propertyNameEq(name, "uppercase") or propertyNameEq(name, "upper") or propertyNameEq(name, "lu")) return .uppercase;
+        if (propertyNameEq(name, "titlecase_letter") or propertyNameEq(name, "lt")) return .titlecase_letter;
+        if (propertyNameEq(name, "modifier_letter") or propertyNameEq(name, "lm")) return .modifier_letter;
+        if (propertyNameEq(name, "other_letter") or propertyNameEq(name, "lo")) return .other_letter;
+        if (propertyNameEq(name, "mark") or propertyNameEq(name, "m")) return .mark;
+        if (propertyNameEq(name, "nonspacing_mark") or propertyNameEq(name, "mn")) return .nonspacing_mark;
+        if (propertyNameEq(name, "spacing_mark") or propertyNameEq(name, "mc")) return .spacing_mark;
+        if (propertyNameEq(name, "enclosing_mark") or propertyNameEq(name, "me")) return .enclosing_mark;
+        if (propertyNameEq(name, "decimal_number") or propertyNameEq(name, "nd")) return .decimal_number;
+        if (propertyNameEq(name, "letter_number") or propertyNameEq(name, "nl")) return .letter_number;
+        if (propertyNameEq(name, "other_number") or propertyNameEq(name, "no")) return .other_number;
+        if (propertyNameEq(name, "punctuation") or propertyNameEq(name, "punct") or propertyNameEq(name, "p")) return .punctuation;
+        if (propertyNameEq(name, "connector_punctuation") or propertyNameEq(name, "pc")) return .connector_punctuation;
+        if (propertyNameEq(name, "dash_punctuation") or propertyNameEq(name, "pd")) return .dash_punctuation;
+        if (propertyNameEq(name, "open_punctuation") or propertyNameEq(name, "ps")) return .open_punctuation;
+        if (propertyNameEq(name, "close_punctuation") or propertyNameEq(name, "pe")) return .close_punctuation;
+        if (propertyNameEq(name, "initial_punctuation") or propertyNameEq(name, "pi")) return .initial_punctuation;
+        if (propertyNameEq(name, "final_punctuation") or propertyNameEq(name, "pf")) return .final_punctuation;
+        if (propertyNameEq(name, "other_punctuation") or propertyNameEq(name, "po")) return .other_punctuation;
+        if (propertyNameEq(name, "separator") or propertyNameEq(name, "z")) return .separator;
+        if (propertyNameEq(name, "space_separator") or propertyNameEq(name, "zs")) return .space_separator;
+        if (propertyNameEq(name, "line_separator") or propertyNameEq(name, "zl")) return .line_separator;
+        if (propertyNameEq(name, "paragraph_separator") or propertyNameEq(name, "zp")) return .paragraph_separator;
+        if (propertyNameEq(name, "symbol") or propertyNameEq(name, "s")) return .symbol;
+        if (propertyNameEq(name, "math_symbol") or propertyNameEq(name, "sm")) return .math_symbol;
+        if (propertyNameEq(name, "currency_symbol") or propertyNameEq(name, "sc")) return .currency_symbol;
+        if (propertyNameEq(name, "modifier_symbol") or propertyNameEq(name, "sk")) return .modifier_symbol;
+        if (propertyNameEq(name, "other_symbol") or propertyNameEq(name, "so")) return .other_symbol;
+        if (propertyNameEq(name, "other") or propertyNameEq(name, "c")) return .other;
+        if (propertyNameEq(name, "control") or propertyNameEq(name, "cc")) return .control;
+        if (propertyNameEq(name, "format") or propertyNameEq(name, "cf")) return .format;
+        if (propertyNameEq(name, "surrogate") or propertyNameEq(name, "cs")) return .surrogate;
+        if (propertyNameEq(name, "private_use") or propertyNameEq(name, "co")) return .private_use;
+        if (propertyNameEq(name, "unassigned") or propertyNameEq(name, "cn")) return .unassigned;
         return null;
     }
 
@@ -127,11 +185,40 @@ pub const Strategy = struct {
             .whitespace => inRanges(cp, &generated.whitespace_ranges),
             .alphabetic => inRanges(cp, &generated.alphabetic_ranges),
             .lowercase => inRanges(cp, &generated.lowercase_ranges),
-            .mark => inRanges(cp, &generated.mark_ranges),
-            .punctuation => inRanges(cp, &generated.punctuation_ranges),
-            .separator => inRanges(cp, &generated.separator_ranges),
-            .symbol => inRanges(cp, &generated.symbol_ranges),
             .uppercase => inRanges(cp, &generated.uppercase_ranges),
+            .titlecase_letter => inRanges(cp, &generated.titlecase_letter_ranges),
+            .modifier_letter => inRanges(cp, &generated.modifier_letter_ranges),
+            .other_letter => inRanges(cp, &generated.other_letter_ranges),
+            .mark => inRanges(cp, &generated.mark_ranges),
+            .nonspacing_mark => inRanges(cp, &generated.nonspacing_mark_ranges),
+            .spacing_mark => inRanges(cp, &generated.spacing_mark_ranges),
+            .enclosing_mark => inRanges(cp, &generated.enclosing_mark_ranges),
+            .decimal_number => inRanges(cp, &generated.decimal_number_ranges),
+            .letter_number => inRanges(cp, &generated.letter_number_ranges),
+            .other_number => inRanges(cp, &generated.other_number_ranges),
+            .punctuation => inRanges(cp, &generated.punctuation_ranges),
+            .connector_punctuation => inRanges(cp, &generated.connector_punctuation_ranges),
+            .dash_punctuation => inRanges(cp, &generated.dash_punctuation_ranges),
+            .open_punctuation => inRanges(cp, &generated.open_punctuation_ranges),
+            .close_punctuation => inRanges(cp, &generated.close_punctuation_ranges),
+            .initial_punctuation => inRanges(cp, &generated.initial_punctuation_ranges),
+            .final_punctuation => inRanges(cp, &generated.final_punctuation_ranges),
+            .other_punctuation => inRanges(cp, &generated.other_punctuation_ranges),
+            .separator => inRanges(cp, &generated.separator_ranges),
+            .space_separator => inRanges(cp, &generated.space_separator_ranges),
+            .line_separator => inRanges(cp, &generated.line_separator_ranges),
+            .paragraph_separator => inRanges(cp, &generated.paragraph_separator_ranges),
+            .symbol => inRanges(cp, &generated.symbol_ranges),
+            .math_symbol => inRanges(cp, &generated.math_symbol_ranges),
+            .currency_symbol => inRanges(cp, &generated.currency_symbol_ranges),
+            .modifier_symbol => inRanges(cp, &generated.modifier_symbol_ranges),
+            .other_symbol => inRanges(cp, &generated.other_symbol_ranges),
+            .other => inRanges(cp, &generated.other_ranges),
+            .control => inRanges(cp, &generated.control_ranges),
+            .format => inRanges(cp, &generated.format_ranges),
+            .surrogate => inRanges(cp, &generated.surrogate_ranges),
+            .private_use => inRanges(cp, &generated.private_use_ranges),
+            .unassigned => inRanges(cp, &generated.unassigned_ranges),
         };
     }
 
@@ -362,10 +449,39 @@ test "Unicode strategy looks up named properties and aliases" {
     try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("Alphabetic"));
     try testing.expectEqual(@as(?Property, .alphabetic), Strategy.lookupProperty("alpha"));
     try testing.expectEqual(@as(?Property, .lowercase), Strategy.lookupProperty("Ll"));
+    try testing.expectEqual(@as(?Property, .titlecase_letter), Strategy.lookupProperty("Lt"));
+    try testing.expectEqual(@as(?Property, .modifier_letter), Strategy.lookupProperty("Lm"));
+    try testing.expectEqual(@as(?Property, .other_letter), Strategy.lookupProperty("Lo"));
     try testing.expectEqual(@as(?Property, .mark), Strategy.lookupProperty("M"));
+    try testing.expectEqual(@as(?Property, .nonspacing_mark), Strategy.lookupProperty("Mn"));
+    try testing.expectEqual(@as(?Property, .spacing_mark), Strategy.lookupProperty("Mc"));
+    try testing.expectEqual(@as(?Property, .enclosing_mark), Strategy.lookupProperty("Me"));
+    try testing.expectEqual(@as(?Property, .decimal_number), Strategy.lookupProperty("Nd"));
+    try testing.expectEqual(@as(?Property, .letter_number), Strategy.lookupProperty("Nl"));
+    try testing.expectEqual(@as(?Property, .other_number), Strategy.lookupProperty("No"));
     try testing.expectEqual(@as(?Property, .punctuation), Strategy.lookupProperty("P"));
+    try testing.expectEqual(@as(?Property, .connector_punctuation), Strategy.lookupProperty("Pc"));
+    try testing.expectEqual(@as(?Property, .dash_punctuation), Strategy.lookupProperty("Pd"));
+    try testing.expectEqual(@as(?Property, .open_punctuation), Strategy.lookupProperty("Ps"));
+    try testing.expectEqual(@as(?Property, .close_punctuation), Strategy.lookupProperty("Pe"));
+    try testing.expectEqual(@as(?Property, .initial_punctuation), Strategy.lookupProperty("Pi"));
+    try testing.expectEqual(@as(?Property, .final_punctuation), Strategy.lookupProperty("Pf"));
+    try testing.expectEqual(@as(?Property, .other_punctuation), Strategy.lookupProperty("Po"));
     try testing.expectEqual(@as(?Property, .separator), Strategy.lookupProperty("Z"));
+    try testing.expectEqual(@as(?Property, .space_separator), Strategy.lookupProperty("Zs"));
+    try testing.expectEqual(@as(?Property, .line_separator), Strategy.lookupProperty("Zl"));
+    try testing.expectEqual(@as(?Property, .paragraph_separator), Strategy.lookupProperty("Zp"));
     try testing.expectEqual(@as(?Property, .symbol), Strategy.lookupProperty("S"));
+    try testing.expectEqual(@as(?Property, .math_symbol), Strategy.lookupProperty("Sm"));
+    try testing.expectEqual(@as(?Property, .currency_symbol), Strategy.lookupProperty("Sc"));
+    try testing.expectEqual(@as(?Property, .modifier_symbol), Strategy.lookupProperty("Sk"));
+    try testing.expectEqual(@as(?Property, .other_symbol), Strategy.lookupProperty("So"));
+    try testing.expectEqual(@as(?Property, .other), Strategy.lookupProperty("C"));
+    try testing.expectEqual(@as(?Property, .control), Strategy.lookupProperty("Cc"));
+    try testing.expectEqual(@as(?Property, .format), Strategy.lookupProperty("Cf"));
+    try testing.expectEqual(@as(?Property, .surrogate), Strategy.lookupProperty("Cs"));
+    try testing.expectEqual(@as(?Property, .private_use), Strategy.lookupProperty("Co"));
+    try testing.expectEqual(@as(?Property, .unassigned), Strategy.lookupProperty("Cn"));
     try testing.expectEqual(@as(?Property, .uppercase), Strategy.lookupProperty("Uppercase"));
     try testing.expectEqual(@as(?Property, null), Strategy.lookupProperty("Emoji"));
 }
@@ -379,11 +495,40 @@ test "Unicode strategy evaluates property membership" {
     try testing.expect(Strategy.hasProperty(' ', .whitespace));
     try testing.expect(Strategy.hasProperty(0x0345, .alphabetic));
     try testing.expect(Strategy.hasProperty('ß', .lowercase));
+    try testing.expect(Strategy.hasProperty(0x01C5, .titlecase_letter));
+    try testing.expect(Strategy.hasProperty(0x02B0, .modifier_letter));
+    try testing.expect(Strategy.hasProperty('中', .other_letter));
     try testing.expect(Strategy.hasProperty(0x0345, .mark));
+    try testing.expect(Strategy.hasProperty(0x0345, .nonspacing_mark));
+    try testing.expect(Strategy.hasProperty(0x093E, .spacing_mark));
+    try testing.expect(Strategy.hasProperty(0x20DD, .enclosing_mark));
+    try testing.expect(Strategy.hasProperty('7', .decimal_number));
+    try testing.expect(Strategy.hasProperty(0x2160, .letter_number));
+    try testing.expect(Strategy.hasProperty(0x00B2, .other_number));
     try testing.expect(Strategy.hasProperty('-', .punctuation));
+    try testing.expect(Strategy.hasProperty('_', .connector_punctuation));
+    try testing.expect(Strategy.hasProperty('-', .dash_punctuation));
+    try testing.expect(Strategy.hasProperty('(', .open_punctuation));
+    try testing.expect(Strategy.hasProperty(')', .close_punctuation));
+    try testing.expect(Strategy.hasProperty('«', .initial_punctuation));
+    try testing.expect(Strategy.hasProperty('»', .final_punctuation));
+    try testing.expect(Strategy.hasProperty('!', .other_punctuation));
     try testing.expect(Strategy.hasProperty(' ', .separator));
+    try testing.expect(Strategy.hasProperty(' ', .space_separator));
+    try testing.expect(Strategy.hasProperty(0x2028, .line_separator));
+    try testing.expect(Strategy.hasProperty(0x2029, .paragraph_separator));
     try testing.expect(Strategy.hasProperty('+', .symbol));
+    try testing.expect(Strategy.hasProperty('+', .math_symbol));
+    try testing.expect(Strategy.hasProperty('$', .currency_symbol));
+    try testing.expect(Strategy.hasProperty('^', .modifier_symbol));
+    try testing.expect(Strategy.hasProperty(0x2603, .other_symbol));
     try testing.expect(Strategy.hasProperty('Σ', .uppercase));
+    try testing.expect(Strategy.hasProperty(0xE000, .other));
+    try testing.expect(Strategy.hasProperty(0x0001, .control));
+    try testing.expect(Strategy.hasProperty(0x200E, .format));
+    try testing.expect(Strategy.hasProperty(0xD800, .surrogate));
+    try testing.expect(Strategy.hasProperty(0xE000, .private_use));
+    try testing.expect(Strategy.hasProperty(0x0378, .unassigned));
     try testing.expect(!Strategy.hasProperty('-', .letter));
 }
 

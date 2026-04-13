@@ -37,7 +37,7 @@ Character classes support:
 - Negation in the leading position: `[^0-9]`
 - Literal `]`, `-`, and `^` when used in non-special positions or escaped
 
-The current engine exposes a small Unicode property surface.
+The current engine exposes a growing native Unicode property surface.
 
 Unicode data note:
 
@@ -61,16 +61,30 @@ Current escape boundary:
   - `\p{Alphabetic}` and `\P{Alphabetic}`
   - `\p{Letter}` and `\P{Letter}`
   - `\p{Lowercase}` and `\P{Lowercase}`
+  - `\p{Titlecase_Letter}` and `\P{Titlecase_Letter}`
+  - `\p{Modifier_Letter}` and `\P{Modifier_Letter}`
+  - `\p{Other_Letter}` and `\P{Other_Letter}`
   - `\p{Mark}` and `\P{Mark}`
+  - `\p{Nonspacing_Mark}`, `\p{Spacing_Mark}`, and `\p{Enclosing_Mark}`
   - `\p{Number}` and `\P{Number}`
+  - `\p{Decimal_Number}`, `\p{Letter_Number}`, and `\p{Other_Number}`
   - `\p{Punctuation}` and `\P{Punctuation}`
+  - `\p{Connector_Punctuation}`, `\p{Dash_Punctuation}`, `\p{Open_Punctuation}`, `\p{Close_Punctuation}`, `\p{Initial_Punctuation}`, `\p{Final_Punctuation}`, and `\p{Other_Punctuation}`
   - `\p{Separator}` and `\P{Separator}`
+  - `\p{Space_Separator}`, `\p{Line_Separator}`, and `\p{Paragraph_Separator}`
   - `\p{Symbol}` and `\P{Symbol}`
+  - `\p{Math_Symbol}`, `\p{Currency_Symbol}`, `\p{Modifier_Symbol}`, and `\p{Other_Symbol}`
+  - `\p{Other}` and `\P{Other}`
+  - `\p{Control}`, `\p{Format}`, `\p{Surrogate}`, `\p{Private_Use}`, and `\p{Unassigned}`
   - `\p{Uppercase}` and `\P{Uppercase}`
   - `\p{Whitespace}` and `\P{Whitespace}`
   - the same property items may also appear inside bracket classes
     - for example `[\p{Letter}\P{Whitespace}]`
-  - accepted aliases currently include `alpha`, `L`, `Ll`, `Lu`, `M`, `N`, `P`, `S`, `White_Space`, `Z`, `lower`, `punct`, `upper`, and `white_space`
+  - accepted aliases currently include:
+    - family aliases such as `L`, `N`, `M`, `P`, `S`, `Z`, and `C`
+    - subgroup aliases such as `Ll`, `Lu`, `Lt`, `Lm`, `Lo`, `Mn`, `Mc`, `Me`, `Nd`, `Nl`, `No`, `Pc`, `Pd`, `Ps`, `Pe`, `Pi`, `Pf`, `Po`, `Sm`, `Sc`, `Sk`, `So`, `Zs`, `Zl`, `Zp`, `Cc`, `Cf`, `Cs`, `Co`, and `Cn`
+    - long-name aliases such as `alpha`, `lower`, `upper`, `punct`, `space`, `white_space`, and `private_use`
+  - property names are normalized by ignoring ASCII case, `_`, `-`, and ASCII whitespace
   - invalid raw bytes do not match positive Unicode properties and do match
     negated Unicode properties
 - `\u{...}` accepts 1 to 6 hex digits and rejects surrogate code points and values above `U+10FFFF`

@@ -5947,6 +5947,56 @@ test "runCli supports Mark, Punctuation, Separator, and Symbol Unicode propertie
     defer symbol_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), symbol_run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, symbol_run.stdout, 1, "sample.txt:4:1:+"));
+
+    const not_punctuation_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\P{Punctuation}+", root_path });
+    defer not_punctuation_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), not_punctuation_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, not_punctuation_run.stdout, 1, "sample.txt:1:1:"));
+}
+
+test "runCli supports Unicode general-category subgroup properties" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "ǅ\n" ++
+            "Ⅰ\n" ++
+            "_\n" ++
+            "\xEE\x80\x80\n" ++
+            "\xCD\xB8\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const titlecase_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Lt}+", root_path });
+    defer titlecase_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), titlecase_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, titlecase_run.stdout, 1, "sample.txt:1:1:ǅ"));
+
+    const letter_number_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Nl}+", root_path });
+    defer letter_number_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), letter_number_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, letter_number_run.stdout, 1, "sample.txt:2:1:Ⅰ"));
+
+    const connector_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Pc}+", root_path });
+    defer connector_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), connector_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, connector_run.stdout, 1, "sample.txt:3:1:_"));
+
+    const other_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Other}+", root_path });
+    defer other_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), other_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, other_run.stdout, 1, "sample.txt:4:1:"));
+
+    const unassigned_run = try runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Cn}+", root_path });
+    defer unassigned_run.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), unassigned_run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, unassigned_run.stdout, 1, "sample.txt:5:1:"));
 }
 
 test "runCli supports Unicode property items inside character classes" {

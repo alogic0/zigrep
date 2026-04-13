@@ -2126,6 +2126,26 @@ test "Searcher handles Unicode properties in UTF-8 and raw-byte paths" {
     defer symbol.deinit();
     try testing.expect((try symbol.reportFirstMatch("sample.txt", "+")) != null);
 
+    var titlecase = try Searcher.init(testing.allocator, "\\p{Lt}+", .{});
+    defer titlecase.deinit();
+    try testing.expect((try titlecase.reportFirstMatch("sample.txt", "ǅ")) != null);
+
+    var letter_number_category = try Searcher.init(testing.allocator, "\\p{Nl}+", .{});
+    defer letter_number_category.deinit();
+    try testing.expect((try letter_number_category.reportFirstMatch("sample.txt", "Ⅰ")) != null);
+
+    var connector_punctuation = try Searcher.init(testing.allocator, "\\p{Pc}+", .{});
+    defer connector_punctuation.deinit();
+    try testing.expect((try connector_punctuation.reportFirstMatch("sample.txt", "_")) != null);
+
+    var other = try Searcher.init(testing.allocator, "\\p{Other}+", .{});
+    defer other.deinit();
+    try testing.expect((try other.reportFirstMatch("sample.txt", "\xEE\x80\x80")) != null);
+
+    var unassigned = try Searcher.init(testing.allocator, "\\p{Cn}+", .{});
+    defer unassigned.deinit();
+    try testing.expect((try unassigned.reportFirstMatch("sample.txt", "\xCD\xB8")) != null);
+
 }
 
 test "Searcher handles Unicode property items inside character classes" {
