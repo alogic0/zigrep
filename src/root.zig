@@ -10,6 +10,7 @@ pub const search_output = @import("search_output.zig");
 pub const search_filtering = @import("search_filtering.zig");
 pub const command = @import("command.zig");
 pub const cli = @import("cli.zig");
+pub const cli_dispatch = @import("cli_dispatch.zig");
 pub const config = @import("config.zig");
 pub const app_version = build_options.app_version;
 

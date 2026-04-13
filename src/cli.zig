@@ -2,8 +2,8 @@ const std = @import("std");
 const config = @import("config.zig");
 const build_options = @import("build_options");
 const command = @import("command.zig");
+const cli_dispatch = @import("cli_dispatch.zig");
 const search = @import("search/root.zig");
-const runner = @import("search_runner.zig");
 
 pub const CliError = error{
     MissingPattern,
@@ -22,18 +22,7 @@ pub const ReportMode = command.ReportMode;
 pub const CliOptions = command.CliOptions;
 pub const app_version = build_options.app_version;
 
-pub const ParseResult = union(enum) {
-    help,
-    version,
-    type_list: struct {
-        type_adds: []const []const u8,
-
-        pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
-            allocator.free(self.type_adds);
-        }
-    },
-    run: CliOptions,
-};
+pub const ParseResult = cli_dispatch.ParseResult;
 
 const ParseState = struct {
     include_hidden: bool = false,
@@ -88,11 +77,7 @@ pub fn runCli(
     defer resolved.deinit(allocator);
 
     const parsed = try parseArgs(allocator, resolved.argv);
-    defer switch (parsed) {
-        .run => |opts| opts.deinit(allocator),
-        .type_list => |opts| opts.deinit(allocator),
-        .help, .version => {},
-    };
+    defer cli_dispatch.deinitParseResult(parsed, allocator);
 
     switch (parsed) {
         .help => {
@@ -103,15 +88,7 @@ pub fn runCli(
             try stdout.print("zigrep {s}\n", .{app_version});
             return 0;
         },
-        .type_list => |opts| {
-            const matcher = try search.types.init(allocator, opts.type_adds);
-            defer matcher.deinit(allocator);
-            try search.types.writeTypeList(stdout, matcher);
-            return 0;
-        },
-        .run => |opts| {
-            return runner.runSearch(allocator, stdout, stderr, opts);
-        },
+        .type_list, .run => return cli_dispatch.executeParsedCommand(allocator, stdout, stderr, parsed),
     }
 }
 
