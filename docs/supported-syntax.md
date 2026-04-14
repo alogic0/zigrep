@@ -224,7 +224,7 @@ The current CLI supports:
 - Binary-file search controls with `--text` and `--binary`
 - Buffered or mmap-backed reads with `--buffered` and `--mmap`
 - Worker-count control with `-j` or `--threads`
-- Path-based result ordering with `--sort path` or `--sortr path`
+- Result ordering with `--sort` / `--sortr` for `path`, `modified`, and `accessed`
 - Walk depth limiting with `--max-depth`
 - Context lines with `-A` / `--after-context`, `-B` / `--before-context`, and `-C` / `--context`
 - Matching-line limit with `-m` or `--max-count`
@@ -264,6 +264,15 @@ Code-search note:
 - replacement expansion supports `$0`, numbered captures like `$1`, braced forms like `${1}`, named captures like `$name` or `${name}`, and `$$` for a literal `$`
 - unknown capture names or indexes expand to an empty string
 - replacement currently remains incompatible with non-text or non-line-oriented modes such as `--count`, `--json`, `-v`, and multiline search
+
+`--sort` note:
+
+- `--sort path` and `--sortr path` sort results by path in ascending or descending order
+- `--sort modified` and `--sortr modified` sort results by file modification time
+- `--sort accessed` and `--sortr accessed` sort results by file access time
+- timestamp sorts use path order as a deterministic tie-breaker
+- sorting stays in the collected result-ordering layer and forces single-threaded reporting
+- `created` is recognized as a sort mode but is currently rejected as unsupported on the current portable implementation surface
 
 `--quiet` note:
 

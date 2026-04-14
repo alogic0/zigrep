@@ -32,6 +32,9 @@ pub const ReportMode = enum {
 pub const SortMode = enum {
     none,
     path,
+    modified,
+    accessed,
+    created,
 };
 
 pub const GlobSpec = struct {

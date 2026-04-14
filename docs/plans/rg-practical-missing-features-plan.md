@@ -126,15 +126,21 @@ work.
 
 ## Feature 5: Timestamp Sorting Modes
 
-- [ ] Extend `--sort` / `--sortr` beyond `path` to the practical timestamp
+- [x] Extend `--sort` / `--sortr` beyond `path` to the practical timestamp
   modes:
   - `modified`
   - `accessed`
   - `created`
-- [ ] Match ripgrep’s behavior closely when a timestamp mode is recognized but
+- [x] Match ripgrep’s behavior closely when a timestamp mode is recognized but
   unsupported on the current platform or filesystem.
-- [ ] Keep timestamp sorting in the post-collection ordering layer, not in the
+- [x] Keep timestamp sorting in the post-collection ordering layer, not in the
   traversal algorithm.
+
+Current status:
+
+- `modified` and `accessed` are implemented with stat-based post-collection ordering
+- `created` is recognized but currently rejected as unsupported because the
+  current portable stat surface does not expose file birth time directly
 
 ### Timestamp Sort Guidance
 

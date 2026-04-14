@@ -18,6 +18,9 @@ pub const Entry = struct {
     path: []const u8,
     kind: EntryKind,
     depth: usize,
+    accessed_ns: i128,
+    modified_ns: i128,
+    changed_ns: i128,
 
     pub fn deinit(self: Entry, allocator: std.mem.Allocator) void {
         allocator.free(self.path);
@@ -77,11 +80,15 @@ pub fn walk(
     const root_kind = try classifyPath(root_path);
     switch (root_kind) {
         .file => {
+            const stat = try std.fs.cwd().statFile(root_path);
             const owned = try allocator.dupe(u8, root_path);
             try visitor.visit(.{
                 .path = owned,
                 .kind = .file,
                 .depth = 0,
+                .accessed_ns = stat.atime,
+                .modified_ns = stat.mtime,
+                .changed_ns = stat.ctime,
             });
         },
         .directory => try walkDir(allocator, root_path, options, 0, false, &visited_dirs, visitor, warning_handler),
@@ -143,11 +150,21 @@ fn walkDir(
 
         switch (kind) {
             .file => {
+                const stat = std.fs.cwd().statFile(child_path) catch |err| {
+                    if (shouldWarnAndSkipTraversalError(err)) {
+                        warning_handler.warn(child_path, err);
+                        continue;
+                    }
+                    return err;
+                };
                 const owned = try allocator.dupe(u8, child_path);
                 try visitor.visit(.{
                     .path = owned,
                     .kind = .file,
                     .depth = child_depth,
+                    .accessed_ns = stat.atime,
+                    .modified_ns = stat.mtime,
+                    .changed_ns = stat.ctime,
                 });
             },
             .directory => {
@@ -185,11 +202,21 @@ fn walkFollowedPath(
     };
     switch (kind) {
         .file => {
+            const stat = std.fs.cwd().statFile(path) catch |err| {
+                if (allow_warn_skip and shouldWarnAndSkipTraversalError(err)) {
+                    warning_handler.warn(path, err);
+                    return;
+                }
+                return err;
+            };
             const owned = try allocator.dupe(u8, path);
             try visitor.visit(.{
                 .path = owned,
                 .kind = .file,
                 .depth = depth,
+                .accessed_ns = stat.atime,
+                .modified_ns = stat.mtime,
+                .changed_ns = stat.ctime,
             });
         },
         .directory => {

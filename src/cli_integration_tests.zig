@@ -2,6 +2,12 @@ const std = @import("std");
 const zigrep = @import("zigrep");
 const cli_test_support = @import("cli_test_support.zig");
 
+fn setFileTimes(dir: std.fs.Dir, sub_path: []const u8, atime_ns: i128, mtime_ns: i128) !void {
+    var file = try dir.openFile(sub_path, .{ .mode = .read_write });
+    defer file.close();
+    try file.updateTimes(atime_ns, mtime_ns);
+}
+
 test "runCli reports matches and skips binary files by default" {
     const testing = std.testing;
 
@@ -144,6 +150,66 @@ test "runCli files quiet respects descending path sort" {
     try testing.expectEqual(@as(u8, 0), hit.exit_code);
     try testing.expectEqualStrings("", hit.stdout);
     try testing.expectEqualStrings("", hit.stderr);
+}
+
+test "runCli files mode supports modified-time sort" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "older.txt",
+        .data = "shown\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "newer.txt",
+        .data = "shown\n",
+    });
+    try setFileTimes(tmp.dir, "older.txt", 1 * std.time.ns_per_s, 1 * std.time.ns_per_s);
+    try setFileTimes(tmp.dir, "newer.txt", 2 * std.time.ns_per_s, 2 * std.time.ns_per_s);
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "--sort", "modified", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    const older_index = std.mem.indexOf(u8, run.stdout, "/older.txt\n").?;
+    const newer_index = std.mem.indexOf(u8, run.stdout, "/newer.txt\n").?;
+    try testing.expect(older_index < newer_index);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli search supports descending accessed-time sort" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "older.txt",
+        .data = "needle old\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "newer.txt",
+        .data = "needle new\n",
+    });
+    try setFileTimes(tmp.dir, "older.txt", 1 * std.time.ns_per_s, 10 * std.time.ns_per_s);
+    try setFileTimes(tmp.dir, "newer.txt", 2 * std.time.ns_per_s, 1 * std.time.ns_per_s);
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--sortr", "accessed", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    const newer_index = std.mem.indexOf(u8, run.stdout, "newer.txt:1:1:needle new").?;
+    const older_index = std.mem.indexOf(u8, run.stdout, "older.txt:1:1:needle old").?;
+    try testing.expect(newer_index < older_index);
+    try testing.expectEqualStrings("", run.stderr);
 }
 
 test "runCli fixed-strings matches literal regex metacharacters" {

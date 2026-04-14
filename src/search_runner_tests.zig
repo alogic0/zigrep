@@ -89,7 +89,14 @@ test "searchEntriesSequential warns and skips unreadable files" {
     defer testing.allocator.free(missing_path);
 
     const entries = [_]zigrep.search.walk.Entry{
-        .{ .path = missing_path, .kind = .file, .depth = 0 },
+        .{
+            .path = missing_path,
+            .kind = .file,
+            .depth = 0,
+            .accessed_ns = 0,
+            .modified_ns = 0,
+            .changed_ns = 0,
+        },
     };
 
     const result = try runner.searchEntriesSequential(testing.allocator, &stdout_capture.writer, &stderr_capture.writer, &entries, .{
@@ -363,4 +370,35 @@ test "runSearch sort path disables parallel reordering and sorts descending" {
     const b_index = std.mem.indexOf(u8, stdout_capture.written(), "b.txt:1:1:needle two").?;
     try testing.expect(b_index < a_index);
     try testing.expectEqualStrings("", stderr_capture.written());
+}
+
+test "runSearch rejects unsupported created-time sort" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.txt",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stdout_capture.deinit();
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    try testing.expectError(error.UnsupportedSortMode, runner.runSearch(
+        testing.allocator,
+        &stdout_capture.writer,
+        &stderr_capture.writer,
+        .{
+            .pattern = "needle",
+            .paths = &.{root_path},
+            .sort_mode = .created,
+        },
+    ));
 }

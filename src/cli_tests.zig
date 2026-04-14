@@ -524,6 +524,46 @@ test "parseArgs accepts sort flags" {
     }
 }
 
+test "parseArgs accepts timestamp sort modes" {
+    const testing = std.testing;
+
+    const modified = try parseArgs(testing.allocator, &.{ "zigrep", "--sort", "modified", "needle", "src" });
+    defer switch (modified) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+    switch (modified) {
+        .run => |opts| try testing.expectEqual(zigrep.command.SortMode.modified, opts.sort_mode),
+        .help, .version, .type_list => unreachable,
+    }
+
+    const accessed = try parseArgs(testing.allocator, &.{ "zigrep", "--sortr", "accessed", "needle", "src" });
+    defer switch (accessed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+    switch (accessed) {
+        .run => |opts| {
+            try testing.expectEqual(zigrep.command.SortMode.accessed, opts.sort_mode);
+            try testing.expect(opts.sort_reverse);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+
+    const created = try parseArgs(testing.allocator, &.{ "zigrep", "--sort", "created", "needle", "src" });
+    defer switch (created) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+    switch (created) {
+        .run => |opts| try testing.expectEqual(zigrep.command.SortMode.created, opts.sort_mode),
+        .help, .version, .type_list => unreachable,
+    }
+}
+
 test "parseArgs sortr overrides sort" {
     const testing = std.testing;
 
@@ -546,7 +586,7 @@ test "parseArgs sortr overrides sort" {
 test "parseArgs rejects unknown sort mode" {
     const testing = std.testing;
 
-    try testing.expectError(error.InvalidFlagValue, parseArgs(testing.allocator, &.{ "zigrep", "--sort", "modified", "needle", "src" }));
+    try testing.expectError(error.InvalidFlagValue, parseArgs(testing.allocator, &.{ "zigrep", "--sort", "wat", "needle", "src" }));
 }
 
 test "parseArgs accepts ignore control flags" {

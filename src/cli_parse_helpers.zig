@@ -293,6 +293,9 @@ fn parseEncoding(arg: []const u8) CliError!search.io.InputEncoding {
 fn parseSortMode(arg: []const u8) CliError!SortMode {
     if (std.mem.eql(u8, arg, "none")) return .none;
     if (std.mem.eql(u8, arg, "path")) return .path;
+    if (std.mem.eql(u8, arg, "modified")) return .modified;
+    if (std.mem.eql(u8, arg, "accessed")) return .accessed;
+    if (std.mem.eql(u8, arg, "created")) return .created;
     return error.InvalidFlagValue;
 }
 

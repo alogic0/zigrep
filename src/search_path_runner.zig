@@ -15,20 +15,55 @@ const search_result = @import("search_result.zig");
 pub const CliOptions = command.CliOptions;
 pub const SearchResult = search_result.SearchResult;
 
+fn validateSortMode(options: CliOptions) !void {
+    if (options.sort_mode == .created) return error.UnsupportedSortMode;
+}
+
 fn sortEntries(entries: []zigrep.search.walk.Entry, options: CliOptions) void {
     if (options.sort_mode == .none or entries.len <= 1) return;
 
     const Context = struct {
+        mode: command.SortMode,
         reverse: bool,
     };
     const lessThan = struct {
         fn compare(context: Context, lhs: zigrep.search.walk.Entry, rhs: zigrep.search.walk.Entry) bool {
-            if (!context.reverse) return std.mem.lessThan(u8, lhs.path, rhs.path);
-            return std.mem.lessThan(u8, rhs.path, lhs.path);
+            const ascending = switch (context.mode) {
+                .none => false,
+                .path => comparePath(lhs, rhs),
+                .modified => compareTimestamp(lhs.modified_ns, rhs.modified_ns, lhs.path, rhs.path),
+                .accessed => compareTimestamp(lhs.accessed_ns, rhs.accessed_ns, lhs.path, rhs.path),
+                .created => compareTimestamp(lhs.changed_ns, rhs.changed_ns, lhs.path, rhs.path),
+            };
+            if (!context.reverse) return ascending;
+            return compareReversed(context.mode, lhs, rhs);
+        }
+
+        fn comparePath(lhs: zigrep.search.walk.Entry, rhs: zigrep.search.walk.Entry) bool {
+            return std.mem.lessThan(u8, lhs.path, rhs.path);
+        }
+
+        fn compareTimestamp(lhs_time: i128, rhs_time: i128, lhs_path: []const u8, rhs_path: []const u8) bool {
+            if (lhs_time < rhs_time) return true;
+            if (lhs_time > rhs_time) return false;
+            return std.mem.lessThan(u8, lhs_path, rhs_path);
+        }
+
+        fn compareReversed(mode: command.SortMode, lhs: zigrep.search.walk.Entry, rhs: zigrep.search.walk.Entry) bool {
+            return switch (mode) {
+                .none => false,
+                .path => comparePath(rhs, lhs),
+                .modified => compareTimestamp(rhs.modified_ns, lhs.modified_ns, rhs.path, lhs.path),
+                .accessed => compareTimestamp(rhs.accessed_ns, lhs.accessed_ns, rhs.path, lhs.path),
+                .created => compareTimestamp(rhs.changed_ns, lhs.changed_ns, rhs.path, lhs.path),
+            };
         }
     }.compare;
 
-    std.sort.heap(zigrep.search.walk.Entry, entries, Context{ .reverse = options.sort_reverse }, lessThan);
+    std.sort.heap(zigrep.search.walk.Entry, entries, Context{
+        .mode = options.sort_mode,
+        .reverse = options.sort_reverse,
+    }, lessThan);
 }
 
 pub fn searchPath(
@@ -41,6 +76,7 @@ pub fn searchPath(
     sequentialFn: *const fn (std.mem.Allocator, *std.Io.Writer, *std.Io.Writer, []const zigrep.search.walk.Entry, CliOptions) anyerror!SearchResult,
     parallelFn: *const fn (*std.Io.Writer, *std.Io.Writer, []const zigrep.search.walk.Entry, CliOptions, zigrep.search.schedule.Plan) anyerror!SearchResult,
 ) !SearchResult {
+    try validateSortMode(options);
     var traversal_warning_count: usize = 0;
     const TraversalWarningHandler = struct {
         writer: *std.Io.Writer,
@@ -97,6 +133,7 @@ pub fn listPathFiles(
     options: CliOptions,
     type_matcher: zigrep.search.types.Matcher,
 ) !usize {
+    try validateSortMode(options);
     var traversal_warning_count: usize = 0;
     const TraversalWarningHandler = struct {
         writer: *std.Io.Writer,

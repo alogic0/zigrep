@@ -111,8 +111,8 @@ pub fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -u, --unrestricted    reduce filtering; repeat to include hidden and binary files
         \\  --files               list candidate files after filtering
         \\  -q, --quiet           suppress normal output and stop after the first result
-        \\  --sort MODE           sort results ascending by: none, path
-        \\  --sortr MODE          sort results descending by: none, path
+        \\  --sort MODE           sort results ascending by: none, path, modified, accessed, created
+        \\  --sortr MODE          sort results descending by: none, path, modified, accessed, created
         \\  -v, --invert-match    select non-matching lines instead of matching lines
         \\  --ignore-file PATH    load ignore rules from PATH
         \\  --no-ignore           disable ignore filtering
