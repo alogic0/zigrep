@@ -2,7 +2,7 @@ const std = @import("std");
 const zigrep = @import("zigrep");
 const cli = zigrep.cli;
 const config = zigrep.config;
-const sort_capability = zigrep.sort_capability;
+const sort_capability = zigrep.internal.sort_capability;
 
 // Top-level CLI entry orchestration.
 // This module resolves config, handles help/version, and bridges parsed CLI

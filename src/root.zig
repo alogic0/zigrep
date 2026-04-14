@@ -8,12 +8,16 @@ const build_options = @import("build_options");
 pub const regex = regex_mod;
 pub const search = @import("search/root.zig");
 pub const search_runner = @import("search_runner.zig");
-pub const search_reporting = @import("search_reporting.zig");
 pub const command = @import("command.zig");
 pub const cli = @import("cli.zig");
 pub const config = @import("config.zig");
-pub const sort_capability = @import("sort_capability.zig");
 pub const app_version = build_options.app_version;
+pub const internal = struct {
+    pub const sort_capability = @import("sort_capability.zig");
+};
+pub const testing = struct {
+    pub const search_reporting = @import("search_reporting.zig");
+};
 
 pub fn compile(
     allocator: std.mem.Allocator,

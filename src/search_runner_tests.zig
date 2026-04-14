@@ -1,8 +1,8 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
+const search_reporting = zigrep.testing.search_reporting;
 
 const runner = zigrep.search_runner;
-const search_reporting = zigrep.search_reporting;
 const CliOptions = zigrep.command.CliOptions;
 
 test "runSearch parallel path preserves heading groups" {

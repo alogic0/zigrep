@@ -132,26 +132,50 @@ The main issues to address are:
 
 ## Phase 5: Re-check Root And Test Pressure After Cleanup
 
-- [ ] Re-review whether the current root exports still match intentional API
+- [x] Re-review whether the current root exports still match intentional API
   boundaries after the reporting cleanup.
-- [ ] Re-check whether tests still need direct access to unstable reporting
+- [x] Re-check whether tests still need direct access to unstable reporting
   internals or can depend on narrower owners.
-- [ ] Document any remaining deliberate exceptions instead of leaving them as
+- [x] Document any remaining deliberate exceptions instead of leaving them as
   accidental convenience imports.
+
+### Phase 5 Notes
+
+- `src/root.zig` no longer re-exports `search_reporting` or
+  `sort_capability`; those modules are internal implementation details and are
+  now imported directly by the few files that need them.
+- Reporting-focused tests use `zigrep.testing.search_reporting`, a narrow
+  test-only namespace in `src/root.zig`, instead of a general app-facing
+  re-export. This keeps coverage on the stable reporting facade without
+  reopening the full root surface.
+- The remaining root exports are intentional app-facing surfaces:
+  - `regex`
+  - `search`
+  - `search_runner`
+  - `command`
+  - `cli`
+  - `config`
+  - `app_version`
+- Deliberate exception:
+  - `internal.sort_capability` exists so secondary Zig modules like
+    `src/cli_entry.zig` can share the same owned module instance without
+    promoting sort capability helpers to a normal app-facing export.
+  - `testing.search_reporting` exists only to keep test imports inside the
+    `zigrep` module without treating reporting as a normal app-facing export.
 
 ## Validation
 
-- [ ] Keep current CLI behavior unchanged
-- [ ] Keep current regex behavior unchanged
+- [x] Keep current CLI behavior unchanged
+- [x] Keep current regex behavior unchanged
 - [ ] Run:
   - [x] `zig build test`
   - [x] `zig build bench-smoke`
-- [ ] Re-run the practical parity checks that recently exercised:
-  - `--json`
-  - `--text`
-  - `--binary`
-  - `--only-matching`
-  - `--replace`
+- [x] Re-run the practical parity checks that recently exercised:
+  - [x] `--json`
+  - [x] `--text`
+  - [x] `--binary`
+  - [x] `--only-matching`
+  - [x] `--replace`
 
 ## Recommended Order
 
@@ -159,7 +183,7 @@ The main issues to address are:
 - [x] 2. Introduce narrower internal option groupings
 - [x] 3. Centralize output-policy decisions
 - [x] 4. Split reporting by report family
-- [ ] 5. Re-check root and test boundary pressure
+- [x] 5. Re-check root and test boundary pressure
 
 ## Explicit Non-Goals
 

@@ -1,7 +1,7 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
 const cli_test_support = @import("cli_test_support.zig");
-const search_reporting = zigrep.search_reporting;
+const search_reporting = zigrep.testing.search_reporting;
 
 test "runCli prints every matching line from one file" {
     const testing = std.testing;
