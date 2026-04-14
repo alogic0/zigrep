@@ -1455,7 +1455,7 @@ test "writeFileReports does not require owned line bytes for decoded multi-line 
         .escaped,
     );
 
-    try testing.expect(matched);
+    try testing.expect(matched.matched);
     try testing.expectEqualStrings(
         "utf16.txt:1:1:needle one\n" ++
             "utf16.txt:3:1:needle two\n",
@@ -1528,7 +1528,7 @@ test "writeFileReports supports Unicode digit shorthand on full file contents" {
         .escaped,
     );
 
-    try testing.expect(matched);
+    try testing.expect(matched.matched);
     try testing.expectEqualStrings(
         "sample.txt:1:1:a5b\n" ++
             "sample.txt:2:1:a١b\n",

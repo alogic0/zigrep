@@ -72,7 +72,7 @@ pub fn runSearch(
 
     var result: SearchResult = .{ .matched = false };
     for (effective_options.paths) |path| {
-        if (effective_options.buffer_output or effective_options.output_format == .json) {
+        if (effective_options.buffer_output) {
             var buffered_output: std.Io.Writer.Allocating = .init(allocator);
             defer buffered_output.deinit();
 
@@ -88,12 +88,6 @@ pub fn runSearch(
             );
             if (path_result.matched) result.matched = true;
             result.stats.add(path_result.stats);
-            if (effective_options.output_format == .json) {
-                result.stats.matched_lines -= path_result.stats.matched_lines;
-                result.stats.matches -= path_result.stats.matches;
-                result.stats.matched_lines += countDistinctJsonLineNumbers(buffered_output.written());
-                result.stats.matches += countJsonEventType(buffered_output.written(), "\"type\":\"match\"");
-            }
             try stdout.writeAll(buffered_output.written());
             continue;
         }
@@ -184,7 +178,7 @@ pub fn runStdinSearch(
         try search_output.writeJsonBeginEvent(output_writer, stdin_label);
     }
 
-    const matched = try search_reporting.writeFileOutput(
+    const report = try search_reporting.writeFileOutput(
         allocator,
         output_writer,
         &searcher,
@@ -204,25 +198,23 @@ pub fn runStdinSearch(
 
     if (options.output_format == .json) {
         const pre_end_written = json_capture.written();
-        const match_events = countJsonEventType(pre_end_written, "\"type\":\"match\"");
-        const matched_lines = countDistinctJsonLineNumbers(pre_end_written);
         const elapsed_ns = search_timer.read();
         try search_output.writeJsonEndEvent(output_writer, stdin_label, .{
             .bytes_searched = search_bytes.len,
             .bytes_printed = pre_end_written.len,
             .searches = 1,
-            .searches_with_match = if (matched) 1 else 0,
-            .matched_lines = matched_lines,
-            .matches = match_events,
+            .searches_with_match = if (report.matched) 1 else 0,
+            .matched_lines = report.matched_lines,
+            .matches = report.matches,
             .elapsed_ns = elapsed_ns,
         });
         try search_output.writeJsonSummaryEvent(output_writer, .{
             .bytes_searched = search_bytes.len,
             .bytes_printed = pre_end_written.len,
             .searches = 1,
-            .searches_with_match = if (matched) 1 else 0,
-            .matched_lines = matched_lines,
-            .matches = match_events,
+            .searches_with_match = if (report.matched) 1 else 0,
+            .matched_lines = report.matched_lines,
+            .matches = report.matches,
             .elapsed_ns = elapsed_ns,
             .elapsed_total_ns = total_timer.read(),
         });
@@ -231,13 +223,15 @@ pub fn runStdinSearch(
 
     const stats: SearchStats = .{
         .searched_files = 1,
-        .matched_files = if (matched) 1 else 0,
+        .matched_files = if (report.matched) 1 else 0,
         .searched_bytes = search_bytes.len,
         .printed_bytes = if (options.output_format == .json) json_capture.written().len else 0,
+        .matched_lines = report.matched_lines,
+        .matches = report.matches,
         .elapsed_ns = if (options.output_format == .json) search_timer.read() else 0,
     };
     if (options.show_stats) try writeStats(stderr, stats);
-    return if (matched) 0 else 1;
+    return if (report.matched) 0 else 1;
 }
 
 pub fn searchEntriesSequential(
@@ -349,43 +343,4 @@ fn writeStats(writer: *std.Io.Writer, stats: SearchStats) !void {
         "stats: searched_files={d} matched_files={d} searched_bytes={d} skipped_binary_files={d} warnings_emitted={d}\n",
         .{ stats.searched_files, stats.matched_files, stats.searched_bytes, stats.skipped_binary_files, stats.warnings_emitted },
     );
-}
-
-fn countJsonEventType(bytes: []const u8, needle: []const u8) usize {
-    var count: usize = 0;
-    var start: usize = 0;
-    while (std.mem.indexOfPos(u8, bytes, start, needle)) |index| {
-        count += 1;
-        start = index + needle.len;
-    }
-    return count;
-}
-
-fn countDistinctJsonLineNumbers(bytes: []const u8) usize {
-    const needle = "\"line_number\":";
-    var count: usize = 0;
-    var start: usize = 0;
-    var last_line_number: ?usize = null;
-
-    while (std.mem.indexOfPos(u8, bytes, start, needle)) |index| {
-        var cursor = index + needle.len;
-        const number_start = cursor;
-        while (cursor < bytes.len and std.ascii.isDigit(bytes[cursor])) : (cursor += 1) {}
-        if (cursor == number_start) {
-            start = number_start;
-            continue;
-        }
-
-        const line_number = std.fmt.parseUnsigned(usize, bytes[number_start..cursor], 10) catch {
-            start = cursor;
-            continue;
-        };
-        if (last_line_number == null or last_line_number.? != line_number) {
-            count += 1;
-            last_line_number = line_number;
-        }
-        start = cursor;
-    }
-
-    return count;
 }
