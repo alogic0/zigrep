@@ -44,11 +44,12 @@ pub const ParseState = struct {
     output: OutputOptions = .{},
     output_format: OutputFormat = .text,
     report_mode: ReportMode = .lines,
-    pattern: ?[]const u8 = null,
+    positional_pattern: ?[]const u8 = null,
     show_type_list: bool = false,
 };
 
 pub const ParseBuffers = struct {
+    explicit_patterns: std.ArrayList([]const u8) = .empty,
     paths: std.ArrayList([]const u8) = .empty,
     globs: std.ArrayList([]const u8) = .empty,
     pre_globs: std.ArrayList([]const u8) = .empty,
@@ -58,6 +59,7 @@ pub const ParseBuffers = struct {
     type_adds: std.ArrayList([]const u8) = .empty,
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        self.explicit_patterns.deinit(allocator);
         self.paths.deinit(allocator);
         self.globs.deinit(allocator);
         self.pre_globs.deinit(allocator);

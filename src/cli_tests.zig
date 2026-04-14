@@ -196,8 +196,8 @@ test "parseArgs accepts fixed-string and explicit-pattern flags" {
 
     switch (parsed) {
         .run => |opts| {
-            try testing.expect(opts.fixed_strings);
-            try testing.expectEqualStrings("@import(\"search/root.zig\")", opts.pattern);
+            try testing.expect(!opts.fixed_strings);
+            try testing.expectEqualStrings("(?:@import\\(\"search/root\\.zig\"\\))", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("src", opts.paths[0]);
         },
@@ -240,6 +240,86 @@ test "parseArgs accepts files mode without a pattern" {
             try testing.expect(opts.list_files);
             try testing.expectEqualStrings("", opts.pattern);
             try testing.expect(opts.output.null_path_terminator);
+            try testing.expect(!opts.show_stats);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs treats stats as a no-op in files mode" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--files", "--stats", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.list_files);
+            try testing.expect(!opts.show_stats);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs treats stats as a no-op in files-with-matches mode" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--stats", "-l", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(ReportMode.files_with_matches, opts.report_mode);
+            try testing.expect(!opts.show_stats);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts repeated explicit patterns as alternation" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-e", "foo", "-e", "bar", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("(?:foo)|(?:bar)", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts repeated fixed-string explicit patterns as escaped alternation" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-F", "-e", "a.b", "-e", "[x]", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(!opts.fixed_strings);
+            try testing.expectEqualStrings("(?:a\\.b)|(?:\\[x\\])", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("src", opts.paths[0]);
         },
@@ -784,13 +864,6 @@ test "parseArgs rejects invalid numeric flags" {
     }));
     try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
         "zigrep",
-        "-e",
-        "needle",
-        "-e",
-        "other",
-    }));
-    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
-        "zigrep",
         "--files",
         "-F",
         "src",
@@ -798,13 +871,13 @@ test "parseArgs rejects invalid numeric flags" {
     try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
         "zigrep",
         "--files",
-        "--json",
+        "-l",
         "src",
     }));
     try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
         "zigrep",
         "--files",
-        "-l",
+        "--json",
         "src",
     }));
 }

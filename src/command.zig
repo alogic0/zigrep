@@ -30,6 +30,7 @@ pub const ReportMode = enum {
 
 pub const CliOptions = struct {
     pattern: []const u8 = "",
+    owned_pattern: ?[]u8 = null,
     paths: []const []const u8,
     globs: []const []const u8 = &.{},
     pre_globs: []const []const u8 = &.{},
@@ -65,6 +66,7 @@ pub const CliOptions = struct {
     buffer_output: bool = false,
 
     pub fn deinit(self: CliOptions, allocator: std.mem.Allocator) void {
+        if (self.owned_pattern) |pattern| allocator.free(pattern);
         allocator.free(self.paths);
         allocator.free(self.globs);
         allocator.free(self.pre_globs);

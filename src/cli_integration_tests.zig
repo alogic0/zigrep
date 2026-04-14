@@ -88,6 +88,113 @@ test "runCli fixed-strings matches literal regex metacharacters" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli repeated explicit patterns match any branch" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "foo here\nbar there\nbaz only\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-e",
+        "foo",
+        "-e",
+        "bar",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:foo here"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:bar there"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "baz only"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli repeated fixed-string explicit patterns escape each branch independently" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "a.b\n[x]\naxb\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-F",
+        "-e",
+        "a.b",
+        "-e",
+        "[x]",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:a.b"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:[x]"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:3:1:axb"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli treats stats as a no-op in files mode" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "shown.txt",
+        .data = "shown\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "--stats", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "shown.txt\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli treats stats as a no-op in files-with-matches mode" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "needle\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--stats", "-l", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli honors root gitignore by default" {
     const testing = std.testing;
 

@@ -62,8 +62,8 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
         }
 
         positional_mode = true;
-        if (!state.list_files and state.pattern == null) {
-            state.pattern = arg;
+        if (!state.list_files and state.positional_pattern == null and buffers.explicit_patterns.items.len == 0) {
+            state.positional_pattern = arg;
         } else {
             try buffers.paths.append(allocator, arg);
         }

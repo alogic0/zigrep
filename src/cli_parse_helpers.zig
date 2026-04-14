@@ -164,7 +164,7 @@ pub fn handleValueFlag(
     arg: []const u8,
 ) !bool {
     if (std.mem.eql(u8, arg, "-e") or std.mem.eql(u8, arg, "--regexp")) {
-        try setPattern(state, try requireNextArg(argv, index));
+        try buffers.explicit_patterns.append(allocator, try requireNextArg(argv, index));
         return true;
     }
     if (std.mem.eql(u8, arg, "--ignore-file")) {
@@ -260,9 +260,4 @@ fn parsePositiveUsize(arg: []const u8) CliError!usize {
 
 fn parseNonNegativeUsize(arg: []const u8) CliError!usize {
     return std.fmt.parseUnsigned(usize, arg, 10) catch error.InvalidFlagValue;
-}
-
-fn setPattern(state: *ParseState, pattern: []const u8) CliError!void {
-    if (state.pattern != null) return error.InvalidFlagCombination;
-    state.pattern = pattern;
 }
