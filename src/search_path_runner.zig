@@ -91,6 +91,54 @@ pub fn listPathFiles(
         }
     };
 
+    const loaded_ignores = try search_filtering.loadIgnoreMatchers(allocator, root_path, options);
+    defer search_filtering.deinitLoadedIgnores(allocator, loaded_ignores);
+
+    if (options.quiet) {
+        const QuietVisitor = struct {
+            allocator: std.mem.Allocator,
+            root_path: []const u8,
+            options: CliOptions,
+            loaded_ignores: []const search_filtering.LoadedIgnore,
+            type_matcher: zigrep.search.types.Matcher,
+            listed: *usize,
+
+            pub fn visit(self: @This(), entry: zigrep.search.walk.Entry) !void {
+                defer entry.deinit(self.allocator);
+                if (!try search_filtering.entryAllowed(
+                    self.allocator,
+                    self.root_path,
+                    entry,
+                    self.options.globs,
+                    self.loaded_ignores,
+                    self.type_matcher,
+                    self.options.include_types,
+                    self.options.exclude_types,
+                )) return;
+                self.listed.* += 1;
+                return error.StopWalk;
+            }
+        };
+
+        var listed: usize = 0;
+        zigrep.search.walk.walk(allocator, root_path, .{
+            .include_hidden = options.include_hidden,
+            .follow_symlinks = options.follow_symlinks,
+            .max_depth = options.max_depth,
+        }, QuietVisitor{
+            .allocator = allocator,
+            .root_path = root_path,
+            .options = options,
+            .loaded_ignores = loaded_ignores,
+            .type_matcher = type_matcher,
+            .listed = &listed,
+        }, TraversalWarningHandler{ .writer = stderr, .count = &traversal_warning_count }) catch |err| switch (err) {
+            error.StopWalk => {},
+            else => return err,
+        };
+        return listed;
+    }
+
     const entries = try zigrep.search.walk.collectFilesWithWarnings(allocator, root_path, .{
         .include_hidden = options.include_hidden,
         .follow_symlinks = options.follow_symlinks,
@@ -100,9 +148,6 @@ pub fn listPathFiles(
         for (entries) |entry| entry.deinit(allocator);
         allocator.free(entries);
     }
-
-    const loaded_ignores = try search_filtering.loadIgnoreMatchers(allocator, root_path, options);
-    defer search_filtering.deinitLoadedIgnores(allocator, loaded_ignores);
 
     const filtered_entries = try search_filtering.filterEntries(
         allocator,
@@ -118,11 +163,8 @@ pub fn listPathFiles(
 
     var listed: usize = 0;
     for (filtered_entries) |entry| {
-        if (!options.quiet) {
-            try search_output.writePathResult(stdout, entry.path, options.output);
-        }
+        try search_output.writePathResult(stdout, entry.path, options.output);
         listed += 1;
-        if (options.quiet) break;
     }
 
     return listed;

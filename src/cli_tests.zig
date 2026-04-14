@@ -902,4 +902,28 @@ test "parseArgs rejects invalid numeric flags" {
         "--json",
         "src",
     }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "-n",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "--column",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "--no-line-number",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "--no-column",
+        "src",
+    }));
 }

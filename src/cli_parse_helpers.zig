@@ -142,18 +142,22 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
     }
     if (std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "--line-number")) {
         state.output.line_number = true;
+        state.line_number_flag_seen = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "--no-line-number")) {
         state.output.line_number = false;
+        state.line_number_flag_seen = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "--column")) {
         state.output.column_number = true;
+        state.column_number_flag_seen = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "--no-column")) {
         state.output.column_number = false;
+        state.column_number_flag_seen = true;
         return .handled;
     }
     return .unhandled;

@@ -45,6 +45,8 @@ pub const ParseState = struct {
     output: OutputOptions = .{},
     output_format: OutputFormat = .text,
     report_mode: ReportMode = .lines,
+    line_number_flag_seen: bool = false,
+    column_number_flag_seen: bool = false,
     positional_pattern: ?[]const u8 = null,
     show_type_list: bool = false,
 };

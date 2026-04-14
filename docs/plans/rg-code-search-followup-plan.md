@@ -46,11 +46,8 @@ Close the remaining ripgrep-confirmed gaps in `zigrep` by adding:
 
 The remaining mismatch is:
 
-- `--files` behavior should be tightened around ripgrep-confirmed filtering
-  combinations and documented more explicitly
-- `--quiet` does not yet have ripgrep-style meaning for `--files`
-- `--quiet` now exists, but `--files` still needs stricter ripgrep-style
-  traversal early-stop behavior
+- `--files` behavior and policy should stay documented explicitly as the CLI
+  surface continues to grow
 
 ## Scope
 
@@ -134,7 +131,7 @@ abstraction up front.
 
 ## Feature 3: `--files` Parity Cleanup
 
-- [ ] Verify and document which existing traversal/filter flags compose with
+- [x] Verify and document which existing traversal/filter flags compose with
   `--files`.
 - [x] Keep `--files` compatible with:
   - `--null`
@@ -146,7 +143,7 @@ abstraction up front.
   - no effect in `--files`, `--files-with-matches`, and
     `--files-without-match` modes
   - no hard error just because `--stats` is present
-- [ ] Keep rejecting match-only flags that do not make sense in file-list mode.
+- [x] Keep rejecting match-only flags that do not make sense in file-list mode.
 
 ### Recommended Initial Policy
 
@@ -160,7 +157,7 @@ abstraction up front.
 - [x] Add `-q` / `--quiet` if it is not already present as part of this parity
   slice, or at minimum support the ripgrep-confirmed `--files` early-stop
   behavior once quiet mode exists.
-- [ ] In `--files` mode, stop traversal/output after the first file that would
+- [x] In `--files` mode, stop traversal/output after the first file that would
   be searched.
 - [x] Define the exit-code behavior consistently with existing search-mode
   quiet semantics if quiet mode already exists elsewhere by the time this is
@@ -178,7 +175,7 @@ abstraction up front.
   patterns cleanly instead of a single optional slot.
 - [x] Keep file-list mode as a distinct command/report path rather than routing
   through fake empty-pattern search behavior.
-- [ ] Preserve precise CLI errors for:
+- [x] Preserve precise CLI errors for:
   - missing patterns
   - illegal mixing of positional and explicit pattern sources
   - invalid file-list-only combinations
@@ -205,7 +202,7 @@ abstraction up front.
   modes.
 - [x] 3. Align `--files` with ripgrep-confirmed `--stats` and filtering
   behavior.
-- [ ] 4. Add or defer `--quiet` for `--files` explicitly.
+- [x] 4. Add or defer `--quiet` for `--files` explicitly.
 - [x] 5. Expand integration coverage for the ripgrep-confirmed workflows.
 
 ## Outcome
@@ -216,6 +213,7 @@ installed ripgrep code-search behavior:
 - multiple explicit patterns with repeated `-e`
 - repeated explicit patterns under `-F`
 - path listing with the expected filtering flags
+- quiet path listing that stops after the first candidate file
 - ripgrep-style `--stats` treatment in file-list mode
 
 That keeps the follow-up work grounded in actual `rg` behavior instead of

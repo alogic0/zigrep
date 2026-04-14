@@ -31,14 +31,37 @@ pub fn filterEntries(
     defer filtered.deinit(allocator);
 
     for (entries) |entry| {
-        const relative = relativeGlobPath(root_path, entry.path);
-        if (!zigrep.search.glob.allowsPath(globs, relative)) continue;
-        if (!type_matcher.fileAllowed(include_types, exclude_types, relative)) continue;
-        if (try pathIsIgnored(allocator, entry.path, loaded_ignores)) continue;
+        if (!try entryAllowed(
+            allocator,
+            root_path,
+            entry,
+            globs,
+            loaded_ignores,
+            type_matcher,
+            include_types,
+            exclude_types,
+        )) continue;
         try filtered.append(allocator, entry);
     }
 
     return filtered.toOwnedSlice(allocator);
+}
+
+pub fn entryAllowed(
+    allocator: std.mem.Allocator,
+    root_path: []const u8,
+    entry: zigrep.search.walk.Entry,
+    globs: []const []const u8,
+    loaded_ignores: []const LoadedIgnore,
+    type_matcher: zigrep.search.types.Matcher,
+    include_types: []const []const u8,
+    exclude_types: []const []const u8,
+) !bool {
+    const relative = relativeGlobPath(root_path, entry.path);
+    if (!zigrep.search.glob.allowsPath(globs, relative)) return false;
+    if (!type_matcher.fileAllowed(include_types, exclude_types, relative)) return false;
+    if (try pathIsIgnored(allocator, entry.path, loaded_ignores)) return false;
+    return true;
 }
 
 pub fn loadIgnoreMatchers(

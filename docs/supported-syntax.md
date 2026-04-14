@@ -216,8 +216,11 @@ The current CLI supports:
 - Ignore controls with `--ignore-file`, `--no-ignore`, `--no-ignore-vcs`, and `--no-ignore-parent`
 - Symlink following with `--follow`
 - Case-insensitive search with `-i` / `--ignore-case` and `-S` / `--smart-case`
+- Literal search with `-F` / `--fixed-strings`
+- Explicit pattern passing with repeated `-e` / `--regexp`
 - Case-sensitive path glob filtering with repeated `-g` / `--glob`
 - File type filters with `-t`, `-T`, `--type-add`, and `--type-list`
+- Candidate-file listing with `--files`
 - Binary-file search controls with `--text` and `--binary`
 - Buffered or mmap-backed reads with `--buffered` and `--mmap`
 - Worker-count control with `-j` or `--threads`
@@ -232,9 +235,33 @@ The current CLI supports:
 - Newline-delimited JSON output with `--json`
 - NUL-delimited path output with `--null` for file-path reporting modes
 - Search summary output with `--stats`
+- Quiet mode with `-q` / `--quiet`
 - Grouped text output with `--heading`
 - Output toggles with `-H`/`--with-filename`, `--no-filename`, `-n`/`--line-number`, `--no-line-number`, `--column`, and `--no-column`
 - `--` to terminate flag parsing
+
+Code-search note:
+
+- `-F` or `--fixed-strings` treats the pattern literally instead of as regex syntax
+- `-e PATTERN` or `--regexp PATTERN` provides the pattern explicitly and is the intended way to search for patterns beginning with `-`
+- repeated `-e` flags are allowed and currently compose as one OR-style search
+- repeated `-e` also composes with `-F`; each explicit fixed string is escaped independently before search
+- `--files` lists candidate files after traversal, ignore filtering, glob filtering, hidden-file policy, symlink policy, and type filtering
+
+`--files` note:
+
+- `--files` is a path-only mode and does not compile or run a regex matcher
+- normal traversal and filtering flags still apply, including `--hidden`, `-u` / `-uu` / `-uuu`, `-g`, `-t`, and `-T`
+- `--null` applies to `--files`
+- `--stats` is a no-op with `--files`
+- match-oriented flags such as explicit patterns, `-F`, `-v`, `-l`, `-L`, context flags, JSON output, heading output, and line/column toggles are rejected in `--files` mode
+
+`--quiet` note:
+
+- `-q` or `--quiet` suppresses normal stdout output
+- in normal search mode, exit code `0` still means at least one match and `1` means no matches
+- in `--files` mode, exit code `0` means at least one candidate file would be searched and `1` means none would be searched
+- `--files --quiet` stops after the first candidate file that survives filtering
 
 `--max-count` note:
 
@@ -272,8 +299,8 @@ Context mode note:
 
 `--null` note:
 
-- `--null` currently applies to `--files-with-matches` and `--files-without-match`
-- those modes emit matching or non-matching file paths terminated with `\0` instead of `\n`
+- `--null` currently applies to `--files`, `--files-with-matches`, and `--files-without-match`
+- those modes emit file paths terminated with `\0` instead of `\n`
 - `--null` is currently rejected with normal line output, count output, context output, and `--json`
 
 `--stats` note:
@@ -281,6 +308,7 @@ Context mode note:
 - `--stats` prints a compact search summary to stderr after the normal search output
 - the current summary includes searched file count, matched file count, searched byte count, and skipped binary-file count
 - `--stats` does not change normal exit codes or stdout search results
+- `--stats` is currently a no-op with `--files`, `--files-with-matches`, and `--files-without-match`
 
 `--heading` note:
 

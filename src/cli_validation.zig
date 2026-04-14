@@ -114,7 +114,8 @@ fn validateRunState(
             state.max_count != null or state.context_before != 0 or state.context_after != 0 or
             state.output_format != .text or state.report_mode != .lines or
             state.output.only_matching or state.output.heading or state.binary_mode != .skip or
-            state.case_mode != .sensitive or state.encoding != .auto)
+            state.case_mode != .sensitive or state.encoding != .auto or
+            state.line_number_flag_seen or state.column_number_flag_seen)
         {
             return error.InvalidFlagCombination;
         }

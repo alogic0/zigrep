@@ -26,6 +26,8 @@ pub const Entry = struct {
 
 pub const WalkError = error{
     OutOfMemory,
+    StopWalk,
+    CurrentWorkingDirectoryUnlinked,
 } || std.fs.Dir.OpenError || std.fs.Dir.StatFileError || std.fs.Dir.AccessError || std.fs.Dir.Iterator.Error || std.fs.Dir.RealPathError;
 
 const VisitedDirs = std.StringHashMapUnmanaged(void);
@@ -396,4 +398,42 @@ test "walk can warn and skip unreadable child directories" {
     try testing.expectEqual(@as(usize, 1), entries.len);
     try testing.expect(std.mem.endsWith(u8, entries[0].path, "visible.txt"));
     try testing.expect(std.mem.containsAtLeast(u8, warning_capture.written(), 1, "warning: skipping directory "));
+}
+
+test "walk visitor can stop traversal early" {
+    const testing = std.testing;
+
+    const StopAfterFirst = struct {
+        allocator: std.mem.Allocator,
+        count: *usize,
+
+        pub fn visit(self: @This(), entry: Entry) WalkError!void {
+            defer entry.deinit(self.allocator);
+            if (entry.kind != .file) return;
+            self.count.* += 1;
+            return error.StopWalk;
+        }
+    };
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("src/nested");
+    try tmp.dir.writeFile(.{ .sub_path = "one.txt", .data = "one" });
+    try tmp.dir.writeFile(.{ .sub_path = "src/two.txt", .data = "two" });
+    try tmp.dir.writeFile(.{ .sub_path = "src/nested/three.txt", .data = "three" });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    var count: usize = 0;
+    walk(testing.allocator, root_path, .{}, StopAfterFirst{
+        .allocator = testing.allocator,
+        .count = &count,
+    }, NoopWarningHandler{}) catch |err| switch (err) {
+        error.StopWalk => {},
+        else => return err,
+    };
+
+    try testing.expectEqual(@as(usize, 1), count);
 }
