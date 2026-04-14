@@ -31,20 +31,24 @@ fn isPathOnlyReportMode(mode: ReportMode) bool {
 }
 
 fn shouldUseExplicitSingleFileDefaults(options: CliOptions) bool {
-    if (options.output.heading or isPathOnlyReportMode(options.report_mode) or options.output_format != .text) return false;
-    if (options.used_default_path or options.paths.len != 1) return false;
+    const reporting = options.reporting();
+    const hints = options.parseHints();
+    const traversal = options.traversal();
+    if (reporting.output.heading or isPathOnlyReportMode(reporting.report_mode) or reporting.output_format != .text) return false;
+    if (hints.used_default_path or traversal.paths.len != 1) return false;
 
-    const stat = std.fs.cwd().statFile(options.paths[0]) catch return false;
+    const stat = std.fs.cwd().statFile(traversal.paths[0]) catch return false;
     return stat.kind == .file;
 }
 
 fn applyExplicitSingleFileOutputDefaults(options: CliOptions) CliOptions {
     var effective = options;
+    const hints = options.parseHints();
     if (!shouldUseExplicitSingleFileDefaults(options)) return effective;
 
-    if (!options.filename_flag_seen) effective.output.with_filename = false;
-    if (!options.line_number_flag_seen) effective.output.line_number = false;
-    if (!options.column_number_flag_seen) effective.output.column_number = false;
+    if (!hints.filename_flag_seen) effective.output.with_filename = false;
+    if (!hints.line_number_flag_seen) effective.output.line_number = false;
+    if (!hints.column_number_flag_seen) effective.output.column_number = false;
     return effective;
 }
 
@@ -55,24 +59,29 @@ pub fn runSearch(
     options: CliOptions,
 ) !u8 {
     var total_timer = try std.time.Timer.start();
-    if (options.multiline and
-        (options.invert_match or
-            options.max_count != null or
-            (options.output.heading and options.report_mode != .lines)))
+    const traversal = options.traversal();
+    const matcher = options.matcher();
+    const reporting = options.reporting();
+    if (matcher.multiline and
+        (matcher.invert_match or
+            reporting.max_count != null or
+            (reporting.output.heading and reporting.report_mode != .lines)))
     {
         return error.InvalidFlagCombination;
     }
-    if (options.multiline_dotall and !options.multiline) return error.InvalidFlagCombination;
+    if (matcher.multiline_dotall and !matcher.multiline) return error.InvalidFlagCombination;
 
-    const type_matcher = try zigrep.search.types.init(allocator, options.type_adds);
+    const type_matcher = try zigrep.search.types.init(allocator, traversal.type_adds);
     defer type_matcher.deinit(allocator);
-    try zigrep.search.types.validateSelectedTypes(type_matcher, options.include_types, options.exclude_types);
+    try zigrep.search.types.validateSelectedTypes(type_matcher, traversal.include_types, traversal.exclude_types);
 
     const effective_options = applyExplicitSingleFileOutputDefaults(options);
+    const effective_traversal = effective_options.traversal();
+    const effective_reporting = effective_options.reporting();
 
     var result: SearchResult = .{ .matched = false };
-    for (effective_options.paths) |path| {
-        if (effective_options.buffer_output) {
+    for (effective_traversal.paths) |path| {
+        if (effective_traversal.buffer_output) {
             var buffered_output: std.Io.Writer.Allocating = .init(allocator);
             defer buffered_output.deinit();
 
@@ -117,7 +126,7 @@ pub fn runSearch(
             .elapsed_total_ns = total_timer.read(),
         });
     }
-    if (effective_options.show_stats) try writeStats(stderr, result.stats);
+    if (effective_reporting.show_stats) try writeStats(stderr, result.stats);
     return if (result.matched) 0 else 1;
 }
 
@@ -129,52 +138,56 @@ pub fn runStdinSearch(
     stdin_bytes: []const u8,
 ) !u8 {
     var total_timer = try std.time.Timer.start();
-    if (options.preprocessor != null or options.list_files) return error.InvalidFlagCombination;
-    if (options.multiline and
-        (options.invert_match or
-            options.max_count != null or
-            (options.output.heading and options.report_mode != .lines)))
+    const traversal = options.traversal();
+    const matcher = options.matcher();
+    const reporting = options.reporting();
+    const hints = options.parseHints();
+    if (traversal.preprocessor != null or traversal.list_files) return error.InvalidFlagCombination;
+    if (matcher.multiline and
+        (matcher.invert_match or
+            reporting.max_count != null or
+            (reporting.output.heading and reporting.report_mode != .lines)))
     {
         return error.InvalidFlagCombination;
     }
-    if (options.multiline_dotall and !options.multiline) return error.InvalidFlagCombination;
+    if (matcher.multiline_dotall and !matcher.multiline) return error.InvalidFlagCombination;
 
-    var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{
-        .case_mode = options.case_mode,
-        .fixed_strings = options.fixed_strings,
-        .multiline = options.multiline,
-        .multiline_dotall = options.multiline_dotall,
+    var searcher = try zigrep.search.grep.Searcher.init(allocator, matcher.pattern, .{
+        .case_mode = matcher.case_mode,
+        .fixed_strings = matcher.fixed_strings,
+        .multiline = matcher.multiline,
+        .multiline_dotall = matcher.multiline_dotall,
     });
     defer searcher.deinit();
 
-    const search_bytes = try search_execution.prepareSearchBytes(allocator, stdin_label, stdin_bytes, options);
+    const search_bytes = try search_execution.prepareSearchBytes(allocator, stdin_label, stdin_bytes, traversal);
     defer if (search_bytes.ptr != stdin_bytes.ptr) allocator.free(search_bytes);
 
-    const effective_binary_output = if (options.search_compressed)
-        search_execution.decideBinaryBehavior(search_bytes, options.encoding, options.binary_mode) orelse {
+    const effective_binary_output = if (traversal.search_compressed)
+        search_execution.decideBinaryBehavior(search_bytes, matcher) orelse {
             const stats: SearchStats = .{ .skipped_binary_files = 1 };
-            if (options.show_stats) try writeStats(stderr, stats);
+            if (reporting.show_stats) try writeStats(stderr, stats);
             return 1;
         }
     else
-        search_execution.decideBinaryBehavior(stdin_bytes, options.encoding, options.binary_mode) orelse {
+        search_execution.decideBinaryBehavior(stdin_bytes, matcher) orelse {
             const stats: SearchStats = .{ .skipped_binary_files = 1 };
-            if (options.show_stats) try writeStats(stderr, stats);
+            if (reporting.show_stats) try writeStats(stderr, stats);
             return 1;
         };
-    const raw_text_output = search_execution.shouldRenderRawBinaryText(search_bytes, options.encoding, options.binary_mode);
+    const raw_text_output = search_execution.shouldRenderRawBinaryText(search_bytes, matcher);
 
-    var effective_output = options.output;
-    if (!options.filename_flag_seen and options.report_mode != .files_with_matches and options.report_mode != .files_without_match) {
+    var effective_output = reporting.output;
+    if (!hints.filename_flag_seen and reporting.report_mode != .files_with_matches and reporting.report_mode != .files_without_match) {
         effective_output.with_filename = false;
     }
 
     var json_capture: std.Io.Writer.Allocating = .init(allocator);
     defer json_capture.deinit();
-    const output_writer = if (options.output_format == .json) &json_capture.writer else stdout;
+    const output_writer = if (reporting.output_format == .json) &json_capture.writer else stdout;
     var search_timer = try std.time.Timer.start();
 
-    if (options.output_format == .json) {
+    if (reporting.output_format == .json) {
         try search_output.writeJsonBeginEvent(output_writer, stdin_label);
     }
 
@@ -184,19 +197,19 @@ pub fn runStdinSearch(
         &searcher,
         stdin_label,
         search_bytes,
-        options.encoding,
+        matcher.encoding,
         effective_binary_output,
-        options.invert_match,
+        matcher.invert_match,
         effective_output,
-        options.output_format,
-        options.report_mode,
-        options.max_count,
-        options.context_before,
-        options.context_after,
+        reporting.output_format,
+        reporting.report_mode,
+        reporting.max_count,
+        reporting.context_before,
+        reporting.context_after,
         if (raw_text_output) .raw else .escaped,
     );
 
-    if (options.output_format == .json) {
+    if (reporting.output_format == .json) {
         const pre_end_written = json_capture.written();
         const elapsed_ns = search_timer.read();
         try search_output.writeJsonEndEvent(output_writer, stdin_label, .{
@@ -225,12 +238,12 @@ pub fn runStdinSearch(
         .searched_files = 1,
         .matched_files = if (report.matched) 1 else 0,
         .searched_bytes = search_bytes.len,
-        .printed_bytes = if (options.output_format == .json) json_capture.written().len else 0,
+        .printed_bytes = if (reporting.output_format == .json) json_capture.written().len else 0,
         .matched_lines = report.matched_lines,
         .matches = report.matches,
-        .elapsed_ns = if (options.output_format == .json) search_timer.read() else 0,
+        .elapsed_ns = if (reporting.output_format == .json) search_timer.read() else 0,
     };
-    if (options.show_stats) try writeStats(stderr, stats);
+    if (reporting.show_stats) try writeStats(stderr, stats);
     return if (report.matched) 0 else 1;
 }
 
@@ -241,11 +254,18 @@ pub fn searchEntriesSequential(
     entries: []const zigrep.search.walk.Entry,
     options: CliOptions,
 ) !SearchResult {
-    var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{
-        .case_mode = options.case_mode,
-        .fixed_strings = options.fixed_strings,
-        .multiline = options.multiline,
-        .multiline_dotall = options.multiline_dotall,
+    const matcher = options.matcher();
+    const reporting = options.reporting();
+    const entry_options: search_entry_runner.EntrySearchOptions = .{
+        .traversal = options.traversal(),
+        .matcher = matcher,
+        .reporting = reporting,
+    };
+    var searcher = try zigrep.search.grep.Searcher.init(allocator, matcher.pattern, .{
+        .case_mode = matcher.case_mode,
+        .fixed_strings = matcher.fixed_strings,
+        .multiline = matcher.multiline,
+        .multiline_dotall = matcher.multiline_dotall,
     });
     defer searcher.deinit();
 
@@ -261,7 +281,7 @@ pub fn searchEntriesSequential(
             stderr,
             &searcher,
             entry,
-            options,
+            entry_options,
         );
         defer entry_output.deinit(file_allocator);
 
@@ -281,12 +301,12 @@ pub fn searchEntriesSequential(
         result.stats.matches += entry_output.matches;
         result.stats.elapsed_ns += entry_output.elapsed_ns;
         if (entry_output.matched) {
-            if (options.quiet) {
+            if (reporting.quiet) {
                 result.matched = true;
                 result.stats.matched_files += 1;
                 return result;
             }
-            if (options.output.heading) {
+            if (reporting.output.heading) {
                 try search_output.writeHeadingBlock(stdout, entry.path, entry_output.bytes.items, &wrote_heading_group);
             } else {
                 try stdout.writeAll(entry_output.bytes.items);
@@ -305,11 +325,13 @@ pub fn runFileList(
     stderr: *std.Io.Writer,
     options: CliOptions,
 ) !u8 {
-    const type_matcher = try zigrep.search.types.init(allocator, options.type_adds);
+    const traversal = options.traversal();
+    const reporting = options.reporting();
+    const type_matcher = try zigrep.search.types.init(allocator, traversal.type_adds);
     defer type_matcher.deinit(allocator);
-    try zigrep.search.types.validateSelectedTypes(type_matcher, options.include_types, options.exclude_types);
+    try zigrep.search.types.validateSelectedTypes(type_matcher, traversal.include_types, traversal.exclude_types);
 
-    for (options.paths) |path| {
+    for (traversal.paths) |path| {
         const listed = try search_path_runner.listPathFiles(
             allocator,
             stdout,
@@ -318,10 +340,10 @@ pub fn runFileList(
             options,
             type_matcher,
         );
-        if (options.quiet and listed != 0) return 0;
+        if (reporting.quiet and listed != 0) return 0;
     }
 
-    return if (options.quiet) 1 else 0;
+    return if (reporting.quiet) 1 else 0;
 }
 
 fn searchEntriesParallel(

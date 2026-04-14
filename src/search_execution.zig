@@ -7,6 +7,8 @@ const zigrep = struct {
 
 pub const CliOptions = command.CliOptions;
 pub const BinaryMode = command.BinaryMode;
+pub const TraversalOptions = command.TraversalOptions;
+pub const MatchOptions = command.MatchOptions;
 
 pub fn warnAndSkipFileError(writer: *std.Io.Writer, path: []const u8, err: anyerror) !bool {
     if (!shouldWarnAndSkipFileError(err)) return false;
@@ -33,36 +35,34 @@ pub fn prepareSearchBytes(
     allocator: std.mem.Allocator,
     path: []const u8,
     bytes: []const u8,
-    options: CliOptions,
+    traversal: TraversalOptions,
 ) ![]const u8 {
-    if (zigrep.search.preprocess.shouldApply(options.preprocessor, options.pre_globs, path)) {
-        return try zigrep.search.preprocess.runAlloc(allocator, options.preprocessor.?, path);
+    if (zigrep.search.preprocess.shouldApply(traversal.preprocessor, traversal.pre_globs, path)) {
+        return try zigrep.search.preprocess.runAlloc(allocator, traversal.preprocessor.?, path);
     }
-    if (!options.search_compressed) return bytes;
+    if (!traversal.search_compressed) return bytes;
     return if (try zigrep.search.io.decompressAlloc(allocator, bytes)) |decoded| decoded else bytes;
 }
 
 pub fn decideBinaryBehavior(
     bytes: []const u8,
-    encoding: zigrep.search.io.InputEncoding,
-    binary_mode: BinaryMode,
+    matcher: MatchOptions,
 ) ?bool {
-    if (encoding != .auto) return false;
-    return switch (binary_mode) {
+    if (matcher.encoding != .auto) return false;
+    return switch (matcher.binary_mode) {
         .text => false,
         .skip, .suppress => switch (zigrep.search.io.detectBinary(bytes, .{})) {
             .text => false,
-            .binary => if (binary_mode == .skip) null else true,
+            .binary => if (matcher.binary_mode == .skip) null else true,
         },
     };
 }
 
 pub fn shouldRenderRawBinaryText(
     bytes: []const u8,
-    encoding: zigrep.search.io.InputEncoding,
-    binary_mode: BinaryMode,
+    matcher: MatchOptions,
 ) bool {
-    if (encoding != .auto or binary_mode != .text) return false;
+    if (matcher.encoding != .auto or matcher.binary_mode != .text) return false;
     return zigrep.search.io.detectBinary(bytes, .{}) == .binary;
 }
 

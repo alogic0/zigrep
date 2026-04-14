@@ -24,6 +24,13 @@ pub fn searchEntriesParallel(
 ) !SearchResult {
     const worker_allocator = std.heap.smp_allocator;
     if (schedule.worker_count <= 1) return error.InvalidFlagValue;
+    const matcher = options.matcher();
+    const reporting = options.reporting();
+    const entry_options: search_entry_runner.EntrySearchOptions = .{
+        .traversal = options.traversal(),
+        .matcher = matcher,
+        .reporting = reporting,
+    };
 
     const StoredOutput = struct {
         bytes: std.ArrayListUnmanaged(u8),
@@ -46,7 +53,9 @@ pub fn searchEntriesParallel(
     const Context = struct {
         stderr: *std.Io.Writer,
         entries: []const zigrep.search.walk.Entry,
-        options: CliOptions,
+        matcher: command.MatchOptions,
+        reporting: command.ReportExecutionOptions,
+        entry_options: search_entry_runner.EntrySearchOptions,
         schedule: zigrep.search.schedule.Plan,
         next_index: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
         result_reports: []?StoredOutput,
@@ -62,10 +71,11 @@ pub fn searchEntriesParallel(
         }
 
         fn runWorker(self: *@This()) void {
-            var searcher = zigrep.search.grep.Searcher.init(std.heap.smp_allocator, self.options.pattern, .{
-                .case_mode = self.options.case_mode,
-                .multiline = self.options.multiline,
-                .multiline_dotall = self.options.multiline_dotall,
+            var searcher = zigrep.search.grep.Searcher.init(std.heap.smp_allocator, self.matcher.pattern, .{
+                .case_mode = self.matcher.case_mode,
+                .fixed_strings = self.matcher.fixed_strings,
+                .multiline = self.matcher.multiline,
+                .multiline_dotall = self.matcher.multiline_dotall,
             }) catch |err| {
                 self.setError(err);
                 return;
@@ -104,7 +114,7 @@ pub fn searchEntriesParallel(
                 self.stderr,
                 searcher,
                 entry,
-                self.options,
+                self.entry_options,
             ) catch |err| {
                 if (try self.warnAndSkip(entry.path, err)) return;
                 return err;
@@ -140,7 +150,7 @@ pub fn searchEntriesParallel(
                 .elapsed_ns = entry_output.elapsed_ns,
                 .matched = entry_output.matched,
                 .skipped_binary = false,
-                .path = if (self.options.output.heading) try std.heap.smp_allocator.dupe(u8, entry.path) else null,
+                .path = if (self.reporting.output.heading) try std.heap.smp_allocator.dupe(u8, entry.path) else null,
             };
         }
 
@@ -168,7 +178,9 @@ pub fn searchEntriesParallel(
     var context = Context{
         .stderr = stderr,
         .entries = entries,
-        .options = options,
+        .matcher = matcher,
+        .reporting = reporting,
+        .entry_options = entry_options,
         .schedule = schedule,
         .result_reports = result_reports,
     };
@@ -202,7 +214,7 @@ pub fn searchEntriesParallel(
             result.stats.matches += report.matches;
             result.stats.elapsed_ns += report.elapsed_ns;
             if (report.matched) {
-                if (options.output.heading) {
+                if (reporting.output.heading) {
                     try search_output.writeHeadingBlock(stdout, report.path.?, report.bytes.items, &wrote_heading_group);
                 } else {
                     try stdout.writeAll(report.bytes.items);

@@ -68,15 +68,15 @@ The main issues to address are:
 
 ## Phase 2: Split Internal Command Options By Responsibility
 
-- [ ] Keep the CLI-facing parse result stable, but introduce narrower internal
+- [x] Keep the CLI-facing parse result stable, but introduce narrower internal
   groupings for execution:
   - traversal options
   - matcher options
   - report/output options
   - parse-hint flags such as explicit filename/line/column visibility
-- [ ] Reduce the number of modules that need to depend on the full
+- [x] Reduce the number of modules that need to depend on the full
   `CliOptions` surface.
-- [ ] Keep the public command model stable unless a stronger API reason
+- [x] Keep the public command model stable unless a stronger API reason
   appears.
 
 ### Phase 2 Guidance
@@ -140,8 +140,8 @@ The main issues to address are:
 - [ ] Keep current CLI behavior unchanged
 - [ ] Keep current regex behavior unchanged
 - [ ] Run:
-  - `zig build test`
-  - `zig build bench-smoke`
+  - [x] `zig build test`
+  - [x] `zig build bench-smoke`
 - [ ] Re-run the practical parity checks that recently exercised:
   - `--json`
   - `--text`
@@ -152,7 +152,7 @@ The main issues to address are:
 ## Recommended Order
 
 - [x] 1. Remove output-derived stats aggregation
-- [ ] 2. Introduce narrower internal option groupings
+- [x] 2. Introduce narrower internal option groupings
 - [ ] 3. Centralize output-policy decisions
 - [ ] 4. Split reporting by report family
 - [ ] 5. Re-check root and test boundary pressure

@@ -17,7 +17,8 @@ pub const CliOptions = command.CliOptions;
 pub const SearchResult = search_result.SearchResult;
 
 fn validateSortMode(options: CliOptions) !void {
-    if (options.sort_mode != .created) return;
+    const traversal = options.traversal();
+    if (traversal.sort_mode != .created) return;
 
     return switch (sort_capability.createdSortCapability()) {
         .available => {},
@@ -26,7 +27,8 @@ fn validateSortMode(options: CliOptions) !void {
 }
 
 fn sortEntries(entries: []zigrep.search.walk.Entry, options: CliOptions) void {
-    if (options.sort_mode == .none or entries.len <= 1) return;
+    const traversal = options.traversal();
+    if (traversal.sort_mode == .none or entries.len <= 1) return;
 
     const Context = struct {
         mode: command.SortMode,
@@ -67,8 +69,8 @@ fn sortEntries(entries: []zigrep.search.walk.Entry, options: CliOptions) void {
     }.compare;
 
     std.sort.heap(zigrep.search.walk.Entry, entries, Context{
-        .mode = options.sort_mode,
-        .reverse = options.sort_reverse,
+        .mode = traversal.sort_mode,
+        .reverse = traversal.sort_reverse,
     }, lessThan);
 }
 
@@ -83,6 +85,7 @@ pub fn searchPath(
     parallelFn: *const fn (*std.Io.Writer, *std.Io.Writer, []const zigrep.search.walk.Entry, CliOptions, zigrep.search.schedule.Plan) anyerror!SearchResult,
 ) !SearchResult {
     try validateSortMode(options);
+    const traversal = options.traversal();
     var traversal_warning_count: usize = 0;
     const TraversalWarningHandler = struct {
         writer: *std.Io.Writer,
@@ -95,9 +98,9 @@ pub fn searchPath(
     };
 
     const entries = try zigrep.search.walk.collectFilesWithWarnings(allocator, root_path, .{
-        .include_hidden = options.include_hidden,
-        .follow_symlinks = options.follow_symlinks,
-        .max_depth = options.max_depth,
+        .include_hidden = traversal.include_hidden,
+        .follow_symlinks = traversal.follow_symlinks,
+        .max_depth = traversal.max_depth,
     }, TraversalWarningHandler{ .writer = stderr, .count = &traversal_warning_count });
     defer {
         for (entries) |entry| entry.deinit(allocator);
@@ -111,17 +114,17 @@ pub fn searchPath(
         allocator,
         root_path,
         entries,
-        options.globs,
+        traversal.globs,
         loaded_ignores,
         type_matcher,
-        options.include_types,
-        options.exclude_types,
+        traversal.include_types,
+        traversal.exclude_types,
     );
     defer allocator.free(filtered_entries);
     sortEntries(@constCast(filtered_entries), options);
 
     const schedule = zigrep.search.schedule.plan(filtered_entries.len, .{
-        .requested_jobs = if (options.sort_mode == .none) options.parallel_jobs else 1,
+        .requested_jobs = if (traversal.sort_mode == .none) traversal.parallel_jobs else 1,
     });
     var result = if (schedule.parallel)
         try parallelFn(stdout, stderr, filtered_entries, options, schedule)
@@ -140,6 +143,8 @@ pub fn listPathFiles(
     type_matcher: zigrep.search.types.Matcher,
 ) !usize {
     try validateSortMode(options);
+    const traversal = options.traversal();
+    const reporting = options.reporting();
     var traversal_warning_count: usize = 0;
     const TraversalWarningHandler = struct {
         writer: *std.Io.Writer,
@@ -154,11 +159,11 @@ pub fn listPathFiles(
     const loaded_ignores = try search_filtering.loadIgnoreMatchers(allocator, root_path, options);
     defer search_filtering.deinitLoadedIgnores(allocator, loaded_ignores);
 
-    if (options.quiet and options.sort_mode == .none) {
+    if (reporting.quiet and traversal.sort_mode == .none) {
         const QuietVisitor = struct {
             allocator: std.mem.Allocator,
             root_path: []const u8,
-            options: CliOptions,
+            traversal: command.TraversalOptions,
             loaded_ignores: []const search_filtering.LoadedIgnore,
             type_matcher: zigrep.search.types.Matcher,
             listed: *usize,
@@ -169,11 +174,11 @@ pub fn listPathFiles(
                     self.allocator,
                     self.root_path,
                     entry,
-                    self.options.globs,
+                    self.traversal.globs,
                     self.loaded_ignores,
                     self.type_matcher,
-                    self.options.include_types,
-                    self.options.exclude_types,
+                    self.traversal.include_types,
+                    self.traversal.exclude_types,
                 )) return;
                 self.listed.* += 1;
                 return error.StopWalk;
@@ -182,13 +187,13 @@ pub fn listPathFiles(
 
         var listed: usize = 0;
         zigrep.search.walk.walk(allocator, root_path, .{
-            .include_hidden = options.include_hidden,
-            .follow_symlinks = options.follow_symlinks,
-            .max_depth = options.max_depth,
+            .include_hidden = traversal.include_hidden,
+            .follow_symlinks = traversal.follow_symlinks,
+            .max_depth = traversal.max_depth,
         }, QuietVisitor{
             .allocator = allocator,
             .root_path = root_path,
-            .options = options,
+            .traversal = traversal,
             .loaded_ignores = loaded_ignores,
             .type_matcher = type_matcher,
             .listed = &listed,
@@ -200,9 +205,9 @@ pub fn listPathFiles(
     }
 
     const entries = try zigrep.search.walk.collectFilesWithWarnings(allocator, root_path, .{
-        .include_hidden = options.include_hidden,
-        .follow_symlinks = options.follow_symlinks,
-        .max_depth = options.max_depth,
+        .include_hidden = traversal.include_hidden,
+        .follow_symlinks = traversal.follow_symlinks,
+        .max_depth = traversal.max_depth,
     }, TraversalWarningHandler{ .writer = stderr, .count = &traversal_warning_count });
     defer {
         for (entries) |entry| entry.deinit(allocator);
@@ -213,22 +218,22 @@ pub fn listPathFiles(
         allocator,
         root_path,
         entries,
-        options.globs,
+        traversal.globs,
         loaded_ignores,
         type_matcher,
-        options.include_types,
-        options.exclude_types,
+        traversal.include_types,
+        traversal.exclude_types,
     );
     defer allocator.free(filtered_entries);
     sortEntries(@constCast(filtered_entries), options);
 
-    if (options.quiet) {
+    if (reporting.quiet) {
         return if (filtered_entries.len != 0) 1 else 0;
     }
 
     var listed: usize = 0;
     for (filtered_entries) |entry| {
-        try search_output.writePathResult(stdout, entry.path, options.output);
+        try search_output.writePathResult(stdout, entry.path, reporting.output);
         listed += 1;
     }
 
