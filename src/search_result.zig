@@ -3,6 +3,9 @@ pub const SearchStats = struct {
     searched_files: usize = 0,
     matched_files: usize = 0,
     searched_bytes: usize = 0,
+    printed_bytes: usize = 0,
+    matched_lines: usize = 0,
+    matches: usize = 0,
     skipped_binary_files: usize = 0,
     warnings_emitted: usize = 0,
 
@@ -10,6 +13,9 @@ pub const SearchStats = struct {
         self.searched_files += other.searched_files;
         self.matched_files += other.matched_files;
         self.searched_bytes += other.searched_bytes;
+        self.printed_bytes += other.printed_bytes;
+        self.matched_lines += other.matched_lines;
+        self.matches += other.matches;
         self.skipped_binary_files += other.skipped_binary_files;
         self.warnings_emitted += other.warnings_emitted;
     }

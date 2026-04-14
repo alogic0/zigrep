@@ -31,6 +31,7 @@ pub const MatchReport = struct {
     // Columns stay byte-oriented to match the rest of the current search layer.
     column_number: usize,
     line: []const u8,
+    line_terminated: bool,
     // This stays null in the normal path. It is only used when a caller needs
     // the line bytes to outlive a temporary transformed haystack.
     owned_line: ?[]u8 = null,
@@ -611,6 +612,7 @@ fn buildReport(path: []const u8, haystack: []const u8, span: regex.Vm.Capture) M
         .line_number = line_info.line_number,
         .column_number = line_info.column_number,
         .line = haystack[line_info.line_span.start..line_info.line_span.end],
+        .line_terminated = line_info.line_span.end < haystack.len and haystack[line_info.line_span.end] == '\n',
         .line_span = line_info.line_span,
         .match_span = .{
             .start = match_start,

@@ -51,21 +51,16 @@ pub fn writeJsonMatchEvent(
     report: zigrep.search.grep.MatchReport,
     output: OutputOptions,
 ) !void {
-    const only_matching = output.only_matching;
-    const display_slice = if (only_matching)
-        report.line[report.match_span.start - report.line_span.start .. report.match_span.end - report.line_span.start]
-    else
-        report.line;
-    const absolute_offset = if (only_matching) report.match_span.start else report.line_span.start;
-    const submatch_start = if (only_matching) 0 else report.match_span.start - report.line_span.start;
-    const submatch_end = if (only_matching) display_slice.len else report.match_span.end - report.line_span.start;
+    _ = output;
+    const submatch_start = report.match_span.start - report.line_span.start;
+    const submatch_end = report.match_span.end - report.line_span.start;
 
     try writer.writeAll("{\"type\":\"match\",\"data\":{");
     try writer.writeAll("\"path\":");
     try writeJsonTextValue(writer, report.path);
     try writer.writeAll(",\"lines\":");
-    try writeJsonTextValue(writer, display_slice);
-    try writer.print(",\"line_number\":{d},\"absolute_offset\":{d}", .{ report.line_number, absolute_offset });
+    try writeJsonTextValueWithTerminator(writer, report.line, report.line_terminated);
+    try writer.print(",\"line_number\":{d},\"absolute_offset\":{d}", .{ report.line_number, report.line_span.start });
     try writer.writeAll(",\"submatches\":[{\"match\":");
     try writeJsonTextValue(writer, report.line[report.match_span.start - report.line_span.start .. report.match_span.end - report.line_span.start]);
     try writer.print(",\"start\":{d},\"end\":{d}", .{ submatch_start, submatch_end });
@@ -282,7 +277,11 @@ pub fn formatReport(
 
 pub fn writeJsonString(writer: *std.Io.Writer, bytes: []const u8) !void {
     try writer.writeByte('"');
+    try writeJsonStringContents(writer, bytes);
+    try writer.writeByte('"');
+}
 
+fn writeJsonStringContents(writer: *std.Io.Writer, bytes: []const u8) !void {
     var index: usize = 0;
     while (index < bytes.len) {
         const byte = bytes[index];
@@ -325,13 +324,27 @@ pub fn writeJsonString(writer: *std.Io.Writer, bytes: []const u8) !void {
         try writer.writeAll(sequence);
         index += sequence_len;
     }
-
-    try writer.writeByte('"');
 }
 
 pub fn writeJsonTextValue(writer: *std.Io.Writer, bytes: []const u8) !void {
     try writer.writeAll("{\"text\":");
     try writeJsonString(writer, bytes);
+    try writer.writeByte('}');
+}
+
+pub fn writeJsonTextValueWithTerminator(
+    writer: *std.Io.Writer,
+    bytes: []const u8,
+    line_terminated: bool,
+) !void {
+    try writer.writeAll("{\"text\":");
+    if (!line_terminated) {
+        try writeJsonString(writer, bytes);
+    } else {
+        try writer.writeByte('"');
+        try writeJsonStringContents(writer, bytes);
+        try writer.writeAll("\\n\"");
+    }
     try writer.writeByte('}');
 }
 

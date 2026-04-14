@@ -671,8 +671,38 @@ test "runCli json mode emits match events" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":{\"text\":"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_number\":1"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"lines\":{\"text\":\"needle one\"}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"lines\":{\"text\":\"needle one\\n\"}"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"submatches\":["));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matched_lines\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matches\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"bytes_printed\":"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli json only-matching mode keeps full line payload and submatch offsets" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "xxneedle yy\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--json", "--only-matching", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"lines\":{\"text\":\"xxneedle yy\\n\"}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"absolute_offset\":0"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"start\":2,\"end\":8"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"match\":{\"text\":\"needle\"}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matched_lines\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matches\":1"));
     try testing.expectEqualStrings("", run.stderr);
 }
 

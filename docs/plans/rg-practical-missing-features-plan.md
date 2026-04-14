@@ -178,12 +178,24 @@ Current status:
 
 ## Feature 7: Ripgrep-Style JSON Output
 
-- [ ] Compare the current custom `--json` event shape directly against ripgrep
+- [x] Compare the current custom `--json` event shape directly against ripgrep
   and record the minimum parity target.
-- [ ] Decide whether to move toward ripgrep-style `begin` / `match` / `end` /
+- [x] Decide whether to move toward ripgrep-style `begin` / `match` / `end` /
   `summary` events or to keep a documented smaller schema.
-- [ ] If parity is the goal, include path encoding, line text, submatch spans,
+- [x] If parity is the goal, include path encoding, line text, submatch spans,
   and summary events in the matching shape.
+
+Current status:
+
+- line-mode JSON now follows the ripgrep-style `begin` / `match` / `end` /
+  `summary` framing closely enough for practical parity work
+- `match` events now keep the full line payload in `lines.text`, including the
+  trailing `\n` when present, even under `--only-matching`
+- top-level `summary` aggregation now reports real printed-byte and
+  match-count totals instead of placeholder zero values
+- remaining gaps are mostly longer-tail schema parity such as elapsed timing
+  fields and the custom `count` / `path` event handling outside ripgrep's
+  supported JSON surface
 
 ### JSON Guidance
 

@@ -131,6 +131,7 @@ test "formatReport obeys output toggles" {
         .line_number = 3,
         .column_number = 7,
         .line = "matched line",
+        .line_terminated = false,
         .line_span = .{ .start = 0, .end = 12 },
         .match_span = .{ .start = 0, .end = 6 },
     };
@@ -153,6 +154,7 @@ test "formatReport escapes unsafe bytes in displayed lines" {
         .line_number = 1,
         .column_number = 4,
         .line = "aa\x00\xffneedle\x1b",
+        .line_terminated = false,
         .line_span = .{ .start = 0, .end = 11 },
         .match_span = .{ .start = 4, .end = 10 },
     };

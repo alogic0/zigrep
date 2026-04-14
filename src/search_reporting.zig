@@ -1056,6 +1056,7 @@ fn writeInvertedFileReports(
             .line_number = index + 1,
             .column_number = 1,
             .line = line,
+            .line_terminated = line_span.end < haystack.len and haystack[line_span.end] == '\n',
             .owned_line = null,
             .line_span = line_span,
             .match_span = line_span,

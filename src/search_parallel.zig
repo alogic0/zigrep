@@ -28,6 +28,9 @@ pub fn searchEntriesParallel(
     const StoredOutput = struct {
         bytes: std.ArrayListUnmanaged(u8),
         searched_bytes: usize = 0,
+        printed_bytes: usize = 0,
+        matched_lines: usize = 0,
+        matches: usize = 0,
         matched: bool = false,
         skipped_binary: bool = false,
         path: ?[]u8 = null,
@@ -116,6 +119,9 @@ pub fn searchEntriesParallel(
                 self.result_reports[index] = .{
                     .bytes = .empty,
                     .searched_bytes = 0,
+                    .printed_bytes = 0,
+                    .matched_lines = 0,
+                    .matches = 0,
                     .matched = false,
                     .skipped_binary = true,
                     .path = null,
@@ -126,6 +132,9 @@ pub fn searchEntriesParallel(
             self.result_reports[index] = .{
                 .bytes = entry_output.bytes,
                 .searched_bytes = entry_output.searched_bytes,
+                .printed_bytes = entry_output.printed_bytes,
+                .matched_lines = entry_output.matched_lines,
+                .matches = entry_output.matches,
                 .matched = entry_output.matched,
                 .skipped_binary = false,
                 .path = if (self.options.output.heading) try std.heap.smp_allocator.dupe(u8, entry.path) else null,
@@ -185,6 +194,9 @@ pub fn searchEntriesParallel(
             }
             result.stats.searched_files += 1;
             result.stats.searched_bytes += report.searched_bytes;
+            result.stats.printed_bytes += report.printed_bytes;
+            result.stats.matched_lines += report.matched_lines;
+            result.stats.matches += report.matches;
             if (report.matched) {
                 if (options.output.heading) {
                     try search_output.writeHeadingBlock(stdout, report.path.?, report.bytes.items, &wrote_heading_group);

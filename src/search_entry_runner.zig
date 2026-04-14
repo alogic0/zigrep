@@ -17,6 +17,8 @@ pub const EntryOutput = struct {
     bytes: std.ArrayListUnmanaged(u8) = .empty,
     searched_bytes: usize = 0,
     printed_bytes: usize = 0,
+    matched_lines: usize = 0,
+    matches: usize = 0,
     matched: bool = false,
     match_events: usize = 0,
     skipped_binary: bool = false,
@@ -112,23 +114,34 @@ pub fn searchEntryToOwnedOutput(
     if (options.output_format == .json) {
         const written = capture.written();
         const match_events = countJsonEventType(written, "\"type\":\"match\"");
+        const matched_lines = countDistinctJsonLineNumbers(written);
         try search_output.writeJsonEndEvent(&capture.writer, entry.path, .{
             .bytes_searched = search_bytes.len,
             .bytes_printed = written.len,
             .searches = 1,
             .searches_with_match = if (matched) 1 else 0,
-            .matched_lines = match_events,
+            .matched_lines = matched_lines,
             .matches = match_events,
         });
     }
 
     const written = capture.written();
+    const match_events = if (options.output_format == .json)
+        countJsonEventType(written, "\"type\":\"match\"")
+    else
+        0;
+    const matched_lines = if (options.output_format == .json)
+        countDistinctJsonLineNumbers(written)
+    else
+        match_events;
     return .{
         .bytes = capture.toArrayList(),
         .searched_bytes = search_bytes.len,
         .printed_bytes = written.len,
+        .matched_lines = matched_lines,
+        .matches = match_events,
         .matched = matched,
-        .match_events = countJsonEventType(written, "\"type\":\"match\""),
+        .match_events = match_events,
     };
 }
 
@@ -139,5 +152,34 @@ fn countJsonEventType(bytes: []const u8, needle: []const u8) usize {
         count += 1;
         start = index + needle.len;
     }
+    return count;
+}
+
+fn countDistinctJsonLineNumbers(bytes: []const u8) usize {
+    const needle = "\"line_number\":";
+    var count: usize = 0;
+    var start: usize = 0;
+    var last_line_number: ?usize = null;
+
+    while (std.mem.indexOfPos(u8, bytes, start, needle)) |index| {
+        var cursor = index + needle.len;
+        const number_start = cursor;
+        while (cursor < bytes.len and std.ascii.isDigit(bytes[cursor])) : (cursor += 1) {}
+        if (cursor == number_start) {
+            start = number_start;
+            continue;
+        }
+
+        const line_number = std.fmt.parseUnsigned(usize, bytes[number_start..cursor], 10) catch {
+            start = cursor;
+            continue;
+        };
+        if (last_line_number == null or last_line_number.? != line_number) {
+            count += 1;
+            last_line_number = line_number;
+        }
+        start = cursor;
+    }
+
     return count;
 }
