@@ -217,6 +217,27 @@ test "parseArgs accepts numeric and formatting flags" {
     }
 }
 
+test "parseArgs column implies line numbers" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--column", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.output.line_number);
+            try testing.expect(opts.output.column_number);
+            try testing.expect(opts.line_number_flag_seen);
+            try testing.expect(opts.column_number_flag_seen);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
 test "parseArgs accepts fixed-string and explicit-pattern flags" {
     const testing = std.testing;
 

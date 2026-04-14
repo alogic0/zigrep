@@ -17,9 +17,7 @@ as follow-up parity work.
 From the latest direct `rg` versus `zigrep` comparison, the remaining behavior
 gaps are:
 
-- more ripgrep-like unsupported `--sort created` behavior
-- ripgrep-style single-file default output suppression for line and column
-  prefixes, not just the filename prefix
+- `--column` should imply line numbers the way ripgrep does
 
 ## Priority
 
@@ -33,8 +31,7 @@ Priority should stay grounded in actual usage:
 With the earlier practical slices now implemented, the remaining follow-up
 priority inside this plan should be:
 
-1. single-file explicit-path output defaults
-2. unsupported `--sort created` parity
+1. `--column` implying line numbers
 
 That ordering reflects how often these features still affect normal code-search
 work.
@@ -200,6 +197,8 @@ Current status:
   - `-H` / `--with-filename`
   - `--no-filename`
   - `--heading`
+- [x] Make `--column` imply line numbers, matching ripgrep behavior for both
+  single-file and multi-file output.
 
 ### Filename Guidance
 

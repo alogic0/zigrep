@@ -155,7 +155,9 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
         return .handled;
     }
     if (std.mem.eql(u8, arg, "--column")) {
+        state.output.line_number = true;
         state.output.column_number = true;
+        state.line_number_flag_seen = true;
         state.column_number_flag_seen = true;
         return .handled;
     }

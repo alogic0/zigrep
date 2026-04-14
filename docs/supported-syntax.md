@@ -271,7 +271,7 @@ Filename default note:
 - `--count` already prints only the count value in that case
 - `-H` or `--with-filename` restores the filename prefix explicitly
 - `-n` or `--line-number` restores line numbers explicitly
-- `--column` restores columns explicitly
+- `--column` restores columns explicitly and also implies line numbers
 - `--no-filename` still suppresses it explicitly
 - directory searches, multiple explicit paths, `--heading`, and stdin labeling keep their own existing behavior
 

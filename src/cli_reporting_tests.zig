@@ -916,7 +916,7 @@ test "runCli column remains when explicitly requested for one explicit file" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expectEqualStrings("1:needle one\n1:needle two\n", run.stdout);
+    try testing.expectEqualStrings("1:1:needle one\n2:1:needle two\n", run.stdout);
     try testing.expectEqualStrings("", run.stderr);
 }
 
