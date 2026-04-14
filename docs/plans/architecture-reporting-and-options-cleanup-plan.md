@@ -118,6 +118,8 @@ The main issues to address are:
   - JSON/event-specific helpers
 - [x] Extract the count, path-only, and binary-match report family into a
   dedicated helper module without changing the public reporting facade.
+- [x] Extract multiline reporting and multiline JSON helpers into a dedicated
+  helper module without changing the public reporting facade.
 - [ ] Keep one small coordinating facade if needed, but move large mode-specific
   branches out of the current monolithic file.
 - [ ] Preserve the current end-to-end output behavior and tests.

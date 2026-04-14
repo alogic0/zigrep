@@ -4,6 +4,7 @@ const zigrep = struct {
 };
 const command = @import("command.zig");
 const search_output = @import("search_output.zig");
+const search_reporting_multiline = @import("search_reporting_multiline.zig");
 const search_reporting_types = @import("search_reporting_types.zig");
 
 pub const OutputOptions = command.OutputOptions;
@@ -77,7 +78,7 @@ pub fn writeFileCount(
     if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
         defer allocator.free(decoded);
         if (searcher.program.can_match_newline) {
-            return writeFileCountMultiline(allocator, writer, searcher, path, decoded, output_format);
+            return search_reporting_multiline.writeFileCountMultiline(allocator, writer, searcher, path, decoded, output_format);
         }
         _ = searcher.forEachLineReport(path, decoded, &counter, Counter.emit) catch |err| switch (err) {
             IterationStop.MaxCountReached => true,
@@ -85,7 +86,7 @@ pub fn writeFileCount(
         };
     } else {
         if (searcher.program.can_match_newline) {
-            return writeFileCountMultiline(allocator, writer, searcher, path, bytes, output_format);
+            return search_reporting_multiline.writeFileCountMultiline(allocator, writer, searcher, path, bytes, output_format);
         }
         _ = searcher.forEachLineReport(path, bytes, &counter, Counter.emit) catch |err| switch (err) {
             IterationStop.MaxCountReached => true,
@@ -176,34 +177,6 @@ pub fn reportFileMatch(
     }
 
     return searcher.reportFirstMatch(path, bytes);
-}
-
-fn writeFileCountMultiline(
-    _: std.mem.Allocator,
-    writer: *std.Io.Writer,
-    searcher: *zigrep.search.grep.Searcher,
-    path: []const u8,
-    haystack: []const u8,
-    output_format: OutputFormat,
-) !ReportSummary {
-    const Context = struct {
-        count: usize = 0,
-
-        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
-            _ = report;
-            self.count += 1;
-        }
-    };
-
-    var context = Context{};
-    _ = try searcher.forEachMatchReport(path, haystack, &context, Context.emit);
-    if (context.count == 0) return .{};
-
-    switch (output_format) {
-        .text => try writer.print("{s}:{d}\n", .{ path, context.count }),
-        .json => try search_output.writeJsonCountEvent(writer, path, context.count),
-    }
-    return .{ .matched = true };
 }
 
 fn countInvertedLines(

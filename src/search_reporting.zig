@@ -6,6 +6,7 @@ const regex = @import("regex/root.zig");
 const command = @import("command.zig");
 const search_output = @import("search_output.zig");
 const search_reporting_match_modes = @import("search_reporting_match_modes.zig");
+const search_reporting_multiline = @import("search_reporting_multiline.zig");
 const search_reporting_types = @import("search_reporting_types.zig");
 
 // Reporting and output shaping.
@@ -630,295 +631,6 @@ fn writeFileReportsWithContextReplacing(
     };
 }
 
-fn writeMultilineReportBlock(
-    writer: *std.Io.Writer,
-    path: []const u8,
-    info: zigrep.search.report.DisplayBlockInfo,
-    haystack: []const u8,
-    output: OutputOptions,
-    display_mode: DisplayMode,
-) !void {
-    try search_output.writePrefixedDisplayBytes(
-        writer,
-        path,
-        info.line_number,
-        info.column_number,
-        haystack[info.block.block_span.start..info.block.block_span.end],
-        output,
-        true,
-        display_mode,
-    );
-}
-
-fn writeFileReportsMultiline(
-    allocator: std.mem.Allocator,
-    writer: *std.Io.Writer,
-    searcher: *zigrep.search.grep.Searcher,
-    path: []const u8,
-    haystack: []const u8,
-    output: OutputOptions,
-    display_mode: DisplayMode,
-) !ReportSummary {
-    const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, haystack);
-    defer allocator.free(matches);
-    if (matches.len == 0) return .{};
-
-    const merged = try mergeMultilineMatchesAlloc(allocator, matches);
-    defer allocator.free(merged);
-
-    for (merged) |info| {
-        try writeMultilineReportBlock(writer, path, info, haystack, output, display_mode);
-    }
-
-    return .{
-        .matched = true,
-        .matched_lines = merged.len,
-        .matches = matches.len,
-    };
-}
-
-fn writeFileOnlyMatchingMultiline(
-    allocator: std.mem.Allocator,
-    writer: *std.Io.Writer,
-    searcher: *zigrep.search.grep.Searcher,
-    path: []const u8,
-    haystack: []const u8,
-    output: OutputOptions,
-    display_mode: DisplayMode,
-) !ReportSummary {
-    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
-    defer allocator.free(line_spans);
-
-    const Context = struct {
-        writer: *std.Io.Writer,
-        haystack: []const u8,
-        line_spans: []const zigrep.search.report.Span,
-        output: OutputOptions,
-        display_mode: DisplayMode,
-        matches: usize = 0,
-
-        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
-            const info = zigrep.search.report.deriveDisplayBlockInfo(self.haystack, self.line_spans, report.match_span);
-            try search_output.writePrefixedDisplayBytes(
-                self.writer,
-                report.path,
-                info.line_number,
-                info.column_number,
-                self.haystack[report.match_span.start..report.match_span.end],
-                self.output,
-                true,
-                self.display_mode,
-            );
-            self.matches += 1;
-        }
-    };
-
-    var context = Context{
-        .writer = writer,
-        .haystack = haystack,
-        .line_spans = line_spans,
-        .output = output,
-        .display_mode = display_mode,
-    };
-
-    _ = try searcher.forEachMatchReport(path, haystack, &context, Context.emit);
-    return .{
-        .matched = context.matches != 0,
-        .matched_lines = context.matches,
-        .matches = context.matches,
-    };
-}
-
-fn writeMultilineJsonMatchEvent(
-    writer: *std.Io.Writer,
-    path: []const u8,
-    haystack: []const u8,
-    match_info: MultilineMatchInfo,
-    output: OutputOptions,
-) !void {
-    const display_slice = if (output.only_matching)
-        haystack[match_info.match_span.start..match_info.match_span.end]
-    else
-        haystack[match_info.display.block.block_span.start..match_info.display.block.block_span.end];
-    const line_span = if (output.only_matching)
-        match_info.match_span
-    else
-        match_info.display.block.block_span;
-
-    try writer.writeAll("{\"type\":\"match\",\"data\":{");
-    try writer.writeAll("\"path\":");
-    try search_output.writeJsonString(writer, path);
-    try writer.print(",\"line_number\":{d},\"column_number\":{d}", .{ match_info.display.line_number, match_info.display.column_number });
-    try writer.writeAll(",\"line\":");
-    try search_output.writeJsonString(writer, display_slice);
-    try writer.print(",\"line_span\":{{\"start\":{d},\"end\":{d}}}", .{ line_span.start, line_span.end });
-    try writer.print(",\"match_span\":{{\"start\":{d},\"end\":{d}}}", .{ match_info.match_span.start, match_info.match_span.end });
-    try writer.writeAll("}}\n");
-}
-
-fn writeFileCountMultiline(
-    allocator: std.mem.Allocator,
-    writer: *std.Io.Writer,
-    searcher: *zigrep.search.grep.Searcher,
-    path: []const u8,
-    haystack: []const u8,
-    output_format: OutputFormat,
-) !ReportSummary {
-    const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, haystack);
-    defer allocator.free(matches);
-    if (matches.len == 0) return .{};
-
-    switch (output_format) {
-        .text => try writer.print("{s}:{d}\n", .{ path, matches.len }),
-        .json => try search_output.writeJsonCountEvent(writer, path, matches.len),
-    }
-    return .{ .matched = true };
-}
-
-fn writeFileReportsWithContextMultiline(
-    allocator: std.mem.Allocator,
-    writer: *std.Io.Writer,
-    searcher: *zigrep.search.grep.Searcher,
-    path: []const u8,
-    haystack: []const u8,
-    output: OutputOptions,
-    context_before: usize,
-    context_after: usize,
-    display_mode: DisplayMode,
-) !ReportSummary {
-    const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, haystack);
-    defer allocator.free(matches);
-    if (matches.len == 0) return .{};
-
-    const merged = try mergeMultilineMatchesAlloc(allocator, matches);
-    defer allocator.free(merged);
-
-    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
-    defer allocator.free(line_spans);
-
-    const include = try allocator.alloc(bool, line_spans.len);
-    defer allocator.free(include);
-    @memset(include, false);
-
-    const block_starts = try allocator.alloc(?usize, line_spans.len);
-    defer allocator.free(block_starts);
-    @memset(block_starts, null);
-
-    for (merged, 0..) |info, block_index| {
-        block_starts[info.block.start_line_index] = block_index;
-        const start = info.block.start_line_index -| context_before;
-        const end = @min(info.block.end_line_index + context_after + 1, line_spans.len);
-        for (start..end) |line_index| include[line_index] = true;
-    }
-
-    var previous_included: ?usize = null;
-    var line_index: usize = 0;
-    while (line_index < line_spans.len) {
-        if (!include[line_index]) {
-            line_index += 1;
-            continue;
-        }
-        if (previous_included) |prev| {
-            if (line_index > prev + 1) try writer.writeAll("--\n");
-        }
-
-        if (block_starts[line_index]) |block_index| {
-            const info = merged[block_index];
-            try writeMultilineReportBlock(writer, path, info, haystack, output, display_mode);
-            previous_included = info.block.end_line_index;
-            line_index = info.block.end_line_index + 1;
-            continue;
-        }
-
-        previous_included = line_index;
-        const line_span = line_spans[line_index];
-        try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output, display_mode);
-        line_index += 1;
-    }
-
-    return .{
-        .matched = true,
-        .matched_lines = merged.len,
-        .matches = matches.len,
-    };
-}
-
-const MultilineMatchInfo = struct {
-    display: zigrep.search.report.DisplayBlockInfo,
-    match_span: zigrep.search.report.Span,
-};
-
-fn collectMultilineMatchesAlloc(
-    allocator: std.mem.Allocator,
-    searcher: *zigrep.search.grep.Searcher,
-    path: []const u8,
-    haystack: []const u8,
-) ![]MultilineMatchInfo {
-    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
-    defer allocator.free(line_spans);
-
-    const Context = struct {
-        allocator: std.mem.Allocator,
-        haystack: []const u8,
-        line_spans: []const zigrep.search.report.Span,
-        items: *std.ArrayList(MultilineMatchInfo),
-
-        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
-            try self.items.append(self.allocator, .{
-                .display = zigrep.search.report.deriveDisplayBlockInfo(self.haystack, self.line_spans, report.match_span),
-                .match_span = report.match_span,
-            });
-        }
-    };
-
-    var items: std.ArrayList(MultilineMatchInfo) = .empty;
-    errdefer items.deinit(allocator);
-
-    var context = Context{
-        .allocator = allocator,
-        .haystack = haystack,
-        .line_spans = line_spans,
-        .items = &items,
-    };
-
-    const matched = try searcher.forEachMatchReport(path, haystack, &context, Context.emit);
-    if (!matched) return allocator.alloc(MultilineMatchInfo, 0);
-    return items.toOwnedSlice(allocator);
-}
-
-fn mergeMultilineMatchesAlloc(
-    allocator: std.mem.Allocator,
-    matches: []const MultilineMatchInfo,
-) ![]zigrep.search.report.DisplayBlockInfo {
-    if (matches.len == 0) return allocator.alloc(zigrep.search.report.DisplayBlockInfo, 0);
-
-    const projected = try allocator.alloc(zigrep.search.report.DisplayBlock, matches.len);
-    defer allocator.free(projected);
-    for (matches, 0..) |match_info, index| projected[index] = match_info.display.block;
-
-    const merged_blocks = try zigrep.search.report.mergeDisplayBlocksAlloc(allocator, projected);
-    defer allocator.free(merged_blocks);
-
-    var merged_infos: std.ArrayList(zigrep.search.report.DisplayBlockInfo) = .empty;
-    defer merged_infos.deinit(allocator);
-
-    var match_index: usize = 0;
-    for (merged_blocks) |block| {
-        while (match_index < matches.len and matches[match_index].display.block.start_line_index < block.start_line_index) {
-            match_index += 1;
-        }
-        if (match_index >= matches.len) return error.InvalidFlagCombination;
-
-        try merged_infos.append(allocator, .{
-            .line_number = matches[match_index].display.line_number,
-            .column_number = matches[match_index].display.column_number,
-            .block = block,
-        });
-    }
-
-    return merged_infos.toOwnedSlice(allocator);
-}
-
 pub fn writeFileOutput(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
@@ -1001,11 +713,11 @@ fn writeFileLines(
                 if (context_before != 0 or context_after != 0 or output_format == .json) {
                     return error.InvalidFlagCombination;
                 }
-                return writeFileOnlyMatchingMultiline(allocator, writer, searcher, path, decoded, output, display_mode);
+                return search_reporting_multiline.writeFileOnlyMatchingMultiline(allocator, writer, searcher, path, decoded, output, display_mode);
             }
             if (context_before != 0 or context_after != 0) {
                 if (output_format != .text) return error.InvalidFlagCombination;
-                return writeFileReportsWithContextMultiline(
+                return search_reporting_multiline.writeFileReportsWithContextMultiline(
                     allocator,
                     writer,
                     searcher,
@@ -1018,17 +730,17 @@ fn writeFileLines(
                 );
             }
             if (output_format == .json) {
-                const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, decoded);
+                const matches = try search_reporting_multiline.collectMultilineMatchesAlloc(allocator, searcher, path, decoded);
                 defer allocator.free(matches);
                 if (matches.len == 0) return .{};
-                for (matches) |match_info| try writeMultilineJsonMatchEvent(writer, path, decoded, match_info, output);
+                for (matches) |match_info| try search_reporting_multiline.writeMultilineJsonMatchEvent(writer, path, decoded, match_info, output);
                 return .{
                     .matched = true,
                     .matched_lines = matches.len,
                     .matches = matches.len,
                 };
             }
-            return writeFileReportsMultiline(allocator, writer, searcher, path, decoded, output, display_mode);
+            return search_reporting_multiline.writeFileReportsMultiline(allocator, writer, searcher, path, decoded, output, display_mode);
         }
         if (invert_match) {
             return writeInvertedFileReports(allocator, writer, searcher, path, decoded, output, output_format, max_count, display_mode);
@@ -1058,11 +770,11 @@ fn writeFileLines(
             if (context_before != 0 or context_after != 0 or output_format == .json) {
                 return error.InvalidFlagCombination;
             }
-            return writeFileOnlyMatchingMultiline(allocator, writer, searcher, path, bytes, output, display_mode);
+            return search_reporting_multiline.writeFileOnlyMatchingMultiline(allocator, writer, searcher, path, bytes, output, display_mode);
         }
         if (context_before != 0 or context_after != 0) {
             if (output_format != .text) return error.InvalidFlagCombination;
-            return writeFileReportsWithContextMultiline(
+            return search_reporting_multiline.writeFileReportsWithContextMultiline(
                 allocator,
                 writer,
                 searcher,
@@ -1075,17 +787,17 @@ fn writeFileLines(
             );
         }
         if (output_format == .json) {
-            const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, bytes);
+            const matches = try search_reporting_multiline.collectMultilineMatchesAlloc(allocator, searcher, path, bytes);
             defer allocator.free(matches);
             if (matches.len == 0) return .{};
-            for (matches) |match_info| try writeMultilineJsonMatchEvent(writer, path, bytes, match_info, output);
+            for (matches) |match_info| try search_reporting_multiline.writeMultilineJsonMatchEvent(writer, path, bytes, match_info, output);
             return .{
                 .matched = true,
                 .matched_lines = matches.len,
                 .matches = matches.len,
             };
         }
-        return writeFileReportsMultiline(allocator, writer, searcher, path, bytes, output, display_mode);
+        return search_reporting_multiline.writeFileReportsMultiline(allocator, writer, searcher, path, bytes, output, display_mode);
     }
 
     if (invert_match) {
