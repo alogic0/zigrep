@@ -49,7 +49,7 @@ fn finalizeRunParse(
     errdefer allocator.free(owned_exclude_types);
 
     return .{ .run = .{
-        .pattern = state.pattern.?,
+        .pattern = state.pattern orelse "",
         .paths = owned_paths,
         .globs = owned_globs,
         .pre_globs = owned_pre_globs,
@@ -77,6 +77,8 @@ fn finalizeRunParse(
         .context_before = state.context_before,
         .context_after = state.context_after,
         .show_stats = state.show_stats,
+        .fixed_strings = state.fixed_strings,
+        .list_files = state.list_files,
         .output = state.output,
         .output_format = state.output_format,
         .report_mode = state.report_mode,
@@ -88,7 +90,6 @@ fn normalizeState(
     state: *ParseState,
     buffers: *ParseBuffers,
 ) !void {
-    if (state.pattern == null) return error.MissingPattern;
     if (state.unrestricted_level >= 1) state.no_ignore = true;
     if (state.unrestricted_level >= 2) state.include_hidden = true;
     if (state.unrestricted_level >= 3) state.binary_mode = .text;
@@ -102,6 +103,20 @@ fn validateRunState(
     state: *const ParseState,
     buffers: *const ParseBuffers,
 ) CliError!void {
+    if (state.list_files) {
+        if (state.pattern != null or state.fixed_strings or state.invert_match or state.search_compressed or
+            state.preprocessor != null or state.multiline or state.multiline_dotall or
+            state.max_count != null or state.context_before != 0 or state.context_after != 0 or
+            state.show_stats or state.output_format != .text or state.report_mode != .lines or
+            state.output.only_matching or state.output.heading or state.binary_mode != .skip or
+            state.case_mode != .sensitive or state.encoding != .auto)
+        {
+            return error.InvalidFlagCombination;
+        }
+        return;
+    }
+
+    if (state.pattern == null) return error.MissingPattern;
     if (state.preprocessor == null and buffers.pre_globs.items.len != 0) return error.InvalidFlagCombination;
     if (state.multiline_dotall and !state.multiline) return error.InvalidFlagCombination;
     if ((state.context_before != 0 or state.context_after != 0) and

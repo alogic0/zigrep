@@ -43,7 +43,10 @@ pub fn executeParsedCommand(
             try search.types.writeTypeList(stdout, matcher);
             break :blk 0;
         },
-        .run => |opts| runner.runSearch(allocator, stdout, stderr, opts),
+        .run => |opts| if (opts.list_files)
+            runner.runFileList(allocator, stdout, stderr, opts)
+        else
+            runner.runSearch(allocator, stdout, stderr, opts),
         .help, .version => unreachable,
     };
 }

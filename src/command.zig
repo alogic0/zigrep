@@ -29,7 +29,7 @@ pub const ReportMode = enum {
 };
 
 pub const CliOptions = struct {
-    pattern: []const u8,
+    pattern: []const u8 = "",
     paths: []const []const u8,
     globs: []const []const u8 = &.{},
     pre_globs: []const []const u8 = &.{},
@@ -57,6 +57,8 @@ pub const CliOptions = struct {
     context_before: usize = 0,
     context_after: usize = 0,
     show_stats: bool = false,
+    fixed_strings: bool = false,
+    list_files: bool = false,
     output: OutputOptions = .{},
     output_format: OutputFormat = .text,
     report_mode: ReportMode = .lines,

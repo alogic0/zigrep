@@ -16,6 +16,7 @@ pub const CaseMode = enum {
 
 pub const SearchOptions = struct {
     case_mode: CaseMode = .sensitive,
+    fixed_strings: bool = false,
     // Phase 1 multiline plumbing: these flags define the intended engine
     // surface, even though multiline execution is not wired yet.
     multiline: bool = false,
@@ -117,7 +118,15 @@ pub const Searcher = struct {
             return error.InvalidMultilineOptions;
         }
 
-        var hir = try regex.compile(allocator, pattern, .{});
+        var owned_compile_pattern: ?[]u8 = null;
+        defer if (owned_compile_pattern) |owned| allocator.free(owned);
+
+        const compile_pattern: []const u8 = if (options.fixed_strings) blk: {
+            owned_compile_pattern = try escapeRegexLiteralAlloc(allocator, pattern);
+            break :blk owned_compile_pattern.?;
+        } else pattern;
+
+        var hir = try regex.compile(allocator, compile_pattern, .{});
         defer hir.deinit(allocator);
 
         const fold_case = shouldFoldCase(pattern, options.case_mode);
@@ -293,6 +302,23 @@ pub const Searcher = struct {
         return .{ .match = adjusted };
     }
 };
+
+fn escapeRegexLiteralAlloc(allocator: std.mem.Allocator, pattern: []const u8) ![]u8 {
+    var escaped: std.ArrayList(u8) = .empty;
+    defer escaped.deinit(allocator);
+
+    for (pattern) |byte| {
+        switch (byte) {
+            '\\', '.', '+', '*', '?', '(', ')', '[', ']', '{', '}', '|', '^', '$' => {
+                try escaped.append(allocator, '\\');
+                try escaped.append(allocator, byte);
+            },
+            else => try escaped.append(allocator, byte),
+        }
+    }
+
+    return escaped.toOwnedSlice(allocator);
+}
 
 fn shouldFoldCase(pattern: []const u8, case_mode: CaseMode) bool {
     return switch (case_mode) {

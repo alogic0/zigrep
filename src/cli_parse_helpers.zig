@@ -40,6 +40,10 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
         state.output_format = .json;
         return .handled;
     }
+    if (std.mem.eql(u8, arg, "--files")) {
+        state.list_files = true;
+        return .handled;
+    }
     if (std.mem.eql(u8, arg, "--stats")) {
         state.show_stats = true;
         return .handled;
@@ -70,6 +74,10 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
     }
     if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--ignore-case")) {
         state.case_mode = .insensitive;
+        return .handled;
+    }
+    if (std.mem.eql(u8, arg, "-F") or std.mem.eql(u8, arg, "--fixed-strings")) {
+        state.fixed_strings = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "-S") or std.mem.eql(u8, arg, "--smart-case")) {
@@ -155,6 +163,10 @@ pub fn handleValueFlag(
     index: *usize,
     arg: []const u8,
 ) !bool {
+    if (std.mem.eql(u8, arg, "-e") or std.mem.eql(u8, arg, "--regexp")) {
+        try setPattern(state, try requireNextArg(argv, index));
+        return true;
+    }
     if (std.mem.eql(u8, arg, "--ignore-file")) {
         try buffers.ignore_files.append(allocator, try requireNextArg(argv, index));
         return true;
@@ -248,4 +260,9 @@ fn parsePositiveUsize(arg: []const u8) CliError!usize {
 
 fn parseNonNegativeUsize(arg: []const u8) CliError!usize {
     return std.fmt.parseUnsigned(usize, arg, 10) catch error.InvalidFlagValue;
+}
+
+fn setPattern(state: *ParseState, pattern: []const u8) CliError!void {
+    if (state.pattern != null) return error.InvalidFlagCombination;
+    state.pattern = pattern;
 }

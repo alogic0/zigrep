@@ -40,6 +40,8 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(!opts.multiline_dotall);
             try testing.expectEqual(@as(?usize, null), opts.parallel_jobs);
             try testing.expectEqual(@as(?usize, null), opts.max_depth);
+            try testing.expect(!opts.fixed_strings);
+            try testing.expect(!opts.list_files);
             try testing.expect(opts.output.with_filename);
             try testing.expect(opts.output.line_number);
             try testing.expect(opts.output.column_number);
@@ -169,6 +171,75 @@ test "parseArgs accepts numeric and formatting flags" {
             try testing.expect(!opts.output.column_number);
             try testing.expect(opts.output.only_matching);
             try testing.expectEqual(ReportMode.count, opts.report_mode);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts fixed-string and explicit-pattern flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-F",
+        "-e",
+        "@import(\"search/root.zig\")",
+        "src",
+    });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.fixed_strings);
+            try testing.expectEqualStrings("@import(\"search/root.zig\")", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts explicit patterns that begin with a dash" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-e", "-literal", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("-literal", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts files mode without a pattern" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--files", "--null", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.list_files);
+            try testing.expectEqualStrings("", opts.pattern);
+            try testing.expect(opts.output.null_path_terminator);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("src", opts.paths[0]);
         },
@@ -710,5 +781,30 @@ test "parseArgs rejects invalid numeric flags" {
         "--pre-glob",
         "*.wrapped",
         "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-e",
+        "needle",
+        "-e",
+        "other",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "-F",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "--json",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "-l",
+        "src",
     }));
 }

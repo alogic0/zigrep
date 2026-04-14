@@ -91,6 +91,7 @@ pub fn searchEntriesSequential(
 ) !SearchResult {
     var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{
         .case_mode = options.case_mode,
+        .fixed_strings = options.fixed_strings,
         .multiline = options.multiline,
         .multiline_dotall = options.multiline_dotall,
     });
@@ -135,6 +136,30 @@ pub fn searchEntriesSequential(
     }
 
     return result;
+}
+
+pub fn runFileList(
+    allocator: std.mem.Allocator,
+    stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
+    options: CliOptions,
+) !u8 {
+    const type_matcher = try zigrep.search.types.init(allocator, options.type_adds);
+    defer type_matcher.deinit(allocator);
+    try zigrep.search.types.validateSelectedTypes(type_matcher, options.include_types, options.exclude_types);
+
+    for (options.paths) |path| {
+        _ = try search_path_runner.listPathFiles(
+            allocator,
+            stdout,
+            stderr,
+            path,
+            options,
+            type_matcher,
+        );
+    }
+
+    return 0;
 }
 
 fn searchEntriesParallel(
