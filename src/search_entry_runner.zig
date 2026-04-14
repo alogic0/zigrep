@@ -5,6 +5,7 @@ const zigrep = struct {
 const command = @import("command.zig");
 const search_reporting = @import("search_reporting.zig");
 const search_execution = @import("search_execution.zig");
+const search_output = @import("search_output.zig");
 
 // Per-file search execution.
 // This module owns file reads, preprocessing/decoding preparation, binary
@@ -15,7 +16,9 @@ pub const CliOptions = command.CliOptions;
 pub const EntryOutput = struct {
     bytes: std.ArrayListUnmanaged(u8) = .empty,
     searched_bytes: usize = 0,
+    printed_bytes: usize = 0,
     matched: bool = false,
+    match_events: usize = 0,
     skipped_binary: bool = false,
     warning_emitted: bool = false,
 
@@ -83,6 +86,10 @@ pub fn searchEntryToOwnedOutput(
     var capture: std.Io.Writer.Allocating = .init(output_allocator);
     defer capture.deinit();
 
+    if (options.output_format == .json) {
+        try search_output.writeJsonBeginEvent(&capture.writer, entry.path);
+    }
+
     const matched = try search_reporting.writeFileOutput(
         file_allocator,
         &capture.writer,
@@ -100,9 +107,35 @@ pub fn searchEntryToOwnedOutput(
         options.context_after,
     );
 
+    if (options.output_format == .json) {
+        const written = capture.written();
+        const match_events = countJsonEventType(written, "\"type\":\"match\"");
+        try search_output.writeJsonEndEvent(&capture.writer, entry.path, .{
+            .bytes_searched = search_bytes.len,
+            .bytes_printed = written.len,
+            .searches = 1,
+            .searches_with_match = if (matched) 1 else 0,
+            .matched_lines = match_events,
+            .matches = match_events,
+        });
+    }
+
+    const written = capture.written();
     return .{
         .bytes = capture.toArrayList(),
         .searched_bytes = search_bytes.len,
+        .printed_bytes = written.len,
         .matched = matched,
+        .match_events = countJsonEventType(written, "\"type\":\"match\""),
     };
+}
+
+fn countJsonEventType(bytes: []const u8, needle: []const u8) usize {
+    var count: usize = 0;
+    var start: usize = 0;
+    while (std.mem.indexOfPos(u8, bytes, start, needle)) |index| {
+        count += 1;
+        start = index + needle.len;
+    }
+    return count;
 }

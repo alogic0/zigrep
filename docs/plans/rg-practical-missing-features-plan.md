@@ -17,7 +17,9 @@ as follow-up parity work.
 From the latest direct `rg` versus `zigrep` comparison, the remaining behavior
 gaps are:
 
-- `--column` should imply line numbers the way ripgrep does
+- richer ripgrep-style `--json` parity
+- binary text-output parity for `--text`
+- binary notice parity for `--binary`
 
 ## Priority
 
@@ -31,7 +33,9 @@ Priority should stay grounded in actual usage:
 With the earlier practical slices now implemented, the remaining follow-up
 priority inside this plan should be:
 
-1. `--column` implying line numbers
+1. richer `--json` parity
+2. binary text-output parity for `--text`
+3. binary notice parity for `--binary`
 
 That ordering reflects how often these features still affect normal code-search
 work.
@@ -175,6 +179,55 @@ Current status:
 - Prefer a two-step capability model for `created`:
   - `comptime` chooses whether a backend exists for this target
   - runtime decides whether creation time is actually available now
+
+## Feature 7: Ripgrep-Style JSON Output
+
+- [ ] Compare the current custom `--json` event shape directly against ripgrep
+  and record the minimum parity target.
+- [ ] Decide whether to move toward ripgrep-style `begin` / `match` / `end` /
+  `summary` events or to keep a documented smaller schema.
+- [ ] If parity is the goal, include path encoding, line text, submatch spans,
+  and summary events in the matching shape.
+
+### JSON Guidance
+
+- Keep this as a reporting-layer change, not a search-core change.
+- Reuse existing match and count information rather than recomputing search
+  results only for JSON.
+- If full ripgrep JSON parity is too large for one slice, land the schema in
+  phases but keep the target shape explicit.
+
+## Feature 8: Binary Text Output Parity
+
+- [ ] Compare `--text` output on binary-containing files directly against
+  ripgrep and match the intended byte-display behavior.
+- [ ] Decide whether `zigrep` should print raw bytes, escaped bytes, or a mode
+  split that matches ripgrep more closely.
+- [ ] Keep binary-text behavior coherent with normal text output, JSON, and
+  replacement semantics.
+
+### Binary Text Guidance
+
+- Treat this as an output-policy question, not as a binary-detection change.
+- Be explicit about invalid UTF-8 and NUL-byte display rules.
+- Prefer one centralized display policy rather than separate ad hoc escaping
+  paths for binary-text mode.
+
+## Feature 9: Binary Match Notice Parity
+
+- [ ] Compare `--binary` notice text directly against ripgrep and decide the
+  desired parity target.
+- [ ] Include enough detail to explain why line content was suppressed, such as
+  the first binary offset if available.
+- [ ] Keep the behavior distinct from `--text`, which should still print match
+  content.
+
+### Binary Notice Guidance
+
+- Keep this as a user-facing reporting change.
+- Reuse existing binary-detection information if the offset is already known;
+  do not add expensive rescans just to decorate the notice unless justified.
+- Keep the emitted message stable and testable once the target wording is set.
 
 ## Feature 6: Single-File Explicit-Path Output Defaults
 

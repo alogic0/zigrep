@@ -104,6 +104,16 @@ pub fn runSearch(
         if (path_result.matched) result.matched = true;
         result.stats.add(path_result.stats);
     }
+    if (effective_options.output_format == .json) {
+        try search_output.writeJsonSummaryEvent(stdout, .{
+            .bytes_searched = result.stats.searched_bytes,
+            .bytes_printed = 0,
+            .searches = result.stats.searched_files,
+            .searches_with_match = result.stats.matched_files,
+            .matched_lines = 0,
+            .matches = 0,
+        });
+    }
     if (effective_options.show_stats) try writeStats(stderr, result.stats);
     return if (result.matched) 0 else 1;
 }
@@ -154,9 +164,17 @@ pub fn runStdinSearch(
         effective_output.with_filename = false;
     }
 
+    var json_capture: std.Io.Writer.Allocating = .init(allocator);
+    defer json_capture.deinit();
+    const output_writer = if (options.output_format == .json) &json_capture.writer else stdout;
+
+    if (options.output_format == .json) {
+        try search_output.writeJsonBeginEvent(output_writer, stdin_label);
+    }
+
     const matched = try search_reporting.writeFileOutput(
         allocator,
-        stdout,
+        output_writer,
         &searcher,
         stdin_label,
         search_bytes,
@@ -170,6 +188,28 @@ pub fn runStdinSearch(
         options.context_before,
         options.context_after,
     );
+
+    if (options.output_format == .json) {
+        const pre_end_written = json_capture.written();
+        const match_events = countJsonEventType(pre_end_written, "\"type\":\"match\"");
+        try search_output.writeJsonEndEvent(output_writer, stdin_label, .{
+            .bytes_searched = search_bytes.len,
+            .bytes_printed = pre_end_written.len,
+            .searches = 1,
+            .searches_with_match = if (matched) 1 else 0,
+            .matched_lines = match_events,
+            .matches = match_events,
+        });
+        try search_output.writeJsonSummaryEvent(output_writer, .{
+            .bytes_searched = search_bytes.len,
+            .bytes_printed = pre_end_written.len,
+            .searches = 1,
+            .searches_with_match = if (matched) 1 else 0,
+            .matched_lines = match_events,
+            .matches = match_events,
+        });
+        try stdout.writeAll(json_capture.written());
+    }
 
     const stats: SearchStats = .{
         .searched_files = 1,
@@ -285,4 +325,14 @@ fn writeStats(writer: *std.Io.Writer, stats: SearchStats) !void {
         "stats: searched_files={d} matched_files={d} searched_bytes={d} skipped_binary_files={d} warnings_emitted={d}\n",
         .{ stats.searched_files, stats.matched_files, stats.searched_bytes, stats.skipped_binary_files, stats.warnings_emitted },
     );
+}
+
+fn countJsonEventType(bytes: []const u8, needle: []const u8) usize {
+    var count: usize = 0;
+    var start: usize = 0;
+    while (std.mem.indexOfPos(u8, bytes, start, needle)) |index| {
+        count += 1;
+        start = index + needle.len;
+    }
+    return count;
 }

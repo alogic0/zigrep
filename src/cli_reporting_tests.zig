@@ -664,11 +664,15 @@ test "runCli json mode emits match events" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"begin\""));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"match\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"end\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"summary\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":{\"text\":"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_number\":1"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line\":\"needle one\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"lines\":{\"text\":\"needle one\"}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"submatches\":["));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -690,8 +694,11 @@ test "runCli json count mode emits count events" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"begin\""));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"end\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"summary\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":{\"text\":"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"count\":2"));
     try testing.expectEqualStrings("", run.stderr);

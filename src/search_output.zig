@@ -11,6 +11,15 @@ pub const ReplacementSegment = struct {
     replacement: []const u8,
 };
 
+pub const JsonEventStats = struct {
+    bytes_searched: usize,
+    bytes_printed: usize,
+    searches: usize = 1,
+    searches_with_match: usize,
+    matched_lines: usize,
+    matches: usize,
+};
+
 pub fn writeHeadingBlock(
     writer: *std.Io.Writer,
     path: []const u8,
@@ -27,39 +36,76 @@ pub fn writeBinaryMatchNotice(writer: *std.Io.Writer, path: []const u8) !void {
     try writer.print("{s}: binary file matches\n", .{path});
 }
 
+pub fn writeJsonBeginEvent(writer: *std.Io.Writer, path: []const u8) !void {
+    try writer.writeAll("{\"type\":\"begin\",\"data\":{\"path\":");
+    try writeJsonTextValue(writer, path);
+    try writer.writeAll("}}\n");
+}
+
 pub fn writeJsonMatchEvent(
     writer: *std.Io.Writer,
     report: zigrep.search.grep.MatchReport,
     output: OutputOptions,
 ) !void {
-    const display_slice = if (output.only_matching)
+    const only_matching = output.only_matching;
+    const display_slice = if (only_matching)
         report.line[report.match_span.start - report.line_span.start .. report.match_span.end - report.line_span.start]
     else
         report.line;
+    const absolute_offset = if (only_matching) report.match_span.start else report.line_span.start;
+    const submatch_start = if (only_matching) 0 else report.match_span.start - report.line_span.start;
+    const submatch_end = if (only_matching) display_slice.len else report.match_span.end - report.line_span.start;
 
     try writer.writeAll("{\"type\":\"match\",\"data\":{");
     try writer.writeAll("\"path\":");
-    try writeJsonString(writer, report.path);
-    try writer.print(",\"line_number\":{d},\"column_number\":{d}", .{ report.line_number, report.column_number });
-    try writer.writeAll(",\"line\":");
-    try writeJsonString(writer, display_slice);
-    try writer.print(",\"line_span\":{{\"start\":{d},\"end\":{d}}}", .{ report.line_span.start, report.line_span.end });
-    try writer.print(",\"match_span\":{{\"start\":{d},\"end\":{d}}}", .{ report.match_span.start, report.match_span.end });
+    try writeJsonTextValue(writer, report.path);
+    try writer.writeAll(",\"lines\":");
+    try writeJsonTextValue(writer, display_slice);
+    try writer.print(",\"line_number\":{d},\"absolute_offset\":{d}", .{ report.line_number, absolute_offset });
+    try writer.writeAll(",\"submatches\":[{\"match\":");
+    try writeJsonTextValue(writer, report.line[report.match_span.start - report.line_span.start .. report.match_span.end - report.line_span.start]);
+    try writer.print(",\"start\":{d},\"end\":{d}", .{ submatch_start, submatch_end });
+    try writer.writeAll("}]");
     try writer.writeAll("}}\n");
 }
 
 pub fn writeJsonCountEvent(writer: *std.Io.Writer, path: []const u8, count: usize) !void {
     try writer.writeAll("{\"type\":\"count\",\"data\":{");
     try writer.writeAll("\"path\":");
-    try writeJsonString(writer, path);
+    try writeJsonTextValue(writer, path);
     try writer.print(",\"count\":{d}}}\n", .{count});
 }
 
 pub fn writeJsonPathEvent(writer: *std.Io.Writer, path: []const u8, matched: bool) !void {
     try writer.writeAll("{\"type\":\"path\",\"data\":{");
     try writer.writeAll("\"path\":");
-    try writeJsonString(writer, path);
+    try writeJsonTextValue(writer, path);
     try writer.print(",\"matched\":{s}}}\n", .{if (matched) "true" else "false"});
+}
+
+pub fn writeJsonEndEvent(
+    writer: *std.Io.Writer,
+    path: []const u8,
+    stats: JsonEventStats,
+) !void {
+    try writer.writeAll("{\"type\":\"end\",\"data\":{");
+    try writer.writeAll("\"path\":");
+    try writeJsonTextValue(writer, path);
+    try writer.writeAll(",\"binary_offset\":null,\"stats\":{");
+    try writer.print(
+        "\"searches\":{d},\"searches_with_match\":{d},\"bytes_searched\":{d},\"bytes_printed\":{d},\"matched_lines\":{d},\"matches\":{d}",
+        .{ stats.searches, stats.searches_with_match, stats.bytes_searched, stats.bytes_printed, stats.matched_lines, stats.matches },
+    );
+    try writer.writeAll("}}}\n");
+}
+
+pub fn writeJsonSummaryEvent(writer: *std.Io.Writer, stats: JsonEventStats) !void {
+    try writer.writeAll("{\"type\":\"summary\",\"data\":{\"stats\":{");
+    try writer.print(
+        "\"searches\":{d},\"searches_with_match\":{d},\"bytes_searched\":{d},\"bytes_printed\":{d},\"matched_lines\":{d},\"matches\":{d}",
+        .{ stats.searches, stats.searches_with_match, stats.bytes_searched, stats.bytes_printed, stats.matched_lines, stats.matches },
+    );
+    try writer.writeAll("}}}\n");
 }
 
 pub fn writePathResult(writer: *std.Io.Writer, path: []const u8, output: OutputOptions) !void {
@@ -264,6 +310,12 @@ pub fn writeJsonString(writer: *std.Io.Writer, bytes: []const u8) !void {
     }
 
     try writer.writeByte('"');
+}
+
+pub fn writeJsonTextValue(writer: *std.Io.Writer, bytes: []const u8) !void {
+    try writer.writeAll("{\"text\":");
+    try writeJsonString(writer, bytes);
+    try writer.writeByte('}');
 }
 
 fn isDisplaySafeAscii(byte: u8, allow_newlines: bool) bool {

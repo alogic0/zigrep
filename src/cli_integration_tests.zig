@@ -809,7 +809,9 @@ test "runCli stdin json uses stdin path label" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":\"stdin\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"begin\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":{\"text\":\"stdin\"}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"summary\""));
     try testing.expectEqualStrings("", run.stderr);
 }
 
