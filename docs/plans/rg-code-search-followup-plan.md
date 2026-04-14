@@ -218,3 +218,6 @@ installed ripgrep code-search behavior:
 
 That keeps the follow-up work grounded in actual `rg` behavior instead of
 drifting into unverified extra features.
+
+The next practical usage-driven gaps are tracked separately in
+`docs/plans/rg-practical-missing-features-plan.md`.

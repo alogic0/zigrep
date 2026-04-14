@@ -423,8 +423,33 @@ test "parseArgs accepts repeated glob flags" {
     switch (parsed) {
         .run => |opts| {
             try testing.expectEqual(@as(usize, 2), opts.globs.len);
-            try testing.expectEqualStrings("*.zig", opts.globs[0]);
-            try testing.expectEqualStrings("!main.zig", opts.globs[1]);
+            try testing.expectEqualStrings("*.zig", opts.globs[0].pattern);
+            try testing.expect(!opts.globs[0].case_insensitive);
+            try testing.expectEqualStrings("!main.zig", opts.globs[1].pattern);
+            try testing.expect(!opts.globs[1].case_insensitive);
+            try testing.expectEqualStrings("needle", opts.pattern);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts case-insensitive glob flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--iglob", "*.zig", "--glob", "!main.zig", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(@as(usize, 2), opts.globs.len);
+            try testing.expectEqualStrings("*.zig", opts.globs[0].pattern);
+            try testing.expect(opts.globs[0].case_insensitive);
+            try testing.expectEqualStrings("!main.zig", opts.globs[1].pattern);
+            try testing.expect(!opts.globs[1].case_insensitive);
             try testing.expectEqualStrings("needle", opts.pattern);
         },
         .help, .version, .type_list => unreachable,

@@ -355,11 +355,13 @@ Practical guidance:
 `--glob` note:
 
 - `-g GLOB` or `--glob GLOB` filters searched file paths relative to each root path
+- `--iglob GLOB` applies the same filtering but matches ASCII case-insensitively
 - repeated `-g` flags are allowed
+- repeated `--iglob` flags are allowed
+- `-g` and `--iglob` can be mixed, and each glob keeps its own case-sensitivity
 - a plain glob like `*.zig` includes matching paths
 - a bang-prefixed glob like `!main.zig` excludes matching paths
 - if any positive globs are present, `zigrep` treats them as an allow-list
-- matching is currently case-sensitive only; `--iglob` is not implemented yet
 
 File type note:
 

@@ -176,6 +176,33 @@ test "runCli glob mode supports negative globs" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli glob mode supports case-insensitive globs" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "Keep.ZIG",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "skip.md",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--iglob", "*.zig", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "Keep.ZIG:1:1:needle one"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "skip.md"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli type include filter limits matches" {
     const testing = std.testing;
 

@@ -28,11 +28,16 @@ pub const ReportMode = enum {
     files_without_match,
 };
 
+pub const GlobSpec = struct {
+    pattern: []const u8,
+    case_insensitive: bool = false,
+};
+
 pub const CliOptions = struct {
     pattern: []const u8 = "",
     owned_pattern: ?[]u8 = null,
     paths: []const []const u8,
-    globs: []const []const u8 = &.{},
+    globs: []const GlobSpec = &.{},
     pre_globs: []const []const u8 = &.{},
     ignore_files: []const []const u8 = &.{},
     include_types: []const []const u8 = &.{},

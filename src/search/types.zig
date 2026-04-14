@@ -23,7 +23,7 @@ pub const Matcher = struct {
     pub fn typeMatches(self: Matcher, type_name: []const u8, path: []const u8) bool {
         const def = self.findType(type_name) orelse return false;
         for (def.globs) |pattern| {
-            if (glob.matchesPathPattern(pattern, path)) return true;
+            if (glob.matchesPathPattern(pattern, path, false)) return true;
         }
         return false;
     }

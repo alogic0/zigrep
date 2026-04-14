@@ -130,6 +130,7 @@ pub fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --pre CMD             run CMD on each selected file path before searching
         \\  --pre-glob GLOB       apply --pre only to paths matching GLOB
         \\  -g, --glob GLOB       include or exclude paths by glob
+        \\  --iglob GLOB          include or exclude paths by case-insensitive glob
         \\  --buffered            use the simpler file-reading method
         \\  --mmap                use the faster file-reading method when possible
         \\  -E, --encoding ENC    force input encoding: auto, none, utf8, latin1, utf16le, utf16be

@@ -16,6 +16,7 @@ pub const OutputOptions = command.OutputOptions;
 pub const OutputFormat = command.OutputFormat;
 pub const BinaryMode = command.BinaryMode;
 pub const ReportMode = command.ReportMode;
+pub const GlobSpec = command.GlobSpec;
 
 pub const ParseState = struct {
     include_hidden: bool = false,
@@ -54,7 +55,7 @@ pub const ParseState = struct {
 pub const ParseBuffers = struct {
     explicit_patterns: std.ArrayList([]const u8) = .empty,
     paths: std.ArrayList([]const u8) = .empty,
-    globs: std.ArrayList([]const u8) = .empty,
+    globs: std.ArrayList(GlobSpec) = .empty,
     pre_globs: std.ArrayList([]const u8) = .empty,
     ignore_files: std.ArrayList([]const u8) = .empty,
     include_types: std.ArrayList([]const u8) = .empty,

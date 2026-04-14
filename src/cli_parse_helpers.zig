@@ -5,6 +5,7 @@ const search = @import("search/root.zig");
 pub const CliError = cli_parse_state.CliError;
 pub const ParseState = cli_parse_state.ParseState;
 pub const ParseBuffers = cli_parse_state.ParseBuffers;
+pub const GlobSpec = cli_parse_state.GlobSpec;
 
 pub const ScalarFlagResult = enum {
     unhandled,
@@ -200,7 +201,17 @@ pub fn handleValueFlag(
         return true;
     }
     if (std.mem.eql(u8, arg, "-g") or std.mem.eql(u8, arg, "--glob")) {
-        try buffers.globs.append(allocator, try requireNextArg(argv, index));
+        try buffers.globs.append(allocator, .{
+            .pattern = try requireNextArg(argv, index),
+            .case_insensitive = false,
+        });
+        return true;
+    }
+    if (std.mem.eql(u8, arg, "--iglob")) {
+        try buffers.globs.append(allocator, .{
+            .pattern = try requireNextArg(argv, index),
+            .case_insensitive = true,
+        });
         return true;
     }
     if (std.mem.eql(u8, arg, "-E") or std.mem.eql(u8, arg, "--encoding")) {
