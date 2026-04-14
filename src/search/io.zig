@@ -104,20 +104,24 @@ pub fn readFile(
 }
 
 pub fn detectBinary(bytes: []const u8, options: BinaryOptions) BinaryDecision {
-    if (detectBom(bytes) != .none) return .text;
+    return if (firstBinaryOffset(bytes, options) == null) .text else .binary;
+}
+
+pub fn firstBinaryOffset(bytes: []const u8, options: BinaryOptions) ?usize {
+    if (detectBom(bytes) != .none) return null;
 
     const sample_len = @min(bytes.len, options.sample_limit);
     const sample = bytes[0..sample_len];
 
     var suspicious_controls: usize = 0;
-    for (sample) |byte| {
-        if (byte == 0) return .binary;
+    for (sample, 0..) |byte, index| {
+        if (byte == 0) return index;
         if (isSuspiciousControl(byte)) {
             suspicious_controls += 1;
-            if (suspicious_controls >= options.control_threshold) return .binary;
+            if (suspicious_controls >= options.control_threshold) return index;
         }
     }
-    return .text;
+    return null;
 }
 
 pub fn detectBom(bytes: []const u8) Bom {

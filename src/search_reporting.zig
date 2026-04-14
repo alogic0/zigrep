@@ -875,7 +875,8 @@ fn writeBinaryFileMatchNotice(
     else
         (try reportFileMatch(allocator, searcher, path, bytes, encoding)) != null;
     if (!has_match) return false;
-    try search_output.writeBinaryMatchNotice(writer, path);
+    const binary_offset = zigrep.search.io.firstBinaryOffset(bytes, .{}) orelse 0;
+    try search_output.writeBinaryMatchNotice(writer, binary_offset);
     return true;
 }
 

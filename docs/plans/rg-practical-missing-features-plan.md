@@ -215,11 +215,11 @@ Current status:
 
 ## Feature 9: Binary Match Notice Parity
 
-- [ ] Compare `--binary` notice text directly against ripgrep and decide the
+- [x] Compare `--binary` notice text directly against ripgrep and decide the
   desired parity target.
-- [ ] Include enough detail to explain why line content was suppressed, such as
+- [x] Include enough detail to explain why line content was suppressed, such as
   the first binary offset if available.
-- [ ] Keep the behavior distinct from `--text`, which should still print match
+- [x] Keep the behavior distinct from `--text`, which should still print match
   content.
 
 ### Binary Notice Guidance

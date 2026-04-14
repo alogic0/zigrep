@@ -266,7 +266,7 @@ test "runCli binary mode reports binary matches without line content" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "payload.bin: binary file matches\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "binary file matches (found \"\\0\" byte around offset 2)\n"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\\x00bb"));
     try testing.expectEqualStrings("", run.stderr);
 }

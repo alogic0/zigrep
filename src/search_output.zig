@@ -32,8 +32,8 @@ pub fn writeHeadingBlock(
     wrote_previous_group.* = true;
 }
 
-pub fn writeBinaryMatchNotice(writer: *std.Io.Writer, path: []const u8) !void {
-    try writer.print("{s}: binary file matches\n", .{path});
+pub fn writeBinaryMatchNotice(writer: *std.Io.Writer, binary_offset: usize) !void {
+    try writer.print("binary file matches (found \"\\0\" byte around offset {d})\n", .{binary_offset});
 }
 
 pub fn writeJsonBeginEvent(writer: *std.Io.Writer, path: []const u8) !void {
