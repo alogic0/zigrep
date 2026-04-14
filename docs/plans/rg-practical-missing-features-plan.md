@@ -189,12 +189,12 @@ Current status:
 
 ### Remaining Single-File Output Gap
 
-- [ ] Suppress line and column prefixes by default too when searching one
+- [x] Suppress line and column prefixes by default too when searching one
   explicit file path in normal text output.
-- [ ] Decide whether the same default should apply to `--count`,
+- [x] Decide whether the same default should apply to `--count`,
   `--only-matching`, and any other line-oriented modes, based on direct
   ripgrep behavior rather than assumption.
-- [ ] Keep explicit formatting overrides authoritative:
+- [x] Keep explicit formatting overrides authoritative:
   - `-n` / `--line-number`
   - `--column`
   - `-H` / `--with-filename`

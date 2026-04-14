@@ -30,12 +30,22 @@ fn isPathOnlyReportMode(mode: ReportMode) bool {
     return mode == .files_with_matches or mode == .files_without_match;
 }
 
-fn shouldSuppressFilenameForExplicitSingleFile(options: CliOptions) bool {
-    if (options.filename_flag_seen or options.output.heading or isPathOnlyReportMode(options.report_mode)) return false;
+fn shouldUseExplicitSingleFileDefaults(options: CliOptions) bool {
+    if (options.output.heading or isPathOnlyReportMode(options.report_mode) or options.output_format != .text) return false;
     if (options.used_default_path or options.paths.len != 1) return false;
 
     const stat = std.fs.cwd().statFile(options.paths[0]) catch return false;
     return stat.kind == .file;
+}
+
+fn applyExplicitSingleFileOutputDefaults(options: CliOptions) CliOptions {
+    var effective = options;
+    if (!shouldUseExplicitSingleFileDefaults(options)) return effective;
+
+    if (!options.filename_flag_seen) effective.output.with_filename = false;
+    if (!options.line_number_flag_seen) effective.output.line_number = false;
+    if (!options.column_number_flag_seen) effective.output.column_number = false;
+    return effective;
 }
 
 pub fn runSearch(
@@ -57,10 +67,7 @@ pub fn runSearch(
     defer type_matcher.deinit(allocator);
     try zigrep.search.types.validateSelectedTypes(type_matcher, options.include_types, options.exclude_types);
 
-    var effective_options = options;
-    if (shouldSuppressFilenameForExplicitSingleFile(options)) {
-        effective_options.output.with_filename = false;
-    }
+    const effective_options = applyExplicitSingleFileOutputDefaults(options);
 
     var result: SearchResult = .{ .matched = false };
     for (effective_options.paths) |path| {

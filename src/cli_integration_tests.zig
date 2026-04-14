@@ -951,7 +951,7 @@ test "runCli ignore-case folds case-related Unicode properties" {
     const negated_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "\\P{Lowercase}+", other_path });
     defer negated_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), negated_run.exit_code);
-    try testing.expectEqualStrings("1:1:中\n", negated_run.stdout);
+    try testing.expectEqualStrings("中\n", negated_run.stdout);
 }
 
 test "runCli accepts universal Unicode case-insensitive range" {

@@ -267,8 +267,11 @@ Code-search note:
 
 Filename default note:
 
-- when searching one explicit file path, text line output and `--count` suppress the filename prefix by default
+- when searching one explicit file path, text line output and `--only-matching` suppress filename, line-number, and column prefixes by default
+- `--count` already prints only the count value in that case
 - `-H` or `--with-filename` restores the filename prefix explicitly
+- `-n` or `--line-number` restores line numbers explicitly
+- `--column` restores columns explicitly
 - `--no-filename` still suppresses it explicitly
 - directory searches, multiple explicit paths, `--heading`, and stdin labeling keep their own existing behavior
 

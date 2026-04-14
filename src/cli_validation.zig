@@ -84,6 +84,8 @@ fn finalizeRunParse(
         .show_stats = pattern_info.show_stats,
         .quiet = state.quiet,
         .filename_flag_seen = state.filename_flag_seen,
+        .line_number_flag_seen = state.line_number_flag_seen,
+        .column_number_flag_seen = state.column_number_flag_seen,
         .fixed_strings = pattern_info.fixed_strings,
         .list_files = state.list_files,
         .sort_mode = state.sort_mode,

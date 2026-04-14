@@ -806,7 +806,7 @@ test "runCli suppresses filename by default for one explicit file" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expectEqualStrings("1:1:needle one\n", run.stdout);
+    try testing.expectEqualStrings("needle one\n", run.stdout);
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -850,7 +850,73 @@ test "runCli with-filename preserves filename for one explicit file" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "single.txt:1:1:needle one\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "single.txt:needle one\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli only-matching suppresses all prefixes by default for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\nneedle two\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--only-matching", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("needle\nneedle\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli line-number remains when explicitly requested for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\nneedle two\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "-n", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("1:needle one\n2:needle two\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli column remains when explicitly requested for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\nneedle two\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--column", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("1:needle one\n1:needle two\n", run.stdout);
     try testing.expectEqualStrings("", run.stderr);
 }
 
