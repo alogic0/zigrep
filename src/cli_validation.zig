@@ -81,6 +81,7 @@ fn finalizeRunParse(
         .context_before = state.context_before,
         .context_after = state.context_after,
         .show_stats = pattern_info.show_stats,
+        .quiet = state.quiet,
         .fixed_strings = pattern_info.fixed_strings,
         .list_files = state.list_files,
         .output = state.output,

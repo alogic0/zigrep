@@ -118,8 +118,11 @@ pub fn listPathFiles(
 
     var listed: usize = 0;
     for (filtered_entries) |entry| {
-        try search_output.writePathResult(stdout, entry.path, options.output);
+        if (!options.quiet) {
+            try search_output.writePathResult(stdout, entry.path, options.output);
+        }
         listed += 1;
+        if (options.quiet) break;
     }
 
     return listed;

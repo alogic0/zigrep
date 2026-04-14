@@ -39,6 +39,7 @@ pub const ParseState = struct {
     context_before: usize = 0,
     context_after: usize = 0,
     show_stats: bool = false,
+    quiet: bool = false,
     fixed_strings: bool = false,
     list_files: bool = false,
     output: OutputOptions = .{},

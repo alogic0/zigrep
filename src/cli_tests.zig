@@ -51,6 +51,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expectEqual(OutputFormat.text, opts.output_format);
             try testing.expectEqual(ReportMode.lines, opts.report_mode);
             try testing.expect(!opts.show_stats);
+            try testing.expect(!opts.quiet);
             try testing.expect(!opts.invert_match);
         },
         .help => unreachable,
@@ -262,6 +263,27 @@ test "parseArgs treats stats as a no-op in files mode" {
         .run => |opts| {
             try testing.expect(opts.list_files);
             try testing.expect(!opts.show_stats);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts quiet mode" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--quiet", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.quiet);
+            try testing.expectEqualStrings("needle", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
         },
         .help, .version, .type_list => unreachable,
     }

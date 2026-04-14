@@ -119,6 +119,34 @@ test "runCli repeated explicit patterns match any branch" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli explicit patterns can begin with a dash" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "-dash here\nplain text\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-e",
+        "-dash",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:-dash here"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "plain text"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli repeated fixed-string explicit patterns escape each branch independently" {
     const testing = std.testing;
 
@@ -151,6 +179,41 @@ test "runCli repeated fixed-string explicit patterns escape each branch independ
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli repeated fixed-string explicit patterns handle import literals and dash-prefixed literals" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data =
+            "@import(\"search/root.zig\")\n" ++
+            "-dash literal\n" ++
+            "@import(\"search/other.zig\")\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-F",
+        "-e",
+        "@import(\"search/root.zig\")",
+        "-e",
+        "-dash",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:@import(\"search/root.zig\")"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:-dash literal"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "@import(\"search/other.zig\")"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli treats stats as a no-op in files mode" {
     const testing = std.testing;
 
@@ -170,6 +233,60 @@ test "runCli treats stats as a no-op in files mode" {
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "shown.txt\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli files mode supports glob filters" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "main.zig",
+        .data = "const x = 1;\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "README.md",
+        .data = "# readme\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "-g", "*.zig", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "main.zig\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "README.md"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli files mode supports type filters" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "main.zig",
+        .data = "const x = 1;\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "README.md",
+        .data = "# readme\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "-t", "zig", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "main.zig\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "README.md"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -393,6 +510,95 @@ test "runCli unrestricted mode widens filtering progressively" {
     try testing.expect(std.mem.containsAtLeast(u8, three_u.stdout, 1, "ignored.txt:1:1:needle ignored"));
     try testing.expect(std.mem.containsAtLeast(u8, three_u.stdout, 1, ".hidden.txt:1:1:needle hidden"));
     try testing.expect(std.mem.containsAtLeast(u8, three_u.stdout, 1, "binary.bin"));
+}
+
+test "runCli files mode honors unrestricted filtering changes" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = ".gitignore",
+        .data = "ignored.txt\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "ignored.txt",
+        .data = "ignored\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = ".hidden.txt",
+        .data = "hidden\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const one_u = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "-u", root_path });
+    defer one_u.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), one_u.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, one_u.stdout, 1, "ignored.txt\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, one_u.stdout, 1, ".hidden.txt"));
+
+    const two_u = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "-uu", root_path });
+    defer two_u.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), two_u.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, two_u.stdout, 1, "ignored.txt\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, two_u.stdout, 1, ".hidden.txt\n"));
+}
+
+test "runCli quiet suppresses search output and returns match status" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "sample.txt",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const hit = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--quiet", "needle", root_path });
+    defer hit.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), hit.exit_code);
+    try testing.expectEqualStrings("", hit.stdout);
+    try testing.expectEqualStrings("", hit.stderr);
+
+    const miss = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--quiet", "absent", root_path });
+    defer miss.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), miss.exit_code);
+    try testing.expectEqualStrings("", miss.stdout);
+    try testing.expectEqualStrings("", miss.stderr);
+}
+
+test "runCli files quiet suppresses output and returns candidate-file status" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "shown.txt",
+        .data = "shown\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const hit = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "--quiet", root_path });
+    defer hit.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), hit.exit_code);
+    try testing.expectEqualStrings("", hit.stdout);
+    try testing.expectEqualStrings("", hit.stderr);
+
+    const miss = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "--quiet", "-g", "*.zig", root_path });
+    defer miss.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), miss.exit_code);
+    try testing.expectEqualStrings("", miss.stdout);
+    try testing.expectEqualStrings("", miss.stderr);
 }
 
 test "runCli ignore-case matches differing literal case" {

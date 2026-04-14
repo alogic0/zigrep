@@ -24,13 +24,13 @@ When used as a substitute for `rg` in this repository:
 - file-only match search works
 - glob filtering works
 - JSON output works
-- plain file listing does not exist
-- exact literal code search still requires regex escaping
-- patterns that begin with `-` still depend on positional parsing tricks
+- plain file listing now exists via `--files`
+- exact literal code search now works via `-F` / `--fixed-strings`
+- patterns that begin with `-` can now be passed explicitly via `-e`
 
 The practical result is that `zigrep` can replace `grep`-style content search
-today, but it cannot yet replace the most common `rg` code-navigation workflow
-without falling back to `find` or careful manual escaping.
+today and now covers the main local `rg`-style code-navigation workflow for
+file listing, literal snippet search, and explicit awkward-pattern passing.
 
 ## Scope
 
@@ -53,11 +53,11 @@ This plan does not include:
 
 ## Feature 1: `--files`
 
-- [ ] Add `--files` as a path-enumeration mode that lists candidate files after
+- [x] Add `--files` as a path-enumeration mode that lists candidate files after
   traversal, ignore filtering, glob filtering, hidden-file policy, symlink
   policy, and type filtering.
-- [ ] Make `--files` skip regex compilation and matching entirely.
-- [ ] Reuse existing path-output formatting where appropriate, including
+- [x] Make `--files` skip regex compilation and matching entirely.
+- [x] Reuse existing path-output formatting where appropriate, including
   `--null`.
 - [ ] Decide and document whether `--files` should reject reporting flags that
   only make sense for match output, such as `-n`, `-o`, `-c`, `-A`, `-B`, and
@@ -82,12 +82,12 @@ This plan does not include:
 
 ## Feature 2: Fixed-String Search
 
-- [ ] Add `-F` / `--fixed-strings`.
-- [ ] Define fixed-string semantics in plain terms:
+- [x] Add `-F` / `--fixed-strings`.
+- [x] Define fixed-string semantics in plain terms:
   - the pattern is interpreted literally
   - regex metacharacters lose special meaning
   - case-mode flags still apply
-- [ ] Decide whether fixed-string matching should lower through the existing
+- [x] Decide whether fixed-string matching should lower through the existing
   regex/HIR path as an escaped literal pattern or through a dedicated literal
   search path.
 - [ ] Keep invalid-UTF-8 and raw-byte behavior aligned with existing literal
@@ -110,9 +110,9 @@ This plan does not include:
 
 ## Feature 3: `-e` / `--regexp`
 
-- [ ] Add `-e PATTERN` and `--regexp PATTERN`.
-- [ ] Support patterns that begin with `-` without requiring `--`.
-- [ ] Allow at least one explicit pattern source through `-e`, even if the
+- [x] Add `-e PATTERN` and `--regexp PATTERN`.
+- [x] Support patterns that begin with `-` without requiring `--`.
+- [x] Allow at least one explicit pattern source through `-e`, even if the
   first non-flag positional pattern remains supported for compatibility.
 - [ ] Decide and document whether multiple `-e` flags are:
   - rejected for now
@@ -126,22 +126,18 @@ This plan does not include:
 
 ### Recommended Initial Policy
 
-- accept one effective pattern source for now
-- allow either:
-  - one positional pattern with no `-e`
-  - one `-e` / `--regexp` pattern with no positional pattern
-- reject mixed or repeated pattern sources until multi-pattern behavior is
-  designed intentionally
+- repeated `-e` is allowed
+- positional pattern plus any `-e` remains invalid for now
+- repeated `-e` becomes one effective OR-style search
 
-That keeps the parser simple while still solving the immediate shell-ergonomic
-problem.
+That keeps the parser simple while matching the current implemented behavior.
 
 ## Cross-Cutting Parser Cleanup
 
-- [ ] Update `src/cli_parse_state.zig`, `src/cli_parse_helpers.zig`, and
+- [x] Update `src/cli_parse_state.zig`, `src/cli_parse_helpers.zig`, and
   `src/cli_validation.zig` so pattern-source handling is explicit instead of
   being coupled only to “first non-flag argument wins”.
-- [ ] Represent pattern mode explicitly in parsed options:
+- [x] Represent pattern mode explicitly in parsed options:
   - regex pattern
   - fixed-string pattern
   - file-list mode with no pattern
@@ -150,20 +146,20 @@ problem.
 
 ## Cross-Cutting Search-Layer Cleanup
 
-- [ ] Avoid forcing `search_runner.runSearch(...)` and
+- [x] Avoid forcing `search_runner.runSearch(...)` and
   `search_path_runner.searchPath(...)` through a fake searcher setup for
   `--files`.
-- [ ] Make the dispatch layer choose between:
+- [x] Make the dispatch layer choose between:
   - search execution
   - type listing
   - file listing
-- [ ] Keep reporting ownership narrow:
+- [x] Keep reporting ownership narrow:
   - path-only emission should reuse existing path output helpers
   - match reporting should stay separate
 
 ## Validation
 
-- [ ] Add end-to-end CLI coverage for the new flags and their interactions.
+- [x] Add end-to-end CLI coverage for the new flags and their interactions.
 - [ ] Add regression coverage for code-search examples used in this repo:
   - listing all tracked candidate source files with `--files`
   - searching for `@import("search/root.zig")` with `-F`
@@ -172,11 +168,11 @@ problem.
 
 ## Suggested Implementation Order
 
-- [ ] 1. Add explicit pattern-source parsing for `-e` and file-list mode.
-- [ ] 2. Add `--files` as a dispatch/report mode that bypasses regex compile.
-- [ ] 3. Add `-F` / `--fixed-strings` with the smallest coherent semantics.
+- [x] 1. Add explicit pattern-source parsing for `-e` and file-list mode.
+- [x] 2. Add `--files` as a dispatch/report mode that bypasses regex compile.
+- [x] 3. Add `-F` / `--fixed-strings` with the smallest coherent semantics.
 - [ ] 4. Tighten validation for invalid flag combinations in file-list mode.
-- [ ] 5. Add end-to-end tests for the new developer-search workflows.
+- [x] 5. Add end-to-end tests for the new developer-search workflows.
 
 ## Outcome
 

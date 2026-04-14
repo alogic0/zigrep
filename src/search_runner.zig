@@ -125,6 +125,11 @@ pub fn searchEntriesSequential(
         result.stats.searched_files += 1;
         result.stats.searched_bytes += entry_output.searched_bytes;
         if (entry_output.matched) {
+            if (options.quiet) {
+                result.matched = true;
+                result.stats.matched_files += 1;
+                return result;
+            }
             if (options.output.heading) {
                 try search_output.writeHeadingBlock(stdout, entry.path, entry_output.bytes.items, &wrote_heading_group);
             } else {
@@ -149,7 +154,7 @@ pub fn runFileList(
     try zigrep.search.types.validateSelectedTypes(type_matcher, options.include_types, options.exclude_types);
 
     for (options.paths) |path| {
-        _ = try search_path_runner.listPathFiles(
+        const listed = try search_path_runner.listPathFiles(
             allocator,
             stdout,
             stderr,
@@ -157,9 +162,10 @@ pub fn runFileList(
             options,
             type_matcher,
         );
+        if (options.quiet and listed != 0) return 0;
     }
 
-    return 0;
+    return if (options.quiet) 1 else 0;
 }
 
 fn searchEntriesParallel(
@@ -170,7 +176,7 @@ fn searchEntriesParallel(
     schedule: zigrep.search.schedule.Plan,
 ) !SearchResult {
     const worker_allocator = std.heap.smp_allocator;
-    if (schedule.worker_count <= 1) {
+    if (options.quiet or schedule.worker_count <= 1) {
         return searchEntriesSequential(worker_allocator, stdout, stderr, entries, options);
     }
     return search_parallel.searchEntriesParallel(stdout, stderr, entries, options, schedule);

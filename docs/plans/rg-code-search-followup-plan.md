@@ -30,9 +30,9 @@ behavior is:
 
 Close the remaining ripgrep-confirmed gaps in `zigrep` by adding:
 
-- repeated `-e` support
-- repeated `-e` composition under `-F`
 - ripgrep-aligned `--files` flag interactions
+- explicit documentation and remaining cleanup for the already-landed repeated
+  `-e` and repeated `-e` with `-F` behavior
 - tests proving those behaviors against the existing traversal/filter model
 
 ## Current Gap
@@ -46,20 +46,20 @@ Close the remaining ripgrep-confirmed gaps in `zigrep` by adding:
 
 The remaining mismatch is:
 
-- repeated `-e` still errors instead of searching all provided patterns
-- repeated `-e` under `-F` is therefore also missing
-- `--files` behavior should be tightened around ripgrep-confirmed flag
-  interactions, especially `--stats` and filtering combinations
+- `--files` behavior should be tightened around ripgrep-confirmed filtering
+  combinations and documented more explicitly
 - `--quiet` does not yet have ripgrep-style meaning for `--files`
+- `--quiet` now exists, but `--files` still needs stricter ripgrep-style
+  traversal early-stop behavior
 
 ## Scope
 
 This plan includes:
 
-- repeated `-e`
-- repeated `-e` with `-F`
 - `--files` parity cleanup for confirmed flag interactions
 - `--quiet` support for `--files`
+- any remaining tests needed to lock in the already-landed repeated `-e`,
+  repeated `-e` with `-F`, and `--files` behavior
 - end-to-end tests for those workflows
 
 This plan does not include:
@@ -69,15 +69,40 @@ This plan does not include:
 - extra code-search features not already confirmed in `rg`
 - broader ripgrep parity outside this workflow slice
 
+## Implementation Guardrails
+
+Use the smallest implementation that fits the current architecture:
+
+- prefer CLI/command-layer composition for repeated `-e` instead of introducing
+  a broader pattern-set abstraction unless a concrete correctness problem forces
+  it
+- keep `--files` as a distinct path-only command/report mode and do not route
+  it through fake empty-pattern search setup
+- keep repeated `-e` with `-F` on the current escaped-regex lowering path
+  unless tests expose a real semantic problem
+- keep reporting ownership narrow:
+  - path-only output should stay on the existing path-output helpers
+  - match reporting should stay on the existing search-reporting path
+
+Avoid these implementation directions:
+
+- adding a new general multi-pattern abstraction before it is clearly needed
+- special-casing `--files` by faking search execution instead of using the
+  existing file-list dispatch path
+- adding a dedicated literal-set engine in this slice without a demonstrated
+  correctness or architecture need
+- adding `--quiet` only as a one-off `--files` hack if broader quiet-mode CLI
+  surface is expected shortly after
+
 ## Feature 1: Repeated `-e`
 
-- [ ] Allow `-e` / `--regexp` to be provided multiple times.
-- [ ] Define the effective search semantics as “match at least one provided
+- [x] Allow `-e` / `--regexp` to be provided multiple times.
+- [x] Define the effective search semantics as “match at least one provided
   pattern,” matching ripgrep’s documented behavior.
-- [ ] Decide whether the initial implementation should compose repeated `-e`
+- [x] Decide whether the initial implementation should compose repeated `-e`
   into one alternation string at the CLI/command layer or represent them as a
   small explicit pattern list internally.
-- [ ] Keep the current dash-prefixed explicit-pattern support intact.
+- [x] Keep the current dash-prefixed explicit-pattern support intact.
 
 ### Recommended Initial Policy
 
@@ -91,11 +116,11 @@ abstraction up front.
 
 ## Feature 2: Repeated `-e` With `-F`
 
-- [ ] Make repeated explicit patterns compose correctly under fixed-string mode.
-- [ ] Ensure each explicit fixed string is escaped independently before
+- [x] Make repeated explicit patterns compose correctly under fixed-string mode.
+- [x] Ensure each explicit fixed string is escaped independently before
   composition.
-- [ ] Preserve current case-mode behavior when multiple fixed strings are used.
-- [ ] Add regression tests for repeated `-e` under `-F` with literals such as:
+- [x] Preserve current case-mode behavior when multiple fixed strings are used.
+- [x] Add regression tests for repeated `-e` under `-F` with literals such as:
   - `a.b`
   - `[x]`
   - `@import("search/root.zig")`
@@ -111,13 +136,13 @@ abstraction up front.
 
 - [ ] Verify and document which existing traversal/filter flags compose with
   `--files`.
-- [ ] Keep `--files` compatible with:
+- [x] Keep `--files` compatible with:
   - `--null`
   - `-g`
   - `-t` / `-T`
   - `--hidden`
   - `-u` / `-uu` / `-uuu`
-- [ ] Change `--stats` handling to match ripgrep’s documented behavior:
+- [x] Change `--stats` handling to match ripgrep’s documented behavior:
   - no effect in `--files`, `--files-with-matches`, and
     `--files-without-match` modes
   - no hard error just because `--stats` is present
@@ -132,12 +157,12 @@ abstraction up front.
 
 ## Feature 4: `--quiet` For `--files`
 
-- [ ] Add `-q` / `--quiet` if it is not already present as part of this parity
+- [x] Add `-q` / `--quiet` if it is not already present as part of this parity
   slice, or at minimum support the ripgrep-confirmed `--files` early-stop
   behavior once quiet mode exists.
 - [ ] In `--files` mode, stop traversal/output after the first file that would
   be searched.
-- [ ] Define the exit-code behavior consistently with existing search-mode
+- [x] Define the exit-code behavior consistently with existing search-mode
   quiet semantics if quiet mode already exists elsewhere by the time this is
   implemented.
 
@@ -149,9 +174,9 @@ abstraction up front.
 
 ## Cross-Cutting Parser And Command Work
 
-- [ ] Refactor explicit pattern handling so it can represent one or more `-e`
+- [x] Refactor explicit pattern handling so it can represent one or more `-e`
   patterns cleanly instead of a single optional slot.
-- [ ] Keep file-list mode as a distinct command/report path rather than routing
+- [x] Keep file-list mode as a distinct command/report path rather than routing
   through fake empty-pattern search behavior.
 - [ ] Preserve precise CLI errors for:
   - missing patterns
@@ -160,9 +185,9 @@ abstraction up front.
 
 ## Validation
 
-- [ ] Add parser tests for repeated `-e`.
-- [ ] Add parser tests for repeated `-e` with `-F`.
-- [ ] Add integration tests for:
+- [x] Add parser tests for repeated `-e`.
+- [x] Add parser tests for repeated `-e` with `-F`.
+- [x] Add integration tests for:
   - `-e foo -e bar`
   - `-F -e 'a.b' -e '[x]'`
   - `-e -dash`
@@ -170,18 +195,18 @@ abstraction up front.
   - `--files -t zig`
   - `--files -uu`
   - `--files --stats`
-- [ ] If quiet mode lands here, add integration coverage for `--files --quiet`.
-- [ ] Run `zig build test`
+- [x] If quiet mode lands here, add integration coverage for `--files --quiet`.
+- [x] Run `zig build test`
 
 ## Suggested Implementation Order
 
-- [ ] 1. Add repeated `-e` parsing and internal representation.
-- [ ] 2. Implement repeated-pattern composition for regex and fixed-string
+- [x] 1. Add repeated `-e` parsing and internal representation.
+- [x] 2. Implement repeated-pattern composition for regex and fixed-string
   modes.
-- [ ] 3. Align `--files` with ripgrep-confirmed `--stats` and filtering
+- [x] 3. Align `--files` with ripgrep-confirmed `--stats` and filtering
   behavior.
 - [ ] 4. Add or defer `--quiet` for `--files` explicitly.
-- [ ] 5. Expand integration coverage for the ripgrep-confirmed workflows.
+- [x] 5. Expand integration coverage for the ripgrep-confirmed workflows.
 
 ## Outcome
 

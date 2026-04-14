@@ -48,6 +48,10 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
         state.show_stats = true;
         return .handled;
     }
+    if (std.mem.eql(u8, arg, "-q") or std.mem.eql(u8, arg, "--quiet")) {
+        state.quiet = true;
+        return .handled;
+    }
     if (std.mem.eql(u8, arg, "--null")) {
         state.output.null_path_terminator = true;
         return .handled;
