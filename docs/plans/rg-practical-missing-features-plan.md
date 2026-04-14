@@ -8,13 +8,18 @@ The goal here is not full ripgrep parity. The goal is to record the concrete
 features that still forced a fallback or would likely force one in day-to-day
 use.
 
+The plan was mostly completed once, but a fresh direct `rg` versus `zigrep`
+comparison still showed a small number of behavior-level gaps worth tracking
+as follow-up parity work.
+
 ## Observed Missing Features
 
-From direct `zigrep` use in this repository, the remaining missing features
-were:
+From the latest direct `rg` versus `zigrep` comparison, the remaining behavior
+gaps are:
 
-- timestamp-based sorting modes
-- ripgrep-style single-file default filename suppression
+- more ripgrep-like unsupported `--sort created` behavior
+- ripgrep-style single-file default output suppression for line and column
+  prefixes, not just the filename prefix
 
 ## Priority
 
@@ -28,8 +33,8 @@ Priority should stay grounded in actual usage:
 With the earlier practical slices now implemented, the remaining follow-up
 priority inside this plan should be:
 
-1. timestamp-based sorting modes
-2. single-file default filename behavior
+1. single-file explicit-path output defaults
+2. unsupported `--sort created` parity
 
 That ordering reflects how often these features still affect normal code-search
 work.
@@ -141,6 +146,22 @@ Current status:
 - `modified` and `accessed` are implemented with stat-based post-collection ordering
 - `created` is recognized but currently rejected as unsupported because the
   current portable stat surface does not expose file birth time directly
+- the remaining parity gap is user-facing behavior:
+  - `rg` reports a specific creation-time-unavailable message
+  - `zigrep` currently reports the generic `UnsupportedSortMode` error name
+
+### Remaining Created-Sort Parity Gap
+
+- [x] Keep `created` as a recognized sort mode.
+- [x] Change the runtime failure path to report a ripgrep-like
+  creation-time-unavailable message instead of a generic internal error name.
+- [x] Keep the current non-implementation of actual birth-time sorting unless
+  a portable stat source is added later.
+- [x] Implement platform targeting with a narrow split:
+  - use Zig `comptime` only to select which created-time backend code is
+    compiled for the target
+  - keep user-facing support decisions runtime-based when actual availability
+    can still vary by filesystem or runtime environment
 
 ### Timestamp Sort Guidance
 
@@ -149,8 +170,16 @@ Current status:
 - Prefer explicit stat-based ordering over traversal-time heuristics.
 - Keep sorting single-threaded when a timestamp mode is active, consistent with
   the current path-sort behavior.
+- Keep the CLI surface stable across builds; `created` should stay recognized
+  even when the compiled target has no usable implementation backend.
+- Isolate target-specific code behind one small capability/backend layer rather
+  than scattering `comptime` conditionals through parsing, reporting, or
+  search orchestration.
+- Prefer a two-step capability model for `created`:
+  - `comptime` chooses whether a backend exists for this target
+  - runtime decides whether creation time is actually available now
 
-## Feature 6: Single-File Filename Defaults
+## Feature 6: Single-File Explicit-Path Output Defaults
 
 - [x] Make default filename-prefix behavior match ripgrep more closely when the
   search target is one explicit file.
@@ -158,11 +187,27 @@ Current status:
 - [x] Preserve `-H` / `--with-filename`, `--no-filename`, `--heading`, and
   multi-path behavior as explicit overrides.
 
+### Remaining Single-File Output Gap
+
+- [ ] Suppress line and column prefixes by default too when searching one
+  explicit file path in normal text output.
+- [ ] Decide whether the same default should apply to `--count`,
+  `--only-matching`, and any other line-oriented modes, based on direct
+  ripgrep behavior rather than assumption.
+- [ ] Keep explicit formatting overrides authoritative:
+  - `-n` / `--line-number`
+  - `--column`
+  - `-H` / `--with-filename`
+  - `--no-filename`
+  - `--heading`
+
 ### Filename Guidance
 
 - Keep this as a CLI/reporting policy adjustment, not a traversal change.
 - Avoid broad output-policy refactors; the gap is specifically the default case
   for one explicit file versus multi-file search.
+- Prefer one centralized “effective output defaults” decision point rather than
+  scattering explicit-file checks across multiple reporting functions.
 
 ### Design Guidance
 
@@ -197,3 +242,5 @@ that still came up during real use:
 - pipeline-friendly stdin search
 - basic result ordering controls
 - an output-only replacement story with capture expansion
+- closer behavior parity for explicit single-file output defaults
+- closer behavior parity for unsupported `--sort created`

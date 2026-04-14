@@ -3,6 +3,7 @@ const zigrep = struct {
     pub const search = @import("search/root.zig");
 };
 const command = @import("command.zig");
+const sort_capability = @import("sort_capability.zig");
 const search_execution = @import("search_execution.zig");
 const search_filtering = @import("search_filtering.zig");
 const search_output = @import("search_output.zig");
@@ -16,7 +17,12 @@ pub const CliOptions = command.CliOptions;
 pub const SearchResult = search_result.SearchResult;
 
 fn validateSortMode(options: CliOptions) !void {
-    if (options.sort_mode == .created) return error.UnsupportedSortMode;
+    if (options.sort_mode != .created) return;
+
+    return switch (sort_capability.createdSortCapability()) {
+        .available => {},
+        .unavailable_platform, .unavailable_runtime => error.CreationTimeUnavailable,
+    };
 }
 
 fn sortEntries(entries: []zigrep.search.walk.Entry, options: CliOptions) void {

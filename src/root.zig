@@ -12,6 +12,7 @@ pub const search_reporting = @import("search_reporting.zig");
 pub const command = @import("command.zig");
 pub const cli = @import("cli.zig");
 pub const config = @import("config.zig");
+pub const sort_capability = @import("sort_capability.zig");
 pub const app_version = build_options.app_version;
 
 pub fn compile(

@@ -95,6 +95,20 @@ test "writeFatalError omits usage for runtime search errors" {
     try testing.expectEqualStrings("error: FileNotFound\n", stderr_capture.written());
 }
 
+test "writeFatalError prints ripgrep-like created-sort message" {
+    const testing = std.testing;
+
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    try writeFatalError(&stderr_capture.writer, "zigrep", error.CreationTimeUnavailable);
+
+    try testing.expectEqualStrings(
+        "sorting by creation time isn't supported: creation time is not available on this platform currently\n",
+        stderr_capture.written(),
+    );
+}
+
 test "parseArgs treats version-like args as positional after the pattern starts" {
     const testing = std.testing;
 

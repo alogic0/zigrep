@@ -279,7 +279,7 @@ Filename default note:
 - `--sort accessed` and `--sortr accessed` sort results by file access time
 - timestamp sorts use path order as a deterministic tie-breaker
 - sorting stays in the collected result-ordering layer and forces single-threaded reporting
-- `created` is recognized as a sort mode but is currently rejected as unsupported on the current portable implementation surface
+- `created` is recognized as a sort mode but is currently rejected with an explicit creation-time-unavailable message on the current portable implementation surface
 
 `--quiet` note:
 

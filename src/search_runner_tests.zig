@@ -372,7 +372,7 @@ test "runSearch sort path disables parallel reordering and sorts descending" {
     try testing.expectEqualStrings("", stderr_capture.written());
 }
 
-test "runSearch rejects unsupported created-time sort" {
+test "runSearch reports creation-time-unavailable sort" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -391,7 +391,7 @@ test "runSearch rejects unsupported created-time sort" {
     var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
     defer stderr_capture.deinit();
 
-    try testing.expectError(error.UnsupportedSortMode, runner.runSearch(
+    try testing.expectError(error.CreationTimeUnavailable, runner.runSearch(
         testing.allocator,
         &stdout_capture.writer,
         &stderr_capture.writer,

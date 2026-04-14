@@ -2,6 +2,7 @@ const std = @import("std");
 const zigrep = @import("zigrep");
 const cli = zigrep.cli;
 const config = zigrep.config;
+const sort_capability = zigrep.sort_capability;
 
 // Top-level CLI entry orchestration.
 // This module resolves config, handles help/version, and bridges parsed CLI
@@ -11,6 +12,11 @@ pub const app_version = zigrep.app_version;
 const stdin_max_bytes = std.math.maxInt(usize);
 
 pub fn writeFatalError(writer: *std.Io.Writer, argv0: []const u8, err: anyerror) !void {
+    if (err == error.CreationTimeUnavailable) {
+        try writer.print("{s}\n", .{sort_capability.createdSortUnavailableMessage()});
+        return;
+    }
+
     try writer.print("error: {s}\n", .{@errorName(err)});
     if (cli.isUsageError(err)) {
         try cli.writeUsage(writer, argv0);
