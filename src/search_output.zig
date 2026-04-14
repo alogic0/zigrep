@@ -22,6 +22,8 @@ pub const JsonEventStats = struct {
     searches_with_match: usize,
     matched_lines: usize,
     matches: usize,
+    elapsed_ns: ?u64 = null,
+    elapsed_total_ns: ?u64 = null,
 };
 
 pub fn writeHeadingBlock(
@@ -91,6 +93,11 @@ pub fn writeJsonEndEvent(
     try writer.writeAll("\"path\":");
     try writeJsonTextValue(writer, path);
     try writer.writeAll(",\"binary_offset\":null,\"stats\":{");
+    if (stats.elapsed_ns) |elapsed_ns| {
+        try writer.writeAll("\"elapsed\":");
+        try writeJsonElapsed(writer, elapsed_ns);
+        try writer.writeByte(',');
+    }
     try writer.print(
         "\"searches\":{d},\"searches_with_match\":{d},\"bytes_searched\":{d},\"bytes_printed\":{d},\"matched_lines\":{d},\"matches\":{d}",
         .{ stats.searches, stats.searches_with_match, stats.bytes_searched, stats.bytes_printed, stats.matched_lines, stats.matches },
@@ -99,12 +106,36 @@ pub fn writeJsonEndEvent(
 }
 
 pub fn writeJsonSummaryEvent(writer: *std.Io.Writer, stats: JsonEventStats) !void {
-    try writer.writeAll("{\"type\":\"summary\",\"data\":{\"stats\":{");
+    try writer.writeAll("{\"type\":\"summary\",\"data\":{");
+    if (stats.elapsed_total_ns) |elapsed_total_ns| {
+        try writer.writeAll("\"elapsed_total\":");
+        try writeJsonElapsed(writer, elapsed_total_ns);
+        try writer.writeByte(',');
+    }
+    try writer.writeAll("\"stats\":{");
+    if (stats.elapsed_ns) |elapsed_ns| {
+        try writer.writeAll("\"elapsed\":");
+        try writeJsonElapsed(writer, elapsed_ns);
+        try writer.writeByte(',');
+    }
     try writer.print(
         "\"searches\":{d},\"searches_with_match\":{d},\"bytes_searched\":{d},\"bytes_printed\":{d},\"matched_lines\":{d},\"matches\":{d}",
         .{ stats.searches, stats.searches_with_match, stats.bytes_searched, stats.bytes_printed, stats.matched_lines, stats.matches },
     );
     try writer.writeAll("}}}\n");
+}
+
+fn writeJsonElapsed(writer: *std.Io.Writer, elapsed_ns: u64) !void {
+    const secs = elapsed_ns / std.time.ns_per_s;
+    const nanos = elapsed_ns % std.time.ns_per_s;
+    const rounded_us = (elapsed_ns + 500) / 1000;
+    const human_secs = rounded_us / std.time.us_per_s;
+    const human_fraction = rounded_us % std.time.us_per_s;
+
+    try writer.print(
+        "{{\"secs\":{d},\"nanos\":{d},\"human\":\"{d}.{d:0>6}s\"}}",
+        .{ secs, nanos, human_secs, human_fraction },
+    );
 }
 
 pub fn writePathResult(writer: *std.Io.Writer, path: []const u8, output: OutputOptions) !void {

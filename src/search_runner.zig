@@ -54,6 +54,7 @@ pub fn runSearch(
     stderr: *std.Io.Writer,
     options: CliOptions,
 ) !u8 {
+    var total_timer = try std.time.Timer.start();
     if (options.multiline and
         (options.invert_match or
             options.max_count != null or
@@ -71,7 +72,7 @@ pub fn runSearch(
 
     var result: SearchResult = .{ .matched = false };
     for (effective_options.paths) |path| {
-        if (effective_options.buffer_output) {
+        if (effective_options.buffer_output or effective_options.output_format == .json) {
             var buffered_output: std.Io.Writer.Allocating = .init(allocator);
             defer buffered_output.deinit();
 
@@ -87,6 +88,12 @@ pub fn runSearch(
             );
             if (path_result.matched) result.matched = true;
             result.stats.add(path_result.stats);
+            if (effective_options.output_format == .json) {
+                result.stats.matched_lines -= path_result.stats.matched_lines;
+                result.stats.matches -= path_result.stats.matches;
+                result.stats.matched_lines += countDistinctJsonLineNumbers(buffered_output.written());
+                result.stats.matches += countJsonEventType(buffered_output.written(), "\"type\":\"match\"");
+            }
             try stdout.writeAll(buffered_output.written());
             continue;
         }
@@ -112,6 +119,8 @@ pub fn runSearch(
             .searches_with_match = result.stats.matched_files,
             .matched_lines = result.stats.matched_lines,
             .matches = result.stats.matches,
+            .elapsed_ns = result.stats.elapsed_ns,
+            .elapsed_total_ns = total_timer.read(),
         });
     }
     if (effective_options.show_stats) try writeStats(stderr, result.stats);
@@ -125,6 +134,7 @@ pub fn runStdinSearch(
     options: CliOptions,
     stdin_bytes: []const u8,
 ) !u8 {
+    var total_timer = try std.time.Timer.start();
     if (options.preprocessor != null or options.list_files) return error.InvalidFlagCombination;
     if (options.multiline and
         (options.invert_match or
@@ -168,6 +178,7 @@ pub fn runStdinSearch(
     var json_capture: std.Io.Writer.Allocating = .init(allocator);
     defer json_capture.deinit();
     const output_writer = if (options.output_format == .json) &json_capture.writer else stdout;
+    var search_timer = try std.time.Timer.start();
 
     if (options.output_format == .json) {
         try search_output.writeJsonBeginEvent(output_writer, stdin_label);
@@ -195,6 +206,7 @@ pub fn runStdinSearch(
         const pre_end_written = json_capture.written();
         const match_events = countJsonEventType(pre_end_written, "\"type\":\"match\"");
         const matched_lines = countDistinctJsonLineNumbers(pre_end_written);
+        const elapsed_ns = search_timer.read();
         try search_output.writeJsonEndEvent(output_writer, stdin_label, .{
             .bytes_searched = search_bytes.len,
             .bytes_printed = pre_end_written.len,
@@ -202,6 +214,7 @@ pub fn runStdinSearch(
             .searches_with_match = if (matched) 1 else 0,
             .matched_lines = matched_lines,
             .matches = match_events,
+            .elapsed_ns = elapsed_ns,
         });
         try search_output.writeJsonSummaryEvent(output_writer, .{
             .bytes_searched = search_bytes.len,
@@ -210,6 +223,8 @@ pub fn runStdinSearch(
             .searches_with_match = if (matched) 1 else 0,
             .matched_lines = matched_lines,
             .matches = match_events,
+            .elapsed_ns = elapsed_ns,
+            .elapsed_total_ns = total_timer.read(),
         });
         try stdout.writeAll(json_capture.written());
     }
@@ -219,6 +234,7 @@ pub fn runStdinSearch(
         .matched_files = if (matched) 1 else 0,
         .searched_bytes = search_bytes.len,
         .printed_bytes = if (options.output_format == .json) json_capture.written().len else 0,
+        .elapsed_ns = if (options.output_format == .json) search_timer.read() else 0,
     };
     if (options.show_stats) try writeStats(stderr, stats);
     return if (matched) 0 else 1;
@@ -269,6 +285,7 @@ pub fn searchEntriesSequential(
         result.stats.printed_bytes += entry_output.printed_bytes;
         result.stats.matched_lines += entry_output.matched_lines;
         result.stats.matches += entry_output.matches;
+        result.stats.elapsed_ns += entry_output.elapsed_ns;
         if (entry_output.matched) {
             if (options.quiet) {
                 result.matched = true;

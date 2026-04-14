@@ -676,6 +676,8 @@ test "runCli json mode emits match events" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matched_lines\":1"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matches\":1"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"bytes_printed\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"elapsed\":{\"secs\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"elapsed_total\":{\"secs\":"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -703,6 +705,7 @@ test "runCli json only-matching mode keeps full line payload and submatch offset
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"match\":{\"text\":\"needle\"}"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matched_lines\":1"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matches\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"elapsed\":{\"secs\":"));
     try testing.expectEqualStrings("", run.stderr);
 }
 

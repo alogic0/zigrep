@@ -323,8 +323,9 @@ Context mode note:
 - `--count`, `--files-with-matches`, and `--files-without-match` currently fall back to normal text output, matching ripgrep more closely than the earlier custom JSON events
 - line-mode `match` events include nested `path.text`, `lines.text`, `line_number`, `absolute_offset`, and `submatches`
 - in line-mode JSON, `lines.text` keeps the full matched line payload, and `--only-matching` narrows the reported match through `submatches` instead of replacing the line payload
+- line-mode `end` and `summary` events include elapsed timing metadata with `secs`, `nanos`, and `human` fields
 - displayed JSON text content uses the same escaping rules as text output, including `\xNN` escapes for invalid or unsafe bytes
-- this is still smaller than ripgrep's full JSON schema, especially around elapsed timing details
+- this is still smaller than ripgrep's full JSON schema, mainly in longer-tail metadata and exact field coverage
 
 `--null` note:
 

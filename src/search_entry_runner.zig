@@ -19,6 +19,7 @@ pub const EntryOutput = struct {
     printed_bytes: usize = 0,
     matched_lines: usize = 0,
     matches: usize = 0,
+    elapsed_ns: u64 = 0,
     matched: bool = false,
     match_events: usize = 0,
     skipped_binary: bool = false,
@@ -88,6 +89,7 @@ pub fn searchEntryToOwnedOutput(
 
     var capture: std.Io.Writer.Allocating = .init(output_allocator);
     defer capture.deinit();
+    var timer = try std.time.Timer.start();
 
     if (options.output_format == .json) {
         try search_output.writeJsonBeginEvent(&capture.writer, entry.path);
@@ -111,35 +113,38 @@ pub fn searchEntryToOwnedOutput(
         if (raw_text_output) .raw else .escaped,
     );
 
+    const pre_end_written = capture.written();
+    const elapsed_ns = timer.read();
     if (options.output_format == .json) {
-        const written = capture.written();
-        const match_events = countJsonEventType(written, "\"type\":\"match\"");
-        const matched_lines = countDistinctJsonLineNumbers(written);
+        const match_events = countJsonEventType(pre_end_written, "\"type\":\"match\"");
+        const matched_lines = countDistinctJsonLineNumbers(pre_end_written);
         try search_output.writeJsonEndEvent(&capture.writer, entry.path, .{
             .bytes_searched = search_bytes.len,
-            .bytes_printed = written.len,
+            .bytes_printed = pre_end_written.len,
             .searches = 1,
             .searches_with_match = if (matched) 1 else 0,
             .matched_lines = matched_lines,
             .matches = match_events,
+            .elapsed_ns = elapsed_ns,
         });
     }
 
     const written = capture.written();
     const match_events = if (options.output_format == .json)
-        countJsonEventType(written, "\"type\":\"match\"")
+        countJsonEventType(pre_end_written, "\"type\":\"match\"")
     else
         0;
     const matched_lines = if (options.output_format == .json)
-        countDistinctJsonLineNumbers(written)
+        countDistinctJsonLineNumbers(pre_end_written)
     else
         match_events;
     return .{
         .bytes = capture.toArrayList(),
         .searched_bytes = search_bytes.len,
-        .printed_bytes = written.len,
+        .printed_bytes = if (options.output_format == .json) pre_end_written.len else written.len,
         .matched_lines = matched_lines,
         .matches = match_events,
+        .elapsed_ns = elapsed_ns,
         .matched = matched,
         .match_events = match_events,
     };

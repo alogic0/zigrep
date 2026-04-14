@@ -196,8 +196,10 @@ Current status:
 - `--count` and file-path-only modes now fall back to normal text output when
   `--json` is present, matching ripgrep more closely than the earlier custom
   `count` and `path` events
-- remaining gaps are mostly longer-tail schema parity such as elapsed timing
-  fields
+- `end` and `summary` events now include ripgrep-style elapsed timing objects
+  with `secs`, `nanos`, and `human` fields
+- remaining gaps are now mostly longer-tail schema details outside the
+  practical slice tracked here
 
 ### JSON Guidance
 
