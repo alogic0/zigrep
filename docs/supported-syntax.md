@@ -479,7 +479,7 @@ Sort note:
 Stdin note:
 
 - when no explicit path is given and stdin is piped, `zigrep` searches stdin instead of defaulting to `.`
-- normal line output and `--count` omit the filename prefix by default on stdin
+- normal line output, `--count`, and `--only-matching` omit the filename prefix by default on stdin
 - path-oriented stdin output uses the label `stdin`
 - `--files-with-matches`, `--files-without-match`, `--json`, and `--null` use that `stdin` label when they need a path value
 - `--files` remains invalid on piped stdin because file-list mode is path traversal, not content search

@@ -747,6 +747,21 @@ test "runCli stdin json uses stdin path label" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli stdin only-matching omits filename prefix by default" {
+    const testing = std.testing;
+
+    const run = try cli_test_support.runCliCapturedWithStdin(
+        testing.allocator,
+        &.{ "zigrep", "--only-matching", "needle" },
+        "xxneedle\nneedle tail\n",
+    );
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("1:3:needle\n2:1:needle\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli rejects files mode on piped stdin with no explicit path" {
     const testing = std.testing;
 

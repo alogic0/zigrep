@@ -52,7 +52,7 @@ work.
 
 - [x] Add support for searching stdin when no path is given and input is piped.
 - [x] Decide and document path labeling for stdin results.
-- [ ] Keep stdin search behavior coherent with current reporting modes:
+- [x] Keep stdin search behavior coherent with current reporting modes:
   - normal line output
   - `--count`
   - `--only-matching`
