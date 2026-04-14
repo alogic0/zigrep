@@ -787,3 +787,91 @@ test "runCli heading mode groups matches by file" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\n\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
+
+test "runCli suppresses filename by default for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("1:1:needle one\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli count suppresses filename by default for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\nneedle two\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--count", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("2\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli with-filename preserves filename for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "-H", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "single.txt:1:1:needle one\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli heading preserves explicit heading behavior for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--heading", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "single.txt\n1:1:needle one\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}

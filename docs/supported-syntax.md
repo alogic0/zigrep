@@ -265,6 +265,13 @@ Code-search note:
 - unknown capture names or indexes expand to an empty string
 - replacement currently remains incompatible with non-text or non-line-oriented modes such as `--count`, `--json`, `-v`, and multiline search
 
+Filename default note:
+
+- when searching one explicit file path, text line output and `--count` suppress the filename prefix by default
+- `-H` or `--with-filename` restores the filename prefix explicitly
+- `--no-filename` still suppresses it explicitly
+- directory searches, multiple explicit paths, `--heading`, and stdin labeling keep their own existing behavior
+
 `--sort` note:
 
 - `--sort path` and `--sortr path` sort results by path in ascending or descending order

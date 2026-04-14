@@ -152,10 +152,10 @@ Current status:
 
 ## Feature 6: Single-File Filename Defaults
 
-- [ ] Make default filename-prefix behavior match ripgrep more closely when the
+- [x] Make default filename-prefix behavior match ripgrep more closely when the
   search target is one explicit file.
-- [ ] Keep stdin behavior separate from explicit single-file path behavior.
-- [ ] Preserve `-H` / `--with-filename`, `--no-filename`, `--heading`, and
+- [x] Keep stdin behavior separate from explicit single-file path behavior.
+- [x] Preserve `-H` / `--with-filename`, `--no-filename`, `--heading`, and
   multi-path behavior as explicit overrides.
 
 ### Filename Guidance

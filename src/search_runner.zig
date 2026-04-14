@@ -26,6 +26,18 @@ pub const SearchStats = search_result.SearchStats;
 pub const SearchResult = search_result.SearchResult;
 const stdin_label = "stdin";
 
+fn isPathOnlyReportMode(mode: ReportMode) bool {
+    return mode == .files_with_matches or mode == .files_without_match;
+}
+
+fn shouldSuppressFilenameForExplicitSingleFile(options: CliOptions) bool {
+    if (options.filename_flag_seen or options.output.heading or isPathOnlyReportMode(options.report_mode)) return false;
+    if (options.used_default_path or options.paths.len != 1) return false;
+
+    const stat = std.fs.cwd().statFile(options.paths[0]) catch return false;
+    return stat.kind == .file;
+}
+
 pub fn runSearch(
     allocator: std.mem.Allocator,
     stdout: *std.Io.Writer,
@@ -45,9 +57,14 @@ pub fn runSearch(
     defer type_matcher.deinit(allocator);
     try zigrep.search.types.validateSelectedTypes(type_matcher, options.include_types, options.exclude_types);
 
+    var effective_options = options;
+    if (shouldSuppressFilenameForExplicitSingleFile(options)) {
+        effective_options.output.with_filename = false;
+    }
+
     var result: SearchResult = .{ .matched = false };
-    for (options.paths) |path| {
-        if (options.buffer_output) {
+    for (effective_options.paths) |path| {
+        if (effective_options.buffer_output) {
             var buffered_output: std.Io.Writer.Allocating = .init(allocator);
             defer buffered_output.deinit();
 
@@ -56,7 +73,7 @@ pub fn runSearch(
                 &buffered_output.writer,
                 stderr,
                 path,
-                options,
+                effective_options,
                 type_matcher,
                 searchEntriesSequential,
                 searchEntriesParallel,
@@ -72,7 +89,7 @@ pub fn runSearch(
             stdout,
             stderr,
             path,
-            options,
+            effective_options,
             type_matcher,
             searchEntriesSequential,
             searchEntriesParallel,
@@ -80,7 +97,7 @@ pub fn runSearch(
         if (path_result.matched) result.matched = true;
         result.stats.add(path_result.stats);
     }
-    if (options.show_stats) try writeStats(stderr, result.stats);
+    if (effective_options.show_stats) try writeStats(stderr, result.stats);
     return if (result.matched) 0 else 1;
 }
 
