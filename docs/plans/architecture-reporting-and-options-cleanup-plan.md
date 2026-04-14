@@ -109,7 +109,7 @@ The main issues to address are:
 
 ## Phase 4: Split Reporting By Report Family
 
-- [ ] Decompose `src/search_reporting.zig` into smaller modules by behavior
+- [x] Decompose `src/search_reporting.zig` into smaller modules by behavior
   family, for example:
   - line reporting
   - context reporting
@@ -120,9 +120,9 @@ The main issues to address are:
   dedicated helper module without changing the public reporting facade.
 - [x] Extract multiline reporting and multiline JSON helpers into a dedicated
   helper module without changing the public reporting facade.
-- [ ] Keep one small coordinating facade if needed, but move large mode-specific
+- [x] Keep one small coordinating facade if needed, but move large mode-specific
   branches out of the current monolithic file.
-- [ ] Preserve the current end-to-end output behavior and tests.
+- [x] Preserve the current end-to-end output behavior and tests.
 
 ### Phase 4 Guidance
 
@@ -158,7 +158,7 @@ The main issues to address are:
 - [x] 1. Remove output-derived stats aggregation
 - [x] 2. Introduce narrower internal option groupings
 - [x] 3. Centralize output-policy decisions
-- [ ] 4. Split reporting by report family
+- [x] 4. Split reporting by report family
 - [ ] 5. Re-check root and test boundary pressure
 
 ## Explicit Non-Goals
