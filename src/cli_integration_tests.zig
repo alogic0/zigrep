@@ -815,6 +815,21 @@ test "runCli stdin json uses stdin path label" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli stdin json count falls back to text count output" {
+    const testing = std.testing;
+
+    const run = try cli_test_support.runCliCapturedWithStdin(
+        testing.allocator,
+        &.{ "zigrep", "--json", "--count", "needle" },
+        "needle one\nneedle two\n",
+    );
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("2\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli stdin only-matching omits filename prefix by default" {
     const testing = std.testing;
 

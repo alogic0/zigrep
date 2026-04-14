@@ -706,7 +706,7 @@ test "runCli json only-matching mode keeps full line payload and submatch offset
     try testing.expectEqualStrings("", run.stderr);
 }
 
-test "runCli json count mode emits count events" {
+test "runCli json count mode falls back to text count output" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -724,13 +724,8 @@ test "runCli json count mode emits count events" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"begin\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"end\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"summary\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":{\"text\":"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"count\":2"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -767,7 +762,7 @@ test "runCli stats mode prints search summary to stderr" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "warnings_emitted=0"));
 }
 
-test "runCli json count mode can emit stats on stderr" {
+test "runCli json count mode falls back to text and can emit stats on stderr" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -792,9 +787,32 @@ test "runCli json count mode can emit stats on stderr" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"count\":2"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "stats: searched_files=1"));
+}
+
+test "runCli json files-with-matches mode falls back to text path output" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--json", "--files-with-matches", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"path\""));
+    try testing.expectEqualStrings("", run.stderr);
 }
 
 test "runCli heading mode groups matches by file" {

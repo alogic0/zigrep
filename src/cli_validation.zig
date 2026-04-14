@@ -108,6 +108,9 @@ fn normalizeState(
         try buffers.paths.append(allocator, ".");
         state.used_default_path = true;
     }
+    if (state.output_format == .json and state.report_mode != .lines) {
+        state.output_format = .text;
+    }
     if (state.output.heading) {
         state.output.with_filename = false;
     }

@@ -193,9 +193,11 @@ Current status:
   trailing `\n` when present, even under `--only-matching`
 - top-level `summary` aggregation now reports real printed-byte and
   match-count totals instead of placeholder zero values
+- `--count` and file-path-only modes now fall back to normal text output when
+  `--json` is present, matching ripgrep more closely than the earlier custom
+  `count` and `path` events
 - remaining gaps are mostly longer-tail schema parity such as elapsed timing
-  fields and the custom `count` / `path` event handling outside ripgrep's
-  supported JSON surface
+  fields
 
 ### JSON Guidance
 

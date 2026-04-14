@@ -1034,13 +1034,25 @@ test "parseArgs rejects invalid numeric flags" {
         "--null",
         "needle",
     }));
-    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+    const json_path_mode = try parseArgs(testing.allocator, &.{
         "zigrep",
         "--json",
         "--null",
         "-l",
         "needle",
-    }));
+    });
+    defer switch (json_path_mode) {
+        .run => |opts| opts.deinit(testing.allocator),
+        else => {},
+    };
+    switch (json_path_mode) {
+        .run => |opts| {
+            try testing.expectEqual(OutputFormat.text, opts.output_format);
+            try testing.expectEqual(ReportMode.files_with_matches, opts.report_mode);
+            try testing.expect(opts.output.null_path_terminator);
+        },
+        else => return error.TestUnexpectedResult,
+    }
     try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
         "zigrep",
         "--heading",
