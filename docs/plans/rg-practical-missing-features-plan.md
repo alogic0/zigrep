@@ -18,8 +18,6 @@ From the latest direct `rg` versus `zigrep` comparison, the remaining behavior
 gaps are:
 
 - richer ripgrep-style `--json` parity
-- binary text-output parity for `--text`
-- binary notice parity for `--binary`
 
 ## Priority
 
@@ -34,8 +32,6 @@ With the earlier practical slices now implemented, the remaining follow-up
 priority inside this plan should be:
 
 1. richer `--json` parity
-2. binary text-output parity for `--text`
-3. binary notice parity for `--binary`
 
 That ordering reflects how often these features still affect normal code-search
 work.
@@ -199,11 +195,11 @@ Current status:
 
 ## Feature 8: Binary Text Output Parity
 
-- [ ] Compare `--text` output on binary-containing files directly against
+- [x] Compare `--text` output on binary-containing files directly against
   ripgrep and match the intended byte-display behavior.
-- [ ] Decide whether `zigrep` should print raw bytes, escaped bytes, or a mode
+- [x] Decide whether `zigrep` should print raw bytes, escaped bytes, or a mode
   split that matches ripgrep more closely.
-- [ ] Keep binary-text behavior coherent with normal text output, JSON, and
+- [x] Keep binary-text behavior coherent with normal text output, JSON, and
   replacement semantics.
 
 ### Binary Text Guidance

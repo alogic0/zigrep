@@ -5,6 +5,10 @@ const zigrep = struct {
 };
 
 pub const OutputOptions = command.OutputOptions;
+pub const DisplayMode = enum {
+    escaped,
+    raw,
+};
 
 pub const ReplacementSegment = struct {
     match_span: zigrep.search.report.Span,
@@ -117,6 +121,7 @@ pub fn writeReport(
     writer: *std.Io.Writer,
     report: zigrep.search.grep.MatchReport,
     output: OutputOptions,
+    display_mode: DisplayMode,
 ) !void {
     var wrote_prefix = false;
     if (output.with_filename) {
@@ -138,7 +143,7 @@ pub fn writeReport(
         report.line[report.match_span.start - report.line_span.start .. report.match_span.end - report.line_span.start]
     else
         report.line;
-    try writeDisplayLine(writer, display_slice);
+    try writeDisplayLine(writer, display_slice, display_mode);
     try writer.writeByte('\n');
 }
 
@@ -151,6 +156,7 @@ pub fn writeReplacedLine(
     line_span_start: usize,
     segments: []const ReplacementSegment,
     output: OutputOptions,
+    display_mode: DisplayMode,
 ) !void {
     var wrote_prefix = false;
     if (output.with_filename) {
@@ -173,11 +179,11 @@ pub fn writeReplacedLine(
     for (segments) |segment| {
         const relative_start = segment.match_span.start - line_span_start;
         const relative_end = segment.match_span.end - line_span_start;
-        try writeDisplayLine(writer, line[cursor..relative_start]);
-        try writeDisplayLine(writer, segment.replacement);
+        try writeDisplayLine(writer, line[cursor..relative_start], display_mode);
+        try writeDisplayLine(writer, segment.replacement, display_mode);
         cursor = relative_end;
     }
-    try writeDisplayLine(writer, line[cursor..]);
+    try writeDisplayLine(writer, line[cursor..], display_mode);
     try writer.writeByte('\n');
 }
 
@@ -189,6 +195,7 @@ pub fn writePrefixedDisplayBytes(
     bytes: []const u8,
     output: OutputOptions,
     allow_newlines: bool,
+    display_mode: DisplayMode,
 ) !void {
     var wrote_prefix = false;
     if (output.with_filename) {
@@ -206,11 +213,21 @@ pub fn writePrefixedDisplayBytes(
         wrote_prefix = true;
     }
     if (wrote_prefix) try writer.writeByte(':');
-    try writeDisplayBytes(writer, bytes, allow_newlines);
+    try writeDisplayBytes(writer, bytes, allow_newlines, display_mode);
     try writer.writeByte('\n');
 }
 
-pub fn writeDisplayBytes(writer: *std.Io.Writer, bytes: []const u8, allow_newlines: bool) !void {
+pub fn writeDisplayBytes(
+    writer: *std.Io.Writer,
+    bytes: []const u8,
+    allow_newlines: bool,
+    display_mode: DisplayMode,
+) !void {
+    if (display_mode == .raw) {
+        try writer.writeAll(bytes);
+        return;
+    }
+
     var index: usize = 0;
     while (index < bytes.len) {
         const byte = bytes[index];
@@ -247,8 +264,8 @@ pub fn writeDisplayBytes(writer: *std.Io.Writer, bytes: []const u8, allow_newlin
     }
 }
 
-pub fn writeDisplayLine(writer: *std.Io.Writer, bytes: []const u8) !void {
-    try writeDisplayBytes(writer, bytes, false);
+pub fn writeDisplayLine(writer: *std.Io.Writer, bytes: []const u8, display_mode: DisplayMode) !void {
+    try writeDisplayBytes(writer, bytes, false, display_mode);
 }
 
 pub fn formatReport(
@@ -258,7 +275,7 @@ pub fn formatReport(
 ) ![]u8 {
     var buffer: std.Io.Writer.Allocating = .init(allocator);
     defer buffer.deinit();
-    try writeReport(&buffer.writer, report, output);
+    try writeReport(&buffer.writer, report, output, .escaped);
     var array_list = buffer.toArrayList();
     return try array_list.toOwnedSlice(allocator);
 }

@@ -57,6 +57,15 @@ pub fn decideBinaryBehavior(
     };
 }
 
+pub fn shouldRenderRawBinaryText(
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+    binary_mode: BinaryMode,
+) bool {
+    if (encoding != .auto or binary_mode != .text) return false;
+    return zigrep.search.io.detectBinary(bytes, .{}) == .binary;
+}
+
 fn shouldWarnAndSkipFileError(err: anyerror) bool {
     return switch (err) {
         error.FileNotFound,

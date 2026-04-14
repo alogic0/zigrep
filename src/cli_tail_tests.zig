@@ -245,7 +245,7 @@ test "runCli can search binary files when text mode is enabled" {
     const searched = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "needle", root_path });
     defer searched.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), searched.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, searched.stdout, 1, "payload.bin:1:4:aa"));
+    try testing.expect(std.mem.containsAtLeast(u8, searched.stdout, 1, "payload.bin:1:4:aa\x00needle\x00bb\n"));
 }
 
 test "runCli binary mode reports binary matches without line content" {
@@ -1272,7 +1272,7 @@ test "runCli skips control-heavy binary payloads by default but searches them wi
     const text_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "needle", root_path });
     defer text_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), text_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, text_run.stdout, 1, "control-heavy.bin:1:9:\\x01\\x02\\x03\\x04\\x05\\x06\\x07\\x08needle"));
+    try testing.expect(std.mem.containsAtLeast(u8, text_run.stdout, 1, "control-heavy.bin:1:9:\x01\x02\x03\x04\x05\x06\x07\x08needle\n"));
 }
 
 test "runCli can search UTF-16LE BOM files in default mode" {
@@ -1452,6 +1452,7 @@ test "writeFileReports does not require owned line bytes for decoded multi-line 
         .{},
         .text,
         null,
+        .escaped,
     );
 
     try testing.expect(matched);
@@ -1524,6 +1525,7 @@ test "writeFileReports supports Unicode digit shorthand on full file contents" {
         .{},
         .text,
         null,
+        .escaped,
     );
 
     try testing.expect(matched);

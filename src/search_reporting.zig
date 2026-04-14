@@ -14,6 +14,7 @@ const OutputOptions = command.OutputOptions;
 const OutputFormat = command.OutputFormat;
 const ReportMode = command.ReportMode;
 const ReplacementSegment = search_output.ReplacementSegment;
+const DisplayMode = search_output.DisplayMode;
 
 const ReplacedLine = struct {
     line_number: usize,
@@ -32,12 +33,13 @@ pub fn writeFileReports(
     output: OutputOptions,
     output_format: OutputFormat,
     max_count: ?usize,
+    display_mode: DisplayMode,
 ) !bool {
     if (output.replacement != null and output.only_matching) {
-        return writeFileOnlyMatchingReplacement(allocator, writer, searcher, path, bytes, encoding, output, max_count);
+        return writeFileOnlyMatchingReplacement(allocator, writer, searcher, path, bytes, encoding, output, max_count, display_mode);
     }
     if (output.replacement != null and !output.only_matching) {
-        return writeFileReportsReplacing(allocator, writer, searcher, path, bytes, encoding, output, max_count);
+        return writeFileReportsReplacing(allocator, writer, searcher, path, bytes, encoding, output, max_count, display_mode);
     }
     if (output.only_matching) {
         std.debug.assert(max_count == null or max_count.? > 0);
@@ -50,6 +52,7 @@ pub fn writeFileReports(
         output: OutputOptions,
         output_format: OutputFormat,
         max_count: ?usize,
+        display_mode: DisplayMode,
         matched_lines: usize = 0,
         last_line_start: ?usize = null,
 
@@ -72,7 +75,7 @@ pub fn writeFileReports(
                 defer self.allocator.free(line);
             }
             switch (self.output_format) {
-                .text => try search_output.writeReport(self.writer, report, self.output),
+                .text => try search_output.writeReport(self.writer, report, self.output, self.display_mode),
                 .json => try search_output.writeJsonMatchEvent(self.writer, report, self.output),
             }
         }
@@ -84,6 +87,7 @@ pub fn writeFileReports(
         .output = .{},
         .output_format = output_format,
         .max_count = max_count,
+        .display_mode = display_mode,
     };
     context.output = output;
 
@@ -123,6 +127,7 @@ fn writeFileReportsReplacing(
     encoding: zigrep.search.io.InputEncoding,
     output: OutputOptions,
     max_count: ?usize,
+    display_mode: DisplayMode,
 ) !bool {
     const haystack = if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded|
         decoded
@@ -214,6 +219,7 @@ fn writeFileReportsReplacing(
             line.line_span.start,
             line.segments,
             output,
+            display_mode,
         );
     }
     return true;
@@ -228,6 +234,7 @@ fn writeFileOnlyMatchingReplacement(
     encoding: zigrep.search.io.InputEncoding,
     output: OutputOptions,
     max_count: ?usize,
+    display_mode: DisplayMode,
 ) !bool {
     const haystack = if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded|
         decoded
@@ -243,6 +250,7 @@ fn writeFileOnlyMatchingReplacement(
         output: OutputOptions,
         max_count: ?usize,
         capture_names: []const ?[]const u8,
+        display_mode: DisplayMode,
         matched_lines: usize = 0,
         last_line_start: ?usize = null,
 
@@ -277,6 +285,7 @@ fn writeFileOnlyMatchingReplacement(
                 replacement,
                 effective_output,
                 false,
+                self.display_mode,
             );
         }
     };
@@ -287,6 +296,7 @@ fn writeFileOnlyMatchingReplacement(
         .output = output,
         .max_count = max_count,
         .capture_names = searcher.captureNames(),
+        .display_mode = display_mode,
     };
 
     return searcher.forEachCapturedMatchReport(path, haystack, &context, WriterContext.emit) catch |err| switch (err) {
@@ -301,6 +311,7 @@ fn writeContextLine(
     line_number: usize,
     line: []const u8,
     output: OutputOptions,
+    display_mode: DisplayMode,
 ) !void {
     var wrote_prefix = false;
     if (output.with_filename) {
@@ -313,7 +324,7 @@ fn writeContextLine(
         wrote_prefix = true;
     }
     if (wrote_prefix) try writer.writeByte('-');
-    try search_output.writeDisplayLine(writer, line);
+    try search_output.writeDisplayLine(writer, line, display_mode);
     try writer.writeByte('\n');
 }
 
@@ -327,9 +338,10 @@ fn writeFileReportsWithContext(
     max_count: ?usize,
     context_before: usize,
     context_after: usize,
+    display_mode: DisplayMode,
 ) !bool {
     if (output.replacement != null) {
-        return writeFileReportsWithContextReplacing(allocator, writer, searcher, path, haystack, output, max_count, context_before, context_after);
+        return writeFileReportsWithContextReplacing(allocator, writer, searcher, path, haystack, output, max_count, context_before, context_after, display_mode);
     }
     const IterationStop = error{MaxCountReached};
 
@@ -406,9 +418,9 @@ fn writeFileReportsWithContext(
         previous_included = line_index;
 
         if (matched_indexes[line_index]) |match_index| {
-            try search_output.writeReport(writer, matched_lines.items[match_index].report, output);
+            try search_output.writeReport(writer, matched_lines.items[match_index].report, output, display_mode);
         } else {
-            try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output);
+            try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output, display_mode);
         }
     }
 
@@ -425,6 +437,7 @@ fn writeFileReportsWithContextReplacing(
     max_count: ?usize,
     context_before: usize,
     context_after: usize,
+    display_mode: DisplayMode,
 ) !bool {
     var matched_lines: std.ArrayList(ReplacedLine) = .empty;
     defer {
@@ -538,9 +551,10 @@ fn writeFileReportsWithContextReplacing(
                 line.line_span.start,
                 line.segments,
                 output,
+                display_mode,
             );
         } else {
-            try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output);
+            try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output, display_mode);
         }
     }
 
@@ -553,6 +567,7 @@ fn writeMultilineReportBlock(
     info: zigrep.search.report.DisplayBlockInfo,
     haystack: []const u8,
     output: OutputOptions,
+    display_mode: DisplayMode,
 ) !void {
     try search_output.writePrefixedDisplayBytes(
         writer,
@@ -562,6 +577,7 @@ fn writeMultilineReportBlock(
         haystack[info.block.block_span.start..info.block.block_span.end],
         output,
         true,
+        display_mode,
     );
 }
 
@@ -572,6 +588,7 @@ fn writeFileReportsMultiline(
     path: []const u8,
     haystack: []const u8,
     output: OutputOptions,
+    display_mode: DisplayMode,
 ) !bool {
     const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, haystack);
     defer allocator.free(matches);
@@ -581,7 +598,7 @@ fn writeFileReportsMultiline(
     defer allocator.free(merged);
 
     for (merged) |info| {
-        try writeMultilineReportBlock(writer, path, info, haystack, output);
+        try writeMultilineReportBlock(writer, path, info, haystack, output, display_mode);
     }
 
     return true;
@@ -594,6 +611,7 @@ fn writeFileOnlyMatchingMultiline(
     path: []const u8,
     haystack: []const u8,
     output: OutputOptions,
+    display_mode: DisplayMode,
 ) !bool {
     const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
     defer allocator.free(line_spans);
@@ -603,6 +621,7 @@ fn writeFileOnlyMatchingMultiline(
         haystack: []const u8,
         line_spans: []const zigrep.search.report.Span,
         output: OutputOptions,
+        display_mode: DisplayMode,
         matched: bool = false,
 
         fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
@@ -615,6 +634,7 @@ fn writeFileOnlyMatchingMultiline(
                 self.haystack[report.match_span.start..report.match_span.end],
                 self.output,
                 true,
+                self.display_mode,
             );
             self.matched = true;
         }
@@ -625,6 +645,7 @@ fn writeFileOnlyMatchingMultiline(
         .haystack = haystack,
         .line_spans = line_spans,
         .output = output,
+        .display_mode = display_mode,
     };
 
     _ = try searcher.forEachMatchReport(path, haystack, &context, Context.emit);
@@ -686,6 +707,7 @@ fn writeFileReportsWithContextMultiline(
     output: OutputOptions,
     context_before: usize,
     context_after: usize,
+    display_mode: DisplayMode,
 ) !bool {
     const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, haystack);
     defer allocator.free(matches);
@@ -725,7 +747,7 @@ fn writeFileReportsWithContextMultiline(
 
         if (block_starts[line_index]) |block_index| {
             const info = merged[block_index];
-            try writeMultilineReportBlock(writer, path, info, haystack, output);
+            try writeMultilineReportBlock(writer, path, info, haystack, output, display_mode);
             previous_included = info.block.end_line_index;
             line_index = info.block.end_line_index + 1;
             continue;
@@ -733,7 +755,7 @@ fn writeFileReportsWithContextMultiline(
 
         previous_included = line_index;
         const line_span = line_spans[line_index];
-        try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output);
+        try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output, display_mode);
         line_index += 1;
     }
 
@@ -831,6 +853,7 @@ pub fn writeFileOutput(
     max_count: ?usize,
     context_before: usize,
     context_after: usize,
+    display_mode: DisplayMode,
 ) !bool {
     if (suppress_binary_output) {
         return switch (report_mode) {
@@ -854,6 +877,7 @@ pub fn writeFileOutput(
             max_count,
             context_before,
             context_after,
+            display_mode,
         ),
         .count => writeFileCount(allocator, writer, searcher, path, bytes, encoding, invert_match, output, output_format, max_count),
         .files_with_matches => writeFilePathOnMatch(allocator, writer, searcher, path, bytes, encoding, invert_match, output, output_format),
@@ -893,6 +917,7 @@ fn writeFileLines(
     max_count: ?usize,
     context_before: usize,
     context_after: usize,
+    display_mode: DisplayMode,
 ) !bool {
     if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded| {
         defer allocator.free(decoded);
@@ -904,7 +929,7 @@ fn writeFileLines(
                 if (context_before != 0 or context_after != 0 or output_format == .json) {
                     return error.InvalidFlagCombination;
                 }
-                return writeFileOnlyMatchingMultiline(allocator, writer, searcher, path, decoded, output);
+                return writeFileOnlyMatchingMultiline(allocator, writer, searcher, path, decoded, output, display_mode);
             }
             if (context_before != 0 or context_after != 0) {
                 if (output_format != .text) return error.InvalidFlagCombination;
@@ -917,6 +942,7 @@ fn writeFileLines(
                     output,
                     context_before,
                     context_after,
+                    display_mode,
                 );
             }
             if (output_format == .json) {
@@ -926,10 +952,10 @@ fn writeFileLines(
                 for (matches) |match_info| try writeMultilineJsonMatchEvent(writer, path, decoded, match_info, output);
                 return true;
             }
-            return writeFileReportsMultiline(allocator, writer, searcher, path, decoded, output);
+            return writeFileReportsMultiline(allocator, writer, searcher, path, decoded, output, display_mode);
         }
         if (invert_match) {
-            return writeInvertedFileReports(allocator, writer, searcher, path, decoded, output, output_format, max_count);
+            return writeInvertedFileReports(allocator, writer, searcher, path, decoded, output, output_format, max_count, display_mode);
         }
         if (context_before != 0 or context_after != 0) {
             return writeFileReportsWithContext(
@@ -942,9 +968,10 @@ fn writeFileLines(
                 max_count,
                 context_before,
                 context_after,
+                display_mode,
             );
         }
-        return writeFileReports(allocator, writer, searcher, path, decoded, .utf8, output, output_format, max_count);
+        return writeFileReports(allocator, writer, searcher, path, decoded, .utf8, output, output_format, max_count, display_mode);
     }
 
     if (searcher.program.can_match_newline) {
@@ -955,7 +982,7 @@ fn writeFileLines(
             if (context_before != 0 or context_after != 0 or output_format == .json) {
                 return error.InvalidFlagCombination;
             }
-            return writeFileOnlyMatchingMultiline(allocator, writer, searcher, path, bytes, output);
+            return writeFileOnlyMatchingMultiline(allocator, writer, searcher, path, bytes, output, display_mode);
         }
         if (context_before != 0 or context_after != 0) {
             if (output_format != .text) return error.InvalidFlagCombination;
@@ -968,6 +995,7 @@ fn writeFileLines(
                 output,
                 context_before,
                 context_after,
+                display_mode,
             );
         }
         if (output_format == .json) {
@@ -977,11 +1005,11 @@ fn writeFileLines(
             for (matches) |match_info| try writeMultilineJsonMatchEvent(writer, path, bytes, match_info, output);
             return true;
         }
-        return writeFileReportsMultiline(allocator, writer, searcher, path, bytes, output);
+        return writeFileReportsMultiline(allocator, writer, searcher, path, bytes, output, display_mode);
     }
 
     if (invert_match) {
-        return writeInvertedFileReports(allocator, writer, searcher, path, bytes, output, output_format, max_count);
+        return writeInvertedFileReports(allocator, writer, searcher, path, bytes, output, output_format, max_count, display_mode);
     }
     if (context_before != 0 or context_after != 0) {
         return writeFileReportsWithContext(
@@ -994,9 +1022,10 @@ fn writeFileLines(
             max_count,
             context_before,
             context_after,
+            display_mode,
         );
     }
-    return writeFileReports(allocator, writer, searcher, path, bytes, .utf8, output, output_format, max_count);
+    return writeFileReports(allocator, writer, searcher, path, bytes, .utf8, output, output_format, max_count, display_mode);
 }
 
 fn writeInvertedFileReports(
@@ -1008,6 +1037,7 @@ fn writeInvertedFileReports(
     output: OutputOptions,
     output_format: OutputFormat,
     max_count: ?usize,
+    display_mode: DisplayMode,
 ) !bool {
     const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
     defer allocator.free(line_spans);
@@ -1031,7 +1061,7 @@ fn writeInvertedFileReports(
             .match_span = line_span,
         };
         switch (output_format) {
-            .text => try search_output.writeReport(writer, report, output),
+            .text => try search_output.writeReport(writer, report, output, display_mode),
             .json => try search_output.writeJsonMatchEvent(writer, report, output),
         }
     }

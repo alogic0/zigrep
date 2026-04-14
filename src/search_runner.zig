@@ -158,6 +158,7 @@ pub fn runStdinSearch(
             if (options.show_stats) try writeStats(stderr, stats);
             return 1;
         };
+    const raw_text_output = search_execution.shouldRenderRawBinaryText(search_bytes, options.encoding, options.binary_mode);
 
     var effective_output = options.output;
     if (!options.filename_flag_seen and options.report_mode != .files_with_matches and options.report_mode != .files_without_match) {
@@ -187,6 +188,7 @@ pub fn runStdinSearch(
         options.max_count,
         options.context_before,
         options.context_after,
+        if (raw_text_output) .raw else .escaped,
     );
 
     if (options.output_format == .json) {

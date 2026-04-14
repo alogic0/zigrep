@@ -443,8 +443,8 @@ Current `--text` note:
 - planner-friendly empty capture groups like `a()b` are covered by that raw-byte path too
 - default mode now uses that same raw-byte matcher for text-like invalid UTF-8 files; `--text` mainly changes file-selection policy by disabling binary-file skipping
 - literal-only UTF-8 classes like `[ж]`, negated literal-only UTF-8 classes like `[^ж]`, small positive UTF-8 ranges like `[а-я]`, negated small UTF-8 ranges like `[^а-я]`, larger Unicode ranges like `[Ā-ӿ]`, `[^Ā-ӿ]`, or `[Ā-ӿ]+`, bare anchors like `^` or `$`, grouped alternation branches that use those anchored forms, and anchored grouped patterns like `(^ab)+c` are covered by that planner too while keeping normal anchor semantics; the remaining misses are broader regex shapes that still fall outside the planner
-- when a reported line contains invalid bytes or unsafe control bytes, the CLI prints those bytes as `\xNN` escapes instead of sending them raw to the terminal
-- this is still not full ripgrep-compatible encoding behavior
+- when `--text` is active on binary-containing input, text output now prints the matched line bytes raw, including NUL bytes, instead of escaping them as `\xNN`
+- normal non-`--text` text output and JSON output keep their existing escaping rules
 - the exact current rules are documented in [docs/invalid-utf8-semantics.md](invalid-utf8-semantics.md)
 
 Encoding note:
@@ -488,7 +488,7 @@ Status and warning note:
 `--binary` note:
 
 - `--binary` searches binary files but suppresses matching line content
-- in normal text output, a matching binary file prints `path: binary file matches`
+- in normal text output, a matching binary file prints `binary file matches (found "\0" byte around offset N)`
 - with `--files-with-matches` and `--files-without-match`, it uses file-selection semantics over binary files
 - `--binary` is currently rejected with `--count`, `--only-matching`, `--heading`, and `--json`
 

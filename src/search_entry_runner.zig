@@ -82,6 +82,7 @@ pub fn searchEntryToOwnedOutput(
         }
     else
         suppress_binary_output.?;
+    const raw_text_output = search_execution.shouldRenderRawBinaryText(search_bytes, options.encoding, options.binary_mode);
 
     var capture: std.Io.Writer.Allocating = .init(output_allocator);
     defer capture.deinit();
@@ -105,6 +106,7 @@ pub fn searchEntryToOwnedOutput(
         options.max_count,
         options.context_before,
         options.context_after,
+        if (raw_text_output) .raw else .escaped,
     );
 
     if (options.output_format == .json) {
