@@ -20,12 +20,12 @@ test "runCli supports Unicode literal escapes" {
     const cyrillic_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\u{0436}ар", root_path });
     defer cyrillic_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), cyrillic_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, cyrillic_run.stdout, 1, "sample.txt:1:1:жар"));
+    try testing.expect(std.mem.containsAtLeast(u8, cyrillic_run.stdout, 1, "sample.txt:жар"));
 
     const kanji_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\u{65E5}\\u{672C}", root_path });
     defer kanji_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), kanji_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, kanji_run.stdout, 1, "sample.txt:2:1:日本"));
+    try testing.expect(std.mem.containsAtLeast(u8, kanji_run.stdout, 1, "sample.txt:日本"));
 }
 
 test "runCli supports Unicode property escapes on UTF-8 and raw-byte inputs" {
@@ -51,12 +51,12 @@ test "runCli supports Unicode property escapes on UTF-8 and raw-byte inputs" {
     const utf8_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Letter}+\\p{Number}+", root_path });
     defer utf8_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), utf8_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, utf8_run.stdout, 1, "sample.txt:1:1:ж7"));
+    try testing.expect(std.mem.containsAtLeast(u8, utf8_run.stdout, 1, "sample.txt:ж7"));
 
     const raw_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\P{Letter}+", root_path });
     defer raw_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), raw_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, raw_run.stdout, 1, "raw.bin:1:1:"));
+    try testing.expect(std.mem.containsAtLeast(u8, raw_run.stdout, 1, "raw.bin:"));
 }
 
 test "runCli supports the Alphabetic Unicode property" {
@@ -77,7 +77,7 @@ test "runCli supports the Alphabetic Unicode property" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:"));
 }
 
 test "runCli supports Cased and Case_Ignorable Unicode properties" {
@@ -99,12 +99,12 @@ test "runCli supports Cased and Case_Ignorable Unicode properties" {
     const cased_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Cased}+", root_path });
     defer cased_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), cased_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, cased_run.stdout, 1, "sample.txt:1:1:Σ"));
+    try testing.expect(std.mem.containsAtLeast(u8, cased_run.stdout, 1, "sample.txt:Σ"));
 
     const case_ignorable_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Case_Ignorable}+", root_path });
     defer case_ignorable_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), case_ignorable_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, case_ignorable_run.stdout, 1, "sample.txt:2:1:"));
+    try testing.expect(std.mem.containsAtLeast(u8, case_ignorable_run.stdout, 1, "sample.txt:"));
 }
 
 test "runCli supports Any and ASCII Unicode properties" {
@@ -130,17 +130,17 @@ test "runCli supports Any and ASCII Unicode properties" {
     const any_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Any}+", root_path });
     defer any_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), any_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, any_run.stdout, 1, "sample.txt:1:1:ж"));
+    try testing.expect(std.mem.containsAtLeast(u8, any_run.stdout, 1, "sample.txt:ж"));
 
     const ascii_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{ASCII}+", root_path });
     defer ascii_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), ascii_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, ascii_run.stdout, 1, "sample.txt:2:1:Az09"));
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_run.stdout, 1, "sample.txt:Az09"));
 
     const not_any_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\P{Any}+", root_path });
     defer not_any_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), not_any_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, not_any_run.stdout, 1, "raw.bin:1:1:"));
+    try testing.expect(std.mem.containsAtLeast(u8, not_any_run.stdout, 1, "raw.bin:"));
 }
 
 test "runCli supports initial Script Unicode properties" {
@@ -165,33 +165,33 @@ test "runCli supports initial Script Unicode properties" {
     const greek_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Greek}+", root_path });
     defer greek_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), greek_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, greek_run.stdout, 1, "sample.txt:2:1:Ω"));
+    try testing.expect(std.mem.containsAtLeast(u8, greek_run.stdout, 1, "sample.txt:Ω"));
 
     const greek_scx_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{scx=Greek}+", root_path });
     defer greek_scx_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), greek_scx_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, greek_scx_run.stdout, 1, "sample.txt:2:1:Ω"));
-    try testing.expect(std.mem.containsAtLeast(u8, greek_scx_run.stdout, 1, "sample.txt:3:1:͵"));
+    try testing.expect(std.mem.containsAtLeast(u8, greek_scx_run.stdout, 1, "sample.txt:Ω"));
+    try testing.expect(std.mem.containsAtLeast(u8, greek_scx_run.stdout, 1, "sample.txt:͵"));
 
     const greek_scx_long_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Script_Extensions=Greek}+", root_path });
     defer greek_scx_long_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), greek_scx_long_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, greek_scx_long_run.stdout, 1, "sample.txt:3:1:͵"));
+    try testing.expect(std.mem.containsAtLeast(u8, greek_scx_long_run.stdout, 1, "sample.txt:͵"));
 
     const latin_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Script=Latin}+", root_path });
     defer latin_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), latin_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, latin_run.stdout, 1, "sample.txt:1:1:A"));
+    try testing.expect(std.mem.containsAtLeast(u8, latin_run.stdout, 1, "sample.txt:A"));
 
     const cyrillic_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{sc=Cyrl}+", root_path });
     defer cyrillic_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), cyrillic_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, cyrillic_run.stdout, 1, "sample.txt:4:1:Ж"));
+    try testing.expect(std.mem.containsAtLeast(u8, cyrillic_run.stdout, 1, "sample.txt:Ж"));
 
     const hebrew_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Hebrew}+", root_path });
     defer hebrew_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), hebrew_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, hebrew_run.stdout, 1, "sample.txt:5:1:א"));
+    try testing.expect(std.mem.containsAtLeast(u8, hebrew_run.stdout, 1, "sample.txt:א"));
 }
 
 test "runCli supports identifier-style derived Unicode properties" {
@@ -214,27 +214,27 @@ test "runCli supports identifier-style derived Unicode properties" {
     const id_start_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{ID_Start}+", root_path });
     defer id_start_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), id_start_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, id_start_run.stdout, 1, "sample.txt:1:1:A"));
+    try testing.expect(std.mem.containsAtLeast(u8, id_start_run.stdout, 1, "sample.txt:A"));
 
     const id_continue_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{ID_Continue}+", root_path });
     defer id_continue_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), id_continue_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, id_continue_run.stdout, 1, "sample.txt:2:1:0"));
+    try testing.expect(std.mem.containsAtLeast(u8, id_continue_run.stdout, 1, "sample.txt:0"));
 
     const xid_start_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{XID_Start}+", root_path });
     defer xid_start_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), xid_start_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, xid_start_run.stdout, 1, "sample.txt:1:1:A"));
+    try testing.expect(std.mem.containsAtLeast(u8, xid_start_run.stdout, 1, "sample.txt:A"));
 
     const xid_continue_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{XID_Continue}+", root_path });
     defer xid_continue_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), xid_continue_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, xid_continue_run.stdout, 1, "sample.txt:2:1:0"));
+    try testing.expect(std.mem.containsAtLeast(u8, xid_continue_run.stdout, 1, "sample.txt:0"));
 
     const default_ignorable_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Default_Ignorable_Code_Point}+", root_path });
     defer default_ignorable_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), default_ignorable_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, default_ignorable_run.stdout, 1, "sample.txt:3:1:"));
+    try testing.expect(std.mem.containsAtLeast(u8, default_ignorable_run.stdout, 1, "sample.txt:"));
 }
 
 test "runCli supports Lowercase and Uppercase Unicode properties" {
@@ -256,12 +256,12 @@ test "runCli supports Lowercase and Uppercase Unicode properties" {
     const lower_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Lowercase}+", root_path });
     defer lower_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), lower_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, lower_run.stdout, 1, "sample.txt:1:1:ß"));
+    try testing.expect(std.mem.containsAtLeast(u8, lower_run.stdout, 1, "sample.txt:ß"));
 
     const upper_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Uppercase}+", root_path });
     defer upper_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), upper_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, upper_run.stdout, 1, "sample.txt:2:1:Σ"));
+    try testing.expect(std.mem.containsAtLeast(u8, upper_run.stdout, 1, "sample.txt:Σ"));
 }
 
 test "runCli supports Mark, Punctuation, Separator, and Symbol Unicode properties" {
@@ -285,27 +285,27 @@ test "runCli supports Mark, Punctuation, Separator, and Symbol Unicode propertie
     const mark_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Mark}+", root_path });
     defer mark_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), mark_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, mark_run.stdout, 1, "sample.txt:1:1:"));
+    try testing.expect(std.mem.containsAtLeast(u8, mark_run.stdout, 1, "sample.txt:"));
 
     const punctuation_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Punctuation}+", root_path });
     defer punctuation_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), punctuation_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, punctuation_run.stdout, 1, "sample.txt:2:1:!"));
+    try testing.expect(std.mem.containsAtLeast(u8, punctuation_run.stdout, 1, "sample.txt:!"));
 
     const separator_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Separator}+", root_path });
     defer separator_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), separator_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, separator_run.stdout, 1, "sample.txt:3:1: "));
+    try testing.expect(std.mem.containsAtLeast(u8, separator_run.stdout, 1, "sample.txt: "));
 
     const symbol_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Symbol}+", root_path });
     defer symbol_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), symbol_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, symbol_run.stdout, 1, "sample.txt:4:1:+"));
+    try testing.expect(std.mem.containsAtLeast(u8, symbol_run.stdout, 1, "sample.txt:+"));
 
     const not_punctuation_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\P{Punctuation}+", root_path });
     defer not_punctuation_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), not_punctuation_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, not_punctuation_run.stdout, 1, "sample.txt:1:1:"));
+    try testing.expect(std.mem.containsAtLeast(u8, not_punctuation_run.stdout, 1, "sample.txt:"));
 }
 
 test "runCli supports Unicode general-category subgroup properties" {
@@ -330,27 +330,27 @@ test "runCli supports Unicode general-category subgroup properties" {
     const titlecase_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Lt}+", root_path });
     defer titlecase_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), titlecase_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, titlecase_run.stdout, 1, "sample.txt:1:1:ǅ"));
+    try testing.expect(std.mem.containsAtLeast(u8, titlecase_run.stdout, 1, "sample.txt:ǅ"));
 
     const letter_number_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Nl}+", root_path });
     defer letter_number_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), letter_number_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, letter_number_run.stdout, 1, "sample.txt:2:1:Ⅰ"));
+    try testing.expect(std.mem.containsAtLeast(u8, letter_number_run.stdout, 1, "sample.txt:Ⅰ"));
 
     const connector_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Pc}+", root_path });
     defer connector_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), connector_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, connector_run.stdout, 1, "sample.txt:3:1:_"));
+    try testing.expect(std.mem.containsAtLeast(u8, connector_run.stdout, 1, "sample.txt:_"));
 
     const other_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Other}+", root_path });
     defer other_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), other_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, other_run.stdout, 1, "sample.txt:4:1:"));
+    try testing.expect(std.mem.containsAtLeast(u8, other_run.stdout, 1, "sample.txt:"));
 
     const unassigned_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\p{Cn}+", root_path });
     defer unassigned_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), unassigned_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, unassigned_run.stdout, 1, "sample.txt:5:1:"));
+    try testing.expect(std.mem.containsAtLeast(u8, unassigned_run.stdout, 1, "sample.txt:"));
 }
 
 test "runCli supports Unicode property items inside character classes" {
@@ -374,12 +374,12 @@ test "runCli supports Unicode property items inside character classes" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:ж7"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:ж7"));
 
     const script_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "[\\p{Greek}\\p{Uppercase}]+", root_path });
     defer script_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), script_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, script_run.stdout, 1, "sample.txt:2:1:ΩΣ"));
+    try testing.expect(std.mem.containsAtLeast(u8, script_run.stdout, 1, "sample.txt:ΩΣ"));
 }
 
 test "runCli rejects unsupported Unicode properties" {
@@ -419,7 +419,7 @@ test "runCli supports Emoji Unicode properties" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:😀"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:😀"));
 }
 
 test "runCli uses Unicode digit and whitespace shorthand semantics" {
@@ -443,14 +443,14 @@ test "runCli uses Unicode digit and whitespace shorthand semantics" {
     const digit_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "a\\db", root_path });
     defer digit_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), digit_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:1:1:a١b"));
-    try testing.expect(!std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:2:1:a²b"));
+    try testing.expect(std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:a١b"));
+    try testing.expect(!std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:a²b"));
 
     const whitespace_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "foo\\sbar", root_path });
     defer whitespace_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), whitespace_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, whitespace_run.stdout, 1, "sample.txt:3:1:foo\xC2\xA0bar"));
-    try testing.expect(!std.mem.containsAtLeast(u8, whitespace_run.stdout, 1, "sample.txt:4:1:foo"));
+    try testing.expect(std.mem.containsAtLeast(u8, whitespace_run.stdout, 1, "sample.txt:foo\xC2\xA0bar"));
+    try testing.expect(!std.mem.containsAtLeast(u8, whitespace_run.stdout, 1, "sample.txt:foo\nbar"));
 }
 
 test "runCli rejects invalid Unicode escapes" {
@@ -489,7 +489,7 @@ test "runCli default mode matches literal-only UTF-8 classes through the byte pa
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-class.bin:1:4:xx\\xFFжyy"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-class.bin:xx\\xFFжyy"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -511,7 +511,7 @@ test "runCli default mode matches small UTF-8 range classes through the byte pat
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-range.bin:1:4:xx\\xFFжyy"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-range.bin:xx\\xFFжyy"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -533,7 +533,7 @@ test "runCli default mode matches negated literal-only UTF-8 classes through the
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-negated.bin:1:2:\\xFFaяb"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-negated.bin:\\xFFaяb"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -555,7 +555,7 @@ test "runCli default mode matches negated small UTF-8 ranges through the byte pa
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-negated-range.bin:1:2:\\xFFaѣb"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-negated-range.bin:\\xFFaѣb"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -577,7 +577,7 @@ test "runCli default mode matches larger UTF-8 ranges through the byte path" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-large-range.bin:1:4:xx\\xFFжyy"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-large-range.bin:xx\\xFFжyy"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -599,7 +599,7 @@ test "runCli default mode matches negated larger UTF-8 ranges through the byte p
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-large-negated.bin:1:2:\\xFFa字b"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-large-negated.bin:\\xFFa字b"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -621,7 +621,7 @@ test "runCli default mode matches quantified larger UTF-8 ranges through the byt
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-large-quant.bin:1:3:x\\xFFжѣz"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8-large-quant.bin:x\\xFFжѣz"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -643,7 +643,7 @@ test "runCli default mode matches bare start anchors through the byte path" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchor-start.bin:1:1:\\xFFabc"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchor-start.bin:\\xFFabc"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -665,7 +665,7 @@ test "runCli default mode matches bare end anchors through the byte path" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchor-end.bin:1:5:abc\\xFF"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchor-end.bin:abc\\xFF"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -687,7 +687,7 @@ test "runCli default mode matches grouped alternation with anchored branches thr
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchored-alt.bin:1:2:\\xFFcde"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchored-alt.bin:\\xFFcde"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -709,6 +709,6 @@ test "runCli default mode matches anchored grouped repetition through the byte p
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchored-group.bin:1:1:abc"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "anchored-group.bin:abc"));
     try testing.expectEqualStrings("", run.stderr);
 }

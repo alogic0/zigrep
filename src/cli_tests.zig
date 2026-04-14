@@ -44,8 +44,8 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(!opts.fixed_strings);
             try testing.expect(!opts.list_files);
             try testing.expect(opts.output.with_filename);
-            try testing.expect(opts.output.line_number);
-            try testing.expect(opts.output.column_number);
+            try testing.expect(!opts.output.line_number);
+            try testing.expect(!opts.output.column_number);
             try testing.expect(!opts.output.only_matching);
             try testing.expect(!opts.output.null_path_terminator);
             try testing.expect(!opts.output.heading);
@@ -206,7 +206,7 @@ test "parseArgs accepts numeric and formatting flags" {
             try testing.expectEqual(@as(?usize, 3), opts.max_count);
             try testing.expectEqual(search.io.InputEncoding.utf16le, opts.encoding);
             try testing.expect(!opts.output.with_filename);
-            try testing.expect(opts.output.line_number);
+            try testing.expect(!opts.output.line_number);
             try testing.expect(!opts.output.column_number);
             try testing.expect(opts.output.only_matching);
             try testing.expectEqual(ReportMode.count, opts.report_mode);

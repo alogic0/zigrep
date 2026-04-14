@@ -24,7 +24,7 @@ test "runCli multiline mode prints merged multiline blocks in normal text output
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.endsWith(u8, run.stdout, "multi.txt:2:1:abc\ndefxxxabc\ndefxxx\n"));
+    try testing.expect(std.mem.endsWith(u8, run.stdout, "multi.txt:abc\ndefxxxabc\ndefxxx\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -52,8 +52,8 @@ test "runCli multiline only-matching mode prints each exact multiline match" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt:2:1:abc\ndef\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt:4:1:abc\ndef\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt:abc\ndef\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 2, "multi.txt:abc\ndef\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -111,13 +111,13 @@ test "runCli multiline context mode expands around merged blocks" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-1-before\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt:2:1:abc\ndef\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-4-after\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-before\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt:abc\ndef\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-after\n"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "--\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-6-gap2\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt:7:1:abc\ndef\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-9-tail\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-gap2\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 2, "multi.txt:abc\ndef\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-tail\n"));
 }
 
 test "runCli multiline json mode emits per-match events with raw spans" {
@@ -170,7 +170,7 @@ test "runCli multiline heading mode groups blocks by file" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt\n1:1:abc\ndef\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt\nabc\ndef\n"));
 }
 
 test "runCli multiline mode keeps leftmost non-overlapping behavior for overlapping exact matches" {
@@ -196,7 +196,7 @@ test "runCli multiline mode keeps leftmost non-overlapping behavior for overlapp
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.endsWith(u8, run.stdout, "multi.txt:2:1:abc\nabc\n"));
+    try testing.expect(std.mem.endsWith(u8, run.stdout, "multi.txt:abc\nabc\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -220,7 +220,7 @@ test "runCli multiline mode merges adjacent match groups without duplicating lin
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.endsWith(u8, run.stdout, "multi.txt:1:1:abc\nabc\n"));
+    try testing.expect(std.mem.endsWith(u8, run.stdout, "multi.txt:abc\nabc\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -268,7 +268,7 @@ test "runCli multiline dotall makes dot match newline" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.endsWith(u8, run.stdout, "multi.txt:1:1:a\nb\n"));
+    try testing.expect(std.mem.endsWith(u8, run.stdout, "multi.txt:a\nb\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 

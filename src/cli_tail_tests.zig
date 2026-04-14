@@ -25,9 +25,9 @@ test "runCli prints every matching line from one file" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:needle one"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:3:1:needle two"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:4:1:needle needle"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:needle two"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:needle needle"));
 }
 
 
@@ -51,9 +51,7 @@ test "runCli only-matching mode prints each match occurrence" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:needle\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:12:needle\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2:1:needle\n"));
+    try testing.expectEqual(@as(usize, 3), std.mem.count(u8, run.stdout, "many.txt:needle\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -75,7 +73,7 @@ test "runCli only-matching mode honors lazy quantifiers" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:axxb\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:axxb\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -97,9 +95,7 @@ test "runCli only-matching mode respects max-count by matching line" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:needle\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:12:needle\n"));
-    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2:1:needle\n"));
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, run.stdout, "many.txt:needle\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -121,9 +117,7 @@ test "runCli replace works with only-matching mode" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:HIT\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:12:HIT\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2:1:HIT\n"));
+    try testing.expectEqual(@as(usize, 3), std.mem.count(u8, run.stdout, "many.txt:HIT\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -152,7 +146,7 @@ test "runCli replace expands captures in only-matching mode" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:1:1:bar/foo/foo bar\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:bar/foo/foo bar\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -181,7 +175,7 @@ test "runCli replace expands named captures and escapes dollar" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:1:1:$bar-foo\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:$bar-foo\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -219,8 +213,8 @@ test "runCli honors max depth in recursive search" {
     defer shallow.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), shallow.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, shallow.stdout, 1, "root.txt:1:1:needle root"));
-    try testing.expect(std.mem.containsAtLeast(u8, shallow.stdout, 1, "child.txt:1:1:needle child"));
+    try testing.expect(std.mem.containsAtLeast(u8, shallow.stdout, 1, "root.txt:needle root"));
+    try testing.expect(std.mem.containsAtLeast(u8, shallow.stdout, 1, "child.txt:needle child"));
     try testing.expect(!std.mem.containsAtLeast(u8, shallow.stdout, 1, "grandchild.txt"));
 }
 
@@ -245,7 +239,7 @@ test "runCli can search binary files when text mode is enabled" {
     const searched = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "needle", root_path });
     defer searched.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), searched.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, searched.stdout, 1, "payload.bin:1:4:aa\x00needle\x00bb\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, searched.stdout, 1, "payload.bin:aa\x00needle\x00bb\n"));
 }
 
 test "runCli binary mode reports binary matches without line content" {
@@ -311,7 +305,7 @@ test "runCli raw-byte encoding mode searches binary payloads without text mode" 
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "payload.bin:1:4:aa"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "payload.bin:aa"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -344,7 +338,7 @@ test "runCli compressed search mode finds matches in gzip files" {
     const zip_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "-z", "Hello", root_path });
     defer zip_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), zip_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, zip_run.stdout, 1, "sample.txt.gz:1:1:Hello world"));
+    try testing.expect(std.mem.containsAtLeast(u8, zip_run.stdout, 1, "sample.txt.gz:Hello world"));
 }
 
 test "runCli preprocessor takes precedence over compressed search" {
@@ -397,7 +391,7 @@ test "runCli preprocessor takes precedence over compressed search" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt.gz:1:1:needle from pre"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt.gz:needle from pre"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "Hello world"));
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -479,7 +473,7 @@ test "runCli preprocessor transforms matching files selected by pre-glob" {
     defer pre_run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), pre_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, pre_run.stdout, 1, "sample.wrapped:1:1:needle from pre"));
+    try testing.expect(std.mem.containsAtLeast(u8, pre_run.stdout, 1, "sample.wrapped:needle from pre"));
     try testing.expect(!std.mem.containsAtLeast(u8, pre_run.stdout, 1, "plain.txt"));
 }
 
@@ -547,7 +541,7 @@ test "runCli skips invalid UTF-8 files instead of aborting the whole search" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "good.txt:1:1:needle here"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "good.txt:needle here"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stderr, 1, "InvalidUtf8"));
 }
 
@@ -569,7 +563,7 @@ test "runCli text mode searches invalid UTF-8 files through the raw-byte matcher
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "bad.bin:1:4:xx\\xFFneedleyy"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "bad.bin:xx\\xFFneedleyy"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -591,7 +585,7 @@ test "runCli text mode lets dot match an invalid byte through the raw-byte match
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "dot.bin:1:1:a\\xFFb"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "dot.bin:a\\xFFb"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -613,7 +607,7 @@ test "runCli text mode matches UTF-8 literals through the byte path on invalid U
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8.bin:1:4:xx\\xFFжарyy"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf8.bin:xx\\xFFжарyy"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -635,7 +629,7 @@ test "runCli default mode uses the raw-byte path for planner-covered invalid UTF
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:1:4:xx\\xFFneedleyy"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:xx\\xFFneedleyy"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -657,7 +651,7 @@ test "runCli default mode uses the raw-byte path for empty capture groups on inv
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:1:4:xx\\xFFabyy"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:xx\\xFFabyy"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -679,7 +673,7 @@ test "runCli default mode uses the raw-byte path for grouped concatenation insid
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:1:3:zzxa\\xFF7byy"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:zzxa\\xFF7byy"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -701,7 +695,7 @@ test "runCli default mode uses the raw-byte path for quantified bare anchors on 
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:1:1:\\xFFabc"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:\\xFFabc"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -723,7 +717,7 @@ test "runCli default mode uses the general raw-byte VM when no planner path exis
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:1:1:aby\\xFF"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "textish.bin:aby\\xFF"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -756,24 +750,24 @@ test "runCli supports mixed shorthand compatibility semantics" {
     const digit_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "a\\db", root_path });
     defer digit_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), digit_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:1:1:a5b"));
-    try testing.expect(std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:2:1:a١b"));
+    try testing.expect(std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:a5b"));
+    try testing.expect(std.mem.containsAtLeast(u8, digit_run.stdout, 1, "sample.txt:a١b"));
     try testing.expect(!std.mem.containsAtLeast(u8, digit_run.stdout, 1, "a²b"));
 
     const word_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\w+", root_path });
     defer word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), word_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:1:1:a5b"));
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:4:1:Жβ"));
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:5:1:a\xCD\x85"));
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:6:1:word_123"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:a5b"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:Жβ"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:a\xCD\x85"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:word_123"));
 
     const space_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "\\s+", root_path });
     defer space_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), space_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, space_run.stdout, 1, "sample.txt:1:4:a5b"));
+    try testing.expect(std.mem.containsAtLeast(u8, space_run.stdout, 1, "sample.txt:a5b"));
     try testing.expect(std.mem.containsAtLeast(u8, space_run.stdout, 1, "foo\xC2\xA0bar"));
-    try testing.expect(std.mem.containsAtLeast(u8, space_run.stdout, 1, "space.txt:1:1: \t"));
+    try testing.expect(std.mem.containsAtLeast(u8, space_run.stdout, 1, "space.txt: \t"));
 }
 
 test "runCli shorthand negation matches invalid UTF-8 bytes on the raw-byte path" {
@@ -794,7 +788,7 @@ test "runCli shorthand negation matches invalid UTF-8 bytes on the raw-byte path
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "raw.bin:1:1:a\\xFFb"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "raw.bin:a\\xFFb"));
 }
 
 test "runCli uses Unicode word shorthand semantics" {
@@ -822,17 +816,17 @@ test "runCli uses Unicode word shorthand semantics" {
     const word_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\w+", root_path });
     defer word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), word_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:1:1:Жβ"));
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:2:1:a\xCD\x85"));
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:3:1:_"));
-    try testing.expect(!std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:4:1:-"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:Жβ"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:a\xCD\x85"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:_"));
+    try testing.expect(!std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:-"));
     try testing.expect(!std.mem.containsAtLeast(u8, word_run.stdout, 1, "raw.bin"));
 
     const not_word_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\W+", root_path });
     defer not_word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), not_word_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "sample.txt:4:1:-"));
-    try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "raw.bin:1:1:\\xFF"));
+    try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "sample.txt:-"));
+    try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "raw.bin:\\xFF"));
 }
 
 test "runCli supports word boundaries on UTF-8 and raw-byte inputs" {
@@ -860,24 +854,24 @@ test "runCli supports word boundaries on UTF-8 and raw-byte inputs" {
     const word_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\bcat\\b", root_path });
     defer word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), word_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:1:3:a cat!"));
-    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "raw.bin:1:2:\\xFFcat\\xFF"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "sample.txt:a cat!"));
+    try testing.expect(std.mem.containsAtLeast(u8, word_run.stdout, 1, "raw.bin:\\xFFcat\\xFF"));
     try testing.expect(!std.mem.containsAtLeast(u8, word_run.stdout, 1, "scatter"));
 
     const not_word_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\Bcat\\B", root_path });
     defer not_word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), not_word_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "sample.txt:2:2:scatter"));
+    try testing.expect(std.mem.containsAtLeast(u8, not_word_run.stdout, 1, "sample.txt:scatter"));
 
     const unicode_word_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\bЖβ\\b", root_path });
     defer unicode_word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), unicode_word_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, unicode_word_run.stdout, 1, "sample.txt:3:1:Жβ"));
+    try testing.expect(std.mem.containsAtLeast(u8, unicode_word_run.stdout, 1, "sample.txt:Жβ"));
 
     const combining_word_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\bβ\xCD\x85\\b", root_path });
     defer combining_word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), combining_word_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, combining_word_run.stdout, 1, "sample.txt:4:1:β\xCD\x85"));
+    try testing.expect(std.mem.containsAtLeast(u8, combining_word_run.stdout, 1, "sample.txt:β\xCD\x85"));
 }
 
 test "runCli supports inline Unicode mode toggles" {
@@ -903,22 +897,22 @@ test "runCli supports inline Unicode mode toggles" {
     const ascii_word_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u:\\w+)", root_path });
     defer ascii_word_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), ascii_word_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:1:1:A"));
-    try testing.expect(std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:3:1:AЖA"));
-    try testing.expect(std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:4:1:AЖЖ"));
-    try testing.expect(!std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:2:1:Ж"));
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:A"));
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:AЖA"));
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:AЖЖ"));
+    try testing.expect(!std.mem.containsAtLeast(u8, ascii_word_run.stdout, 1, "sample.txt:Ж"));
 
     const ascii_space_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "foo(?-u:\\s)bar", root_path });
     defer ascii_space_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), ascii_space_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, ascii_space_run.stdout, 1, "sample.txt:5:1:foo bar"));
-    try testing.expect(!std.mem.containsAtLeast(u8, ascii_space_run.stdout, 1, "sample.txt:6:1:foo"));
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_space_run.stdout, 1, "sample.txt:foo bar\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, ascii_space_run.stdout, 1, "sample.txt:foo\xC2\xA0bar"));
 
     const nested_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u:\\w(?u:\\w)\\w)", root_path });
     defer nested_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), nested_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, nested_run.stdout, 1, "sample.txt:3:1:AЖA"));
-    try testing.expect(!std.mem.containsAtLeast(u8, nested_run.stdout, 1, "sample.txt:4:1:AЖЖ"));
+    try testing.expect(std.mem.containsAtLeast(u8, nested_run.stdout, 1, "sample.txt:AЖA"));
+    try testing.expect(!std.mem.containsAtLeast(u8, nested_run.stdout, 1, "sample.txt:AЖЖ"));
 
     try testing.expectError(error.UnsupportedGroup, cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u:\\p{Greek})", root_path }));
 }
@@ -948,22 +942,22 @@ test "runCli supports half-word boundaries" {
     const half_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\b{start-half}cat\\b{end-half}", root_path });
     defer half_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), half_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:1:1:cat"));
-    try testing.expect(std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:2:2:!cat"));
-    try testing.expect(std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:3:1:cat!"));
-    try testing.expect(!std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:4:1:βcat"));
-    try testing.expect(!std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:5:1:catβ"));
+    try testing.expect(std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:cat"));
+    try testing.expect(std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:!cat"));
+    try testing.expect(std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:cat!"));
+    try testing.expect(!std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:βcat"));
+    try testing.expect(!std.mem.containsAtLeast(u8, half_run.stdout, 1, "sample.txt:catβ"));
 
     const minus_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "\\b{start-half}-2\\b{end-half}", root_path });
     defer minus_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), minus_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, minus_run.stdout, 1, "sample.txt:6:2:(-2)"));
+    try testing.expect(std.mem.containsAtLeast(u8, minus_run.stdout, 1, "sample.txt:(-2)"));
 
     const ascii_half_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u:\\b{start-half}A\\b{end-half})", root_path });
     defer ascii_half_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), ascii_half_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, ascii_half_run.stdout, 1, "sample.txt:7:2:!A!"));
-    try testing.expect(!std.mem.containsAtLeast(u8, ascii_half_run.stdout, 1, "sample.txt:8:2:!Ж!"));
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_half_run.stdout, 1, "sample.txt:!A!"));
+    try testing.expect(!std.mem.containsAtLeast(u8, ascii_half_run.stdout, 1, "sample.txt:!Ж!"));
 }
 
 test "runCli supports basic class-set operators" {
@@ -987,16 +981,16 @@ test "runCli supports basic class-set operators" {
     const subtraction_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "[\\w--\\p{ASCII}]+", root_path });
     defer subtraction_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), subtraction_run.exit_code);
-    try testing.expect(!std.mem.containsAtLeast(u8, subtraction_run.stdout, 1, "sample.txt:1:1:A"));
-    try testing.expect(std.mem.containsAtLeast(u8, subtraction_run.stdout, 1, "sample.txt:2:1:Ж"));
-    try testing.expect(std.mem.containsAtLeast(u8, subtraction_run.stdout, 1, "sample.txt:3:1:Ω"));
-    try testing.expect(std.mem.containsAtLeast(u8, subtraction_run.stdout, 1, "sample.txt:4:1:ω"));
+    try testing.expect(!std.mem.containsAtLeast(u8, subtraction_run.stdout, 1, "sample.txt:A"));
+    try testing.expect(std.mem.containsAtLeast(u8, subtraction_run.stdout, 1, "sample.txt:Ж"));
+    try testing.expect(std.mem.containsAtLeast(u8, subtraction_run.stdout, 1, "sample.txt:Ω"));
+    try testing.expect(std.mem.containsAtLeast(u8, subtraction_run.stdout, 1, "sample.txt:ω"));
 
     const intersection_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "[\\p{Greek}&&\\p{Uppercase}]+", root_path });
     defer intersection_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), intersection_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, intersection_run.stdout, 1, "sample.txt:3:1:Ω"));
-    try testing.expect(!std.mem.containsAtLeast(u8, intersection_run.stdout, 1, "sample.txt:4:1:ω"));
+    try testing.expect(std.mem.containsAtLeast(u8, intersection_run.stdout, 1, "sample.txt:Ω"));
+    try testing.expect(!std.mem.containsAtLeast(u8, intersection_run.stdout, 1, "sample.txt:ω"));
 }
 
 test "runCli supports nested class-set expressions" {
@@ -1021,11 +1015,11 @@ test "runCli supports nested class-set expressions" {
     const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "[\\w--[\\p{ASCII}&&[^_]]]+", root_path });
     defer run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:A"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:_"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:3:1:Ж"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:4:1:Ω"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:5:1:ω"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:A"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:_"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:Ж"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:Ω"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:ω"));
 }
 
 test "runCli supports inline case-fold groups" {
@@ -1051,26 +1045,26 @@ test "runCli supports inline case-fold groups" {
     const local_on_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?i:a)", root_path });
     defer local_on_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), local_on_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, local_on_run.stdout, 1, "sample.txt:1:1:A"));
-    try testing.expect(std.mem.containsAtLeast(u8, local_on_run.stdout, 1, "sample.txt:2:1:a"));
+    try testing.expect(std.mem.containsAtLeast(u8, local_on_run.stdout, 1, "sample.txt:A"));
+    try testing.expect(std.mem.containsAtLeast(u8, local_on_run.stdout, 1, "sample.txt:a"));
 
     const local_off_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?i:a)(?-i:A)", root_path });
     defer local_off_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), local_off_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, local_off_run.stdout, 1, "sample.txt:3:1:aA"));
-    try testing.expect(!std.mem.containsAtLeast(u8, local_off_run.stdout, 1, "sample.txt:4:1:Aa"));
+    try testing.expect(std.mem.containsAtLeast(u8, local_off_run.stdout, 1, "sample.txt:aA"));
+    try testing.expect(!std.mem.containsAtLeast(u8, local_off_run.stdout, 1, "sample.txt:Aa"));
 
     const unicode_local_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?i:ω)", root_path });
     defer unicode_local_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), unicode_local_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, unicode_local_run.stdout, 1, "sample.txt:5:1:Ω"));
-    try testing.expect(std.mem.containsAtLeast(u8, unicode_local_run.stdout, 1, "sample.txt:6:1:ω"));
+    try testing.expect(std.mem.containsAtLeast(u8, unicode_local_run.stdout, 1, "sample.txt:Ω"));
+    try testing.expect(std.mem.containsAtLeast(u8, unicode_local_run.stdout, 1, "sample.txt:ω"));
 
     const override_global_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--ignore-case", "(?-i:A)", root_path });
     defer override_global_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), override_global_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, override_global_run.stdout, 1, "sample.txt:1:1:A"));
-    try testing.expect(!std.mem.containsAtLeast(u8, override_global_run.stdout, 1, "sample.txt:2:1:a"));
+    try testing.expect(std.mem.containsAtLeast(u8, override_global_run.stdout, 1, "sample.txt:A\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, override_global_run.stdout, 1, "sample.txt:a\n"));
 }
 
 test "runCli supports inline multiline and dotall groups" {
@@ -1094,8 +1088,8 @@ test "runCli supports inline multiline and dotall groups" {
     const multiline_anchor = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?m:^b$)", root_path });
     defer multiline_anchor.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), multiline_anchor.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, multiline_anchor.stdout, 1, "sample.txt:2:1:b"));
-    try testing.expect(std.mem.containsAtLeast(u8, multiline_anchor.stdout, 1, "sample.txt:4:1:b"));
+    try testing.expect(std.mem.containsAtLeast(u8, multiline_anchor.stdout, 1, "sample.txt:b"));
+    try testing.expect(std.mem.containsAtLeast(u8, multiline_anchor.stdout, 1, "sample.txt:b"));
 
     const absolute_anchor = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?-m:^b$)", root_path });
     defer absolute_anchor.deinit(testing.allocator);
@@ -1137,20 +1131,20 @@ test "runCli supports unscoped inline flag toggles" {
     const local_case = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?i)a(?-i)A", root_path });
     defer local_case.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), local_case.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, local_case.stdout, 1, "sample.txt:3:1:aA"));
-    try testing.expect(std.mem.containsAtLeast(u8, local_case.stdout, 1, "sample.txt:4:1:AA"));
-    try testing.expect(!std.mem.containsAtLeast(u8, local_case.stdout, 1, "sample.txt:5:1:Aa"));
+    try testing.expect(std.mem.containsAtLeast(u8, local_case.stdout, 1, "sample.txt:aA"));
+    try testing.expect(std.mem.containsAtLeast(u8, local_case.stdout, 1, "sample.txt:AA"));
+    try testing.expect(!std.mem.containsAtLeast(u8, local_case.stdout, 1, "sample.txt:Aa"));
 
     const ascii_word = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?-u)\\w+", root_path });
     defer ascii_word.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), ascii_word.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:1:1:A"));
-    try testing.expect(!std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:6:1:Ж"));
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:A"));
+    try testing.expect(!std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:Ж"));
 
     const multiline_anchor = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?m)^b$", root_path });
     defer multiline_anchor.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), multiline_anchor.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, multiline_anchor.stdout, 1, "sample.txt:8:1:b"));
+    try testing.expect(std.mem.containsAtLeast(u8, multiline_anchor.stdout, 1, "sample.txt:b"));
 
     try testing.expectError(error.MultilineRequired, cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?s)a.b", root_path }));
 
@@ -1181,7 +1175,7 @@ test "runCli supports grouped inline flag bundles" {
     const multiline_case = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?im:^a$)", root_path });
     defer multiline_case.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), multiline_case.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, multiline_case.stdout, 1, "sample.txt:2:1:A"));
+    try testing.expect(std.mem.containsAtLeast(u8, multiline_case.stdout, 1, "sample.txt:A"));
 
     const no_multiline = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?i-m:^a$)", root_path });
     defer no_multiline.deinit(testing.allocator);
@@ -1194,8 +1188,8 @@ test "runCli supports grouped inline flag bundles" {
     const ascii_word = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "(?i-u:\\w+)", root_path });
     defer ascii_word.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), ascii_word.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:2:1:A"));
-    try testing.expect(!std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:5:1:Ж"));
+    try testing.expect(std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:A"));
+    try testing.expect(!std.mem.containsAtLeast(u8, ascii_word.stdout, 1, "sample.txt:Ж"));
 }
 
 test "runCli supports non-capturing groups" {
@@ -1219,9 +1213,9 @@ test "runCli supports non-capturing groups" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:ababx"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:abx"));
-    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:3:1:ax"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:ababx"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:abx"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:ax"));
 }
 
 test "runCli supports named capture groups" {
@@ -1244,8 +1238,8 @@ test "runCli supports named capture groups" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:1:1:abcc"));
-    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:2:1:zz"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:abcc"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "sample.txt:zz"));
 }
 
 
@@ -1272,7 +1266,7 @@ test "runCli skips control-heavy binary payloads by default but searches them wi
     const text_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "needle", root_path });
     defer text_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), text_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, text_run.stdout, 1, "control-heavy.bin:1:9:\x01\x02\x03\x04\x05\x06\x07\x08needle\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, text_run.stdout, 1, "control-heavy.bin:\x01\x02\x03\x04\x05\x06\x07\x08needle\n"));
 }
 
 test "runCli can search UTF-16LE BOM files in default mode" {
@@ -1293,7 +1287,7 @@ test "runCli can search UTF-16LE BOM files in default mode" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf16le.txt:1:1:needle"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf16le.txt:needle"));
 }
 
 test "runCli can search UTF-16BE BOM files in default mode" {
@@ -1314,7 +1308,7 @@ test "runCli can search UTF-16BE BOM files in default mode" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf16be.txt:1:1:needle"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "utf16be.txt:needle"));
 }
 
 test "runCli can force UTF-16LE decoding without a BOM" {
@@ -1345,7 +1339,7 @@ test "runCli can force UTF-16LE decoding without a BOM" {
     defer forced_run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), forced_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "utf16le-no-bom.txt:1:1:needle"));
+    try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "utf16le-no-bom.txt:needle"));
 }
 
 test "runCli can force UTF-16BE decoding without a BOM" {
@@ -1372,7 +1366,7 @@ test "runCli can force UTF-16BE decoding without a BOM" {
     defer forced_run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), forced_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "utf16be-no-bom.txt:1:1:needle"));
+    try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "utf16be-no-bom.txt:needle"));
 }
 
 test "runCli can force latin1 decoding" {
@@ -1403,7 +1397,7 @@ test "runCli can force latin1 decoding" {
     defer forced_run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), forced_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "latin1.txt:1:1:café needle"));
+    try testing.expect(std.mem.containsAtLeast(u8, forced_run.stdout, 1, "latin1.txt:café needle"));
 }
 
 test "reportFileMatch only owns line bytes for transformed haystacks" {
@@ -1457,8 +1451,8 @@ test "writeFileReports does not require owned line bytes for decoded multi-line 
 
     try testing.expect(matched.matched);
     try testing.expectEqualStrings(
-        "utf16.txt:1:1:needle one\n" ++
-            "utf16.txt:3:1:needle two\n",
+        "utf16.txt:needle one\n" ++
+            "utf16.txt:needle two\n",
         capture.written(),
     );
 }
@@ -1530,8 +1524,8 @@ test "writeFileReports supports Unicode digit shorthand on full file contents" {
 
     try testing.expect(matched.matched);
     try testing.expectEqualStrings(
-        "sample.txt:1:1:a5b\n" ++
-            "sample.txt:2:1:a١b\n",
+        "sample.txt:a5b\n" ++
+            "sample.txt:a١b\n",
         capture.written(),
     );
 }
@@ -1621,7 +1615,7 @@ test "runCli output toggles apply across the end-to-end path" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expectEqualStrings("1:prefix needle suffix\n", run.stdout);
+    try testing.expectEqualStrings("prefix needle suffix\n", run.stdout);
 }
 
 test "runCli parallel and sequential modes produce the same output set" {
@@ -1821,7 +1815,7 @@ test "runCli type, glob, and ignore controls compose on the end-to-end path" {
     defer default_run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), default_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, default_run.stdout, 1, "shown.zig:1:1:needle shown"));
+    try testing.expect(std.mem.containsAtLeast(u8, default_run.stdout, 1, "shown.zig:needle shown"));
     try testing.expect(!std.mem.containsAtLeast(u8, default_run.stdout, 1, "ignored.zig"));
     try testing.expect(!std.mem.containsAtLeast(u8, default_run.stdout, 1, "other.txt"));
 
@@ -1838,7 +1832,7 @@ test "runCli type, glob, and ignore controls compose on the end-to-end path" {
     defer unrestricted_run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), unrestricted_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, unrestricted_run.stdout, 1, "shown.zig:1:1:needle shown"));
-    try testing.expect(std.mem.containsAtLeast(u8, unrestricted_run.stdout, 1, "ignored.zig:1:1:needle hidden"));
+    try testing.expect(std.mem.containsAtLeast(u8, unrestricted_run.stdout, 1, "shown.zig:needle shown"));
+    try testing.expect(std.mem.containsAtLeast(u8, unrestricted_run.stdout, 1, "ignored.zig:needle hidden"));
     try testing.expect(!std.mem.containsAtLeast(u8, unrestricted_run.stdout, 1, "other.txt"));
 }

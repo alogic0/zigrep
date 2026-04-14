@@ -3,8 +3,8 @@ const search = @import("search/root.zig");
 
 pub const OutputOptions = struct {
     with_filename: bool = true,
-    line_number: bool = true,
-    column_number: bool = true,
+    line_number: bool = false,
+    column_number: bool = false,
     only_matching: bool = false,
     null_path_terminator: bool = false,
     heading: bool = false,

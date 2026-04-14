@@ -26,6 +26,7 @@ pub const CliOptions = command.CliOptions;
 pub const SearchStats = search_result.SearchStats;
 pub const SearchResult = search_result.SearchResult;
 const stdin_label = "stdin";
+const stdin_json_label = "<stdin>";
 
 pub fn runSearch(
     allocator: std.mem.Allocator,
@@ -101,7 +102,7 @@ pub fn runSearch(
             .elapsed_total_ns = total_timer.read(),
         });
     }
-    if (effective_reporting.show_stats) try writeStats(stderr, result.stats);
+    if (effective_reporting.show_stats) try writeStats(stderr, result.stats, total_timer.read());
     return if (result.matched) 0 else 1;
 }
 
@@ -140,13 +141,13 @@ pub fn runStdinSearch(
     const effective_binary_output = if (traversal.search_compressed)
         search_execution.decideBinaryBehavior(search_bytes, matcher) orelse {
             const stats: SearchStats = .{ .skipped_binary_files = 1 };
-            if (reporting.show_stats) try writeStats(stderr, stats);
+            if (reporting.show_stats) try writeStats(stderr, stats, total_timer.read());
             return 1;
         }
     else
         search_execution.decideBinaryBehavior(stdin_bytes, matcher) orelse {
             const stats: SearchStats = .{ .skipped_binary_files = 1 };
-            if (reporting.show_stats) try writeStats(stderr, stats);
+            if (reporting.show_stats) try writeStats(stderr, stats, total_timer.read());
             return 1;
         };
     const raw_text_output = search_execution.shouldRenderRawBinaryText(search_bytes, matcher);
@@ -157,14 +158,14 @@ pub fn runStdinSearch(
     var search_timer = try std.time.Timer.start();
 
     if (reporting.output_format == .json) {
-        try search_output.writeJsonBeginEvent(output_writer, stdin_label);
+        try search_output.writeJsonBeginEvent(output_writer, stdin_json_label);
     }
 
     const report = try search_reporting.writeFileOutput(
         allocator,
         output_writer,
         &searcher,
-        stdin_label,
+        if (reporting.output_format == .json) stdin_json_label else stdin_label,
         search_bytes,
         matcher.encoding,
         effective_binary_output,
@@ -181,7 +182,7 @@ pub fn runStdinSearch(
     if (reporting.output_format == .json) {
         const pre_end_written = json_capture.written();
         const elapsed_ns = search_timer.read();
-        try search_output.writeJsonEndEvent(output_writer, stdin_label, .{
+        try search_output.writeJsonEndEvent(output_writer, stdin_json_label, .{
             .bytes_searched = search_bytes.len,
             .bytes_printed = pre_end_written.len,
             .searches = 1,
@@ -212,7 +213,7 @@ pub fn runStdinSearch(
         .matches = report.matches,
         .elapsed_ns = if (reporting.output_format == .json) search_timer.read() else 0,
     };
-    if (reporting.show_stats) try writeStats(stderr, stats);
+    if (reporting.show_stats) try writeStats(stderr, stats, total_timer.read());
     return if (report.matched) 0 else 1;
 }
 
@@ -329,9 +330,37 @@ fn searchEntriesParallel(
     return search_parallel.searchEntriesParallel(stdout, stderr, entries, options, schedule);
 }
 
-fn writeStats(writer: *std.Io.Writer, stats: SearchStats) !void {
+fn writeStats(writer: *std.Io.Writer, stats: SearchStats, total_elapsed_ns: u64) !void {
+    const search_secs_whole = stats.elapsed_ns / std.time.ns_per_s;
+    const search_secs_frac = (stats.elapsed_ns % std.time.ns_per_s) / std.time.ns_per_us;
+    const total_secs_whole = total_elapsed_ns / std.time.ns_per_s;
+    const total_secs_frac = (total_elapsed_ns % std.time.ns_per_s) / std.time.ns_per_us;
+
     try writer.print(
-        "stats: searched_files={d} matched_files={d} searched_bytes={d} skipped_binary_files={d} warnings_emitted={d}\n",
-        .{ stats.searched_files, stats.matched_files, stats.searched_bytes, stats.skipped_binary_files, stats.warnings_emitted },
+        "\n{d} matches\n{d} matched lines\n{d} files contained matches\n{d} files searched\n{d} bytes printed\n{d} bytes searched\n{d}.{d:0>6} seconds spent searching\n{d}.{d:0>6} seconds total\n",
+        .{
+            stats.matches,
+            stats.matched_lines,
+            stats.matched_files,
+            stats.searched_files,
+            stats.printed_bytes,
+            stats.searched_bytes,
+            search_secs_whole,
+            search_secs_frac,
+            total_secs_whole,
+            total_secs_frac,
+        },
     );
+    if (stats.skipped_binary_files != 0) {
+        try writer.print("{d} {s} skipped as binary\n", .{
+            stats.skipped_binary_files,
+            if (stats.skipped_binary_files == 1) "file was" else "files were",
+        });
+    }
+    if (stats.warnings_emitted != 0) {
+        try writer.print("{d} {s} emitted\n", .{
+            stats.warnings_emitted,
+            if (stats.warnings_emitted == 1) "warning was" else "warnings were",
+        });
+    }
 }

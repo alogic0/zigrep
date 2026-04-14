@@ -281,6 +281,8 @@ Filename default note:
 - `--sort modified` and `--sortr modified` sort results by file modification time
 - `--sort accessed` and `--sortr accessed` sort results by file access time
 - timestamp sorts use path order as a deterministic tie-breaker
+- when no explicit sort is requested, default file/path ordering remains implementation-defined
+- `--sort` / `--sortr` are the stable ordering surface when reproducible output order matters
 - sorting stays in the collected result-ordering layer and forces single-threaded reporting
 - `created` is recognized as a sort mode but is currently rejected with an explicit creation-time-unavailable message on the current portable implementation surface
 
@@ -335,8 +337,9 @@ Context mode note:
 
 `--stats` note:
 
-- `--stats` prints a compact search summary to stderr after the normal search output
-- the current summary includes searched file count, matched file count, searched byte count, and skipped binary-file count
+- `--stats` prints a ripgrep-like multi-line search summary to stderr after the normal search output
+- the current summary includes match count, matched-line count, matched-file count, searched-file count, printed/search byte counts, and elapsed searching/total time
+- skipped binary files and emitted warnings are reported as extra trailing lines when those counters are non-zero
 - `--stats` does not change normal exit codes or stdout search results
 - `--stats` is currently a no-op with `--files`, `--files-with-matches`, and `--files-without-match`
 

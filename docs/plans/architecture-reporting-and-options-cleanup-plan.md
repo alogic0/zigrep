@@ -162,12 +162,15 @@ The main issues to address are:
     promoting sort capability helpers to a normal app-facing export.
   - `testing.search_reporting` exists only to keep test imports inside the
     `zigrep` module without treating reporting as a normal app-facing export.
+  - `src/search_reporting_types.zig` remains as a tiny shared owner for
+    `ReportSummary` so the reporting-family modules can share that type without
+    introducing facade import cycles.
 
 ## Validation
 
 - [x] Keep current CLI behavior unchanged
 - [x] Keep current regex behavior unchanged
-- [ ] Run:
+- [x] Run:
   - [x] `zig build test`
   - [x] `zig build bench-smoke`
 - [x] Re-run the practical parity checks that recently exercised:

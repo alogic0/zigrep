@@ -36,8 +36,8 @@ test "runSearch parallel path preserves heading groups" {
     });
 
     try testing.expectEqual(@as(u8, 0), exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt\n1:1:needle one"));
-    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt\n1:1:needle two"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt\nneedle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt\nneedle two"));
     try testing.expectEqualStrings("", stderr_capture.written());
 }
 
@@ -71,9 +71,9 @@ test "runSearch parallel path prints every matching line from one file" {
     });
 
     try testing.expectEqual(@as(u8, 0), exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:1:1:needle one"));
-    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:2:1:needle again"));
-    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt:1:1:needle two"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:needle again"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt:needle two"));
     try testing.expectEqualStrings("", stderr_capture.written());
 }
 
@@ -162,7 +162,7 @@ test "formatReport escapes unsafe bytes in displayed lines" {
     const line = try search_reporting.formatReport(testing.allocator, report, .{});
     defer testing.allocator.free(line);
 
-    try testing.expectEqualStrings("sample.bin:1:4:aa\\x00\\xFFneedle\\x1B\n", line);
+    try testing.expectEqualStrings("sample.bin:aa\\x00\\xFFneedle\\x1B\n", line);
 }
 
 test "runSearch reports matches across files on the parallel path" {
@@ -199,8 +199,8 @@ test "runSearch reports matches across files on the parallel path" {
     });
 
     try testing.expectEqual(@as(u8, 0), exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:1:1:needle one"));
-    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt:1:1:needle two"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "one.txt:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, stdout_capture.written(), 1, "two.txt:needle two"));
     try testing.expectEqualStrings("", stderr_capture.written());
 }
 
@@ -368,8 +368,8 @@ test "runSearch sort path disables parallel reordering and sorts descending" {
     });
 
     try testing.expectEqual(@as(u8, 0), exit_code);
-    const a_index = std.mem.indexOf(u8, stdout_capture.written(), "a.txt:1:1:needle one").?;
-    const b_index = std.mem.indexOf(u8, stdout_capture.written(), "b.txt:1:1:needle two").?;
+    const a_index = std.mem.indexOf(u8, stdout_capture.written(), "a.txt:needle one").?;
+    const b_index = std.mem.indexOf(u8, stdout_capture.written(), "b.txt:needle two").?;
     try testing.expect(b_index < a_index);
     try testing.expectEqualStrings("", stderr_capture.written());
 }

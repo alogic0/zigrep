@@ -49,9 +49,9 @@ test "runCli max-count limits matching lines per file" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:needle one"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:3:1:needle two"));
-    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:4:1:needle three"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:needle two"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:needle three"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -81,13 +81,13 @@ test "runCli context mode prints surrounding lines and separators" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-2-before\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:3:1:needle one\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-4-after\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-before\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:needle one\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-after\n"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "--\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-6-gap2\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:7:1:needle two\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-8-tail\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-gap2\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:needle two\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-tail\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -115,9 +115,9 @@ test "runCli context mode respects max-count" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-1-before\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:2:1:needle one\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-3-after\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-before\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:needle one\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-after\n"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "needle two"));
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -140,7 +140,7 @@ test "runCli replace rewrites every match occurrence in a matching line" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:HIT one HIT two\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:HIT one HIT two\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -165,9 +165,9 @@ test "runCli replace works with context mode and leaves context lines untouched"
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-1-before\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:2:1:HIT one HIT two\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-3-after\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-before\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:HIT one HIT two\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-after\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -195,7 +195,7 @@ test "runCli replace expands numbered captures in matching lines" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:1:1:Xbar-foo-foo bar\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:Xbar-foo-foo bar\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -221,7 +221,7 @@ test "runCli glob mode filters files by positive glob" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "keep.txt:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "keep.txt:needle one"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "skip.md"));
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -248,8 +248,8 @@ test "runCli glob mode supports negative globs" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt:1:1:needle one"));
-    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "main.txt:1:1:needle two"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt:needle one"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "main.txt:needle two"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -275,7 +275,7 @@ test "runCli glob mode supports case-insensitive globs" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "Keep.ZIG:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "Keep.ZIG:needle one"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "skip.md"));
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -302,8 +302,8 @@ test "runCli sort path orders matching files ascending" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    const a_index = std.mem.indexOf(u8, run.stdout, "a.txt:1:1:needle one").?;
-    const b_index = std.mem.indexOf(u8, run.stdout, "b.txt:1:1:needle two").?;
+    const a_index = std.mem.indexOf(u8, run.stdout, "a.txt:needle one").?;
+    const b_index = std.mem.indexOf(u8, run.stdout, "b.txt:needle two").?;
     try testing.expect(a_index < b_index);
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -330,7 +330,7 @@ test "runCli type include filter limits matches" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "main.zig:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "main.zig:needle one"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "README.md"));
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -357,7 +357,7 @@ test "runCli type exclude filter skips matching type" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "main.zig:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "main.zig:needle one"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "README.md"));
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -392,7 +392,7 @@ test "runCli type-add defines custom type" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "home.web:1:1:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "home.web:needle one"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "main.zig"));
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -481,8 +481,8 @@ test "runCli invert-match prints non-matching lines" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2:1:skip this"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:4:1:keep this"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:skip this"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:keep this"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "needle one"));
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -758,11 +758,12 @@ test "runCli stats mode prints search summary to stderr" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt:1:1:needle one"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "stats: searched_files=2"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "matched_files=1"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "skipped_binary_files=1"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "warnings_emitted=0"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt:needle one"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "1 match"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "1 files contained matches"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "2 files searched"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "1 file was skipped as binary"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "seconds total"));
 }
 
 test "runCli json count mode falls back to text and can emit stats on stderr" {
@@ -792,7 +793,10 @@ test "runCli json count mode falls back to text and can emit stats on stderr" {
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2\n"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "stats: searched_files=1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "0 matches"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "1 files contained matches"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "1 files searched"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "seconds spent searching"));
 }
 
 test "runCli json files-with-matches mode falls back to text path output" {
@@ -840,8 +844,8 @@ test "runCli heading mode groups matches by file" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt\n1:1:needle one\n"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "two.txt\n2:1:needle two\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt\nneedle one\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "two.txt\nneedle two\n"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\n\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -996,6 +1000,6 @@ test "runCli heading preserves explicit heading behavior for one explicit file" 
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "single.txt\n1:1:needle one\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "single.txt\nneedle one\n"));
     try testing.expectEqualStrings("", run.stderr);
 }
