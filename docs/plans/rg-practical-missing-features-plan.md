@@ -13,10 +13,8 @@ use.
 From direct `zigrep` use in this repository, the remaining missing features
 were:
 
-- case-insensitive glob filtering via `--iglob`
-- stdin-driven search for pipeline workflows
-- replacement/substitution support
-- sorting controls for result ordering
+- timestamp-based sorting modes
+- ripgrep-style single-file default filename suppression
 
 ## Priority
 
@@ -26,6 +24,12 @@ Priority should stay grounded in actual usage:
 2. stdin search
 3. sorting controls
 4. replacement/substitution
+
+With the earlier practical slices now implemented, the remaining follow-up
+priority inside this plan should be:
+
+1. timestamp-based sorting modes
+2. single-file default filename behavior
 
 That ordering reflects how often these features still affect normal code-search
 work.
@@ -102,6 +106,58 @@ work.
 - [x] Decide whether substitution is output-only, file-rewriting, or both.
 - [x] Keep file mutation out of scope unless explicitly designed and isolated.
 
+### Remaining Replacement Gap
+
+- [x] Add capture-expanding replacement for `-r` / `--replace`.
+- [x] Decide the initial supported expansion surface:
+  - numbered captures like `$1`
+  - named captures if already available from the regex compiler/runtime
+  - escaping rules for literal `$`
+- [x] Keep replacement output-only unless file-rewrite semantics are
+  explicitly designed later.
+
+### Replacement Guidance
+
+- Reuse the existing match-span reporting path and current capture support in
+  the regex engine.
+- Do not redesign the regex compiler just to add replacement expansion.
+- If named-capture expansion is materially more invasive than numbered
+  captures, land numbered captures first and document the limitation.
+
+## Feature 5: Timestamp Sorting Modes
+
+- [ ] Extend `--sort` / `--sortr` beyond `path` to the practical timestamp
+  modes:
+  - `modified`
+  - `accessed`
+  - `created`
+- [ ] Match ripgrep’s behavior closely when a timestamp mode is recognized but
+  unsupported on the current platform or filesystem.
+- [ ] Keep timestamp sorting in the post-collection ordering layer, not in the
+  traversal algorithm.
+
+### Timestamp Sort Guidance
+
+- Reuse the existing sorting surface and ordering hook rather than adding a
+  separate family of flags.
+- Prefer explicit stat-based ordering over traversal-time heuristics.
+- Keep sorting single-threaded when a timestamp mode is active, consistent with
+  the current path-sort behavior.
+
+## Feature 6: Single-File Filename Defaults
+
+- [ ] Make default filename-prefix behavior match ripgrep more closely when the
+  search target is one explicit file.
+- [ ] Keep stdin behavior separate from explicit single-file path behavior.
+- [ ] Preserve `-H` / `--with-filename`, `--no-filename`, `--heading`, and
+  multi-path behavior as explicit overrides.
+
+### Filename Guidance
+
+- Keep this as a CLI/reporting policy adjustment, not a traversal change.
+- Avoid broad output-policy refactors; the gap is specifically the default case
+  for one explicit file versus multi-file search.
+
 ### Design Guidance
 
 - Treat substitution as a separate product decision, not just “one more flag”.
@@ -134,4 +190,4 @@ that still came up during real use:
 - case-insensitive glob filtering
 - pipeline-friendly stdin search
 - basic result ordering controls
-- a clearly decided substitution story
+- an output-only replacement story with capture expansion

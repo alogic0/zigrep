@@ -233,7 +233,7 @@ The current CLI supports:
 - Non-matching-file output with `-L` or `--files-without-match`
 - Inverted line selection with `-v` or `--invert-match`
 - Match-only output with `-o` or `--only-matching`
-- Output-only literal replacement with `-r` or `--replace`
+- Output-only replacement with `-r` or `--replace`
 - Newline-delimited JSON output with `--json`
 - NUL-delimited path output with `--null` for file-path reporting modes
 - Search summary output with `--stats`
@@ -257,6 +257,13 @@ Code-search note:
 - `--null` applies to `--files`
 - `--stats` is a no-op with `--files`
 - match-oriented flags such as explicit patterns, `-F`, `-v`, `-l`, `-L`, context flags, JSON output, heading output, and line/column toggles are rejected in `--files` mode
+
+`--replace` note:
+
+- `-r` or `--replace` changes printed match output only and does not rewrite files
+- replacement expansion supports `$0`, numbered captures like `$1`, braced forms like `${1}`, named captures like `$name` or `${name}`, and `$$` for a literal `$`
+- unknown capture names or indexes expand to an empty string
+- replacement currently remains incompatible with non-text or non-line-oriented modes such as `--count`, `--json`, `-v`, and multiline search
 
 `--quiet` note:
 

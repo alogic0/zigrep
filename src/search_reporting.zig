@@ -2,6 +2,7 @@ const std = @import("std");
 const zigrep = struct {
     pub const search = @import("search/root.zig");
 };
+const regex = @import("regex/root.zig");
 const command = @import("command.zig");
 const search_output = @import("search_output.zig");
 
@@ -12,13 +13,14 @@ const search_output = @import("search_output.zig");
 const OutputOptions = command.OutputOptions;
 const OutputFormat = command.OutputFormat;
 const ReportMode = command.ReportMode;
+const ReplacementSegment = search_output.ReplacementSegment;
 
 const ReplacedLine = struct {
     line_number: usize,
     column_number: usize,
     line: []const u8,
     line_span: zigrep.search.report.Span,
-    match_spans: []zigrep.search.report.Span,
+    segments: []ReplacementSegment,
 };
 pub fn writeFileReports(
     allocator: std.mem.Allocator,
@@ -31,6 +33,9 @@ pub fn writeFileReports(
     output_format: OutputFormat,
     max_count: ?usize,
 ) !bool {
+    if (output.replacement != null and output.only_matching) {
+        return writeFileOnlyMatchingReplacement(allocator, writer, searcher, path, bytes, encoding, output, max_count);
+    }
     if (output.replacement != null and !output.only_matching) {
         return writeFileReportsReplacing(allocator, writer, searcher, path, bytes, encoding, output, max_count);
     }
@@ -127,7 +132,10 @@ fn writeFileReportsReplacing(
 
     var lines: std.ArrayList(ReplacedLine) = .empty;
     defer {
-        for (lines.items) |line| allocator.free(line.match_spans);
+        for (lines.items) |line| {
+            for (line.segments) |segment| allocator.free(segment.replacement);
+            allocator.free(line.segments);
+        }
         lines.deinit(allocator);
     }
 
@@ -135,27 +143,48 @@ fn writeFileReportsReplacing(
         allocator: std.mem.Allocator,
         lines: *std.ArrayList(ReplacedLine),
         max_count: ?usize,
+        replacement_template: []const u8,
+        capture_names: []const ?[]const u8,
 
-        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
+        fn emit(self: *@This(), captured: zigrep.search.grep.CapturedMatchReport) !void {
+            const report = captured.report;
+            const replacement = try expandReplacementAlloc(
+                self.allocator,
+                self.replacement_template,
+                report.match_span,
+                captured.groups,
+                self.capture_names,
+                report.line,
+                report.line_span.start,
+            );
             if (self.lines.items.len != 0 and self.lines.items[self.lines.items.len - 1].line_span.start == report.line_span.start) {
                 var current = &self.lines.items[self.lines.items.len - 1];
-                current.match_spans = try self.allocator.realloc(current.match_spans, current.match_spans.len + 1);
-                current.match_spans[current.match_spans.len - 1] = report.match_span;
+                current.segments = try self.allocator.realloc(current.segments, current.segments.len + 1);
+                current.segments[current.segments.len - 1] = .{
+                    .match_span = report.match_span,
+                    .replacement = replacement,
+                };
                 return;
             }
 
             if (self.max_count) |limit| {
-                if (self.lines.items.len >= limit) return error.MaxCountReached;
+                if (self.lines.items.len >= limit) {
+                    self.allocator.free(replacement);
+                    return error.MaxCountReached;
+                }
             }
 
-            const spans = try self.allocator.alloc(zigrep.search.report.Span, 1);
-            spans[0] = report.match_span;
+            const segments = try self.allocator.alloc(ReplacementSegment, 1);
+            segments[0] = .{
+                .match_span = report.match_span,
+                .replacement = replacement,
+            };
             try self.lines.append(self.allocator, .{
                 .line_number = report.line_number,
                 .column_number = report.column_number,
                 .line = report.line,
                 .line_span = report.line_span,
-                .match_spans = spans,
+                .segments = segments,
             });
         }
     };
@@ -164,9 +193,11 @@ fn writeFileReportsReplacing(
         .allocator = allocator,
         .lines = &lines,
         .max_count = max_count,
+        .replacement_template = output.replacement.?,
+        .capture_names = searcher.captureNames(),
     };
 
-    _ = searcher.forEachMatchReport(path, haystack, &collector, Collector.emit) catch |err| switch (err) {
+    _ = searcher.forEachCapturedMatchReport(path, haystack, &collector, Collector.emit) catch |err| switch (err) {
         error.MaxCountReached => true,
         else => return err,
     };
@@ -181,12 +212,87 @@ fn writeFileReportsReplacing(
             line.column_number,
             line.line,
             line.line_span.start,
-            line.match_spans,
-            output.replacement.?,
+            line.segments,
             output,
         );
     }
     return true;
+}
+
+fn writeFileOnlyMatchingReplacement(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+    output: OutputOptions,
+    max_count: ?usize,
+) !bool {
+    const haystack = if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded|
+        decoded
+    else
+        bytes;
+    defer if (haystack.ptr != bytes.ptr) allocator.free(haystack);
+
+    const IterationStop = error{MaxCountReached};
+
+    const WriterContext = struct {
+        allocator: std.mem.Allocator,
+        writer: *std.Io.Writer,
+        output: OutputOptions,
+        max_count: ?usize,
+        capture_names: []const ?[]const u8,
+        matched_lines: usize = 0,
+        last_line_start: ?usize = null,
+
+        fn emit(self: *@This(), captured: zigrep.search.grep.CapturedMatchReport) !void {
+            const report = captured.report;
+            if (self.last_line_start == null or self.last_line_start.? != report.line_span.start) {
+                if (self.max_count) |limit| {
+                    if (self.matched_lines >= limit) return IterationStop.MaxCountReached;
+                }
+                self.matched_lines += 1;
+                self.last_line_start = report.line_span.start;
+            }
+
+            const replacement = try expandReplacementAlloc(
+                self.allocator,
+                self.output.replacement.?,
+                report.match_span,
+                captured.groups,
+                self.capture_names,
+                report.line,
+                report.line_span.start,
+            );
+            defer self.allocator.free(replacement);
+
+            var effective_output = self.output;
+            effective_output.replacement = null;
+            try search_output.writePrefixedDisplayBytes(
+                self.writer,
+                report.path,
+                report.line_number,
+                report.column_number,
+                replacement,
+                effective_output,
+                false,
+            );
+        }
+    };
+
+    var context = WriterContext{
+        .allocator = allocator,
+        .writer = writer,
+        .output = output,
+        .max_count = max_count,
+        .capture_names = searcher.captureNames(),
+    };
+
+    return searcher.forEachCapturedMatchReport(path, haystack, &context, WriterContext.emit) catch |err| switch (err) {
+        IterationStop.MaxCountReached => context.matched_lines != 0,
+        else => return err,
+    };
 }
 
 fn writeContextLine(
@@ -322,7 +428,10 @@ fn writeFileReportsWithContextReplacing(
 ) !bool {
     var matched_lines: std.ArrayList(ReplacedLine) = .empty;
     defer {
-        for (matched_lines.items) |line| allocator.free(line.match_spans);
+        for (matched_lines.items) |line| {
+            for (line.segments) |segment| allocator.free(segment.replacement);
+            allocator.free(line.segments);
+        }
         matched_lines.deinit(allocator);
     }
 
@@ -330,27 +439,48 @@ fn writeFileReportsWithContextReplacing(
         allocator: std.mem.Allocator,
         items: *std.ArrayList(ReplacedLine),
         max_count: ?usize,
+        replacement_template: []const u8,
+        capture_names: []const ?[]const u8,
 
-        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
+        fn emit(self: *@This(), captured: zigrep.search.grep.CapturedMatchReport) !void {
+            const report = captured.report;
+            const replacement = try expandReplacementAlloc(
+                self.allocator,
+                self.replacement_template,
+                report.match_span,
+                captured.groups,
+                self.capture_names,
+                report.line,
+                report.line_span.start,
+            );
             if (self.items.items.len != 0 and self.items.items[self.items.items.len - 1].line_span.start == report.line_span.start) {
                 var current = &self.items.items[self.items.items.len - 1];
-                current.match_spans = try self.allocator.realloc(current.match_spans, current.match_spans.len + 1);
-                current.match_spans[current.match_spans.len - 1] = report.match_span;
+                current.segments = try self.allocator.realloc(current.segments, current.segments.len + 1);
+                current.segments[current.segments.len - 1] = .{
+                    .match_span = report.match_span,
+                    .replacement = replacement,
+                };
                 return;
             }
 
             if (self.max_count) |limit| {
-                if (self.items.items.len >= limit) return error.MaxCountReached;
+                if (self.items.items.len >= limit) {
+                    self.allocator.free(replacement);
+                    return error.MaxCountReached;
+                }
             }
 
-            const spans = try self.allocator.alloc(zigrep.search.report.Span, 1);
-            spans[0] = report.match_span;
+            const segments = try self.allocator.alloc(ReplacementSegment, 1);
+            segments[0] = .{
+                .match_span = report.match_span,
+                .replacement = replacement,
+            };
             try self.items.append(self.allocator, .{
                 .line_number = report.line_number,
                 .column_number = report.column_number,
                 .line = report.line,
                 .line_span = report.line_span,
-                .match_spans = spans,
+                .segments = segments,
             });
         }
     };
@@ -359,9 +489,11 @@ fn writeFileReportsWithContextReplacing(
         .allocator = allocator,
         .items = &matched_lines,
         .max_count = max_count,
+        .replacement_template = output.replacement.?,
+        .capture_names = searcher.captureNames(),
     };
 
-    _ = searcher.forEachMatchReport(path, haystack, &collector, Collector.emit) catch |err| switch (err) {
+    _ = searcher.forEachCapturedMatchReport(path, haystack, &collector, Collector.emit) catch |err| switch (err) {
         error.MaxCountReached => true,
         else => return err,
     };
@@ -404,8 +536,7 @@ fn writeFileReportsWithContextReplacing(
                 line.column_number,
                 line.line,
                 line.line_span.start,
-                line.match_spans,
-                output.replacement.?,
+                line.segments,
                 output,
             );
         } else {
@@ -1083,6 +1214,149 @@ pub fn reportFileMatch(
     }
 
     return searcher.reportFirstMatch(path, bytes);
+}
+
+fn expandReplacementAlloc(
+    allocator: std.mem.Allocator,
+    template: []const u8,
+    match_span: zigrep.search.report.Span,
+    groups: []const regex.Vm.Capture,
+    capture_names: []const ?[]const u8,
+    line: []const u8,
+    line_span_start: usize,
+) ![]u8 {
+    var expanded: std.ArrayList(u8) = .empty;
+    defer expanded.deinit(allocator);
+
+    var index: usize = 0;
+    while (index < template.len) {
+        if (template[index] != '$') {
+            try expanded.append(allocator, template[index]);
+            index += 1;
+            continue;
+        }
+        if (index + 1 >= template.len) {
+            try expanded.append(allocator, '$');
+            break;
+        }
+
+        const next = template[index + 1];
+        if (next == '$') {
+            try expanded.append(allocator, '$');
+            index += 2;
+            continue;
+        }
+
+        if (next == '{') {
+            const close = std.mem.indexOfScalarPos(u8, template, index + 2, '}') orelse {
+                try expanded.append(allocator, '$');
+                index += 1;
+                continue;
+            };
+            try appendCaptureExpansion(
+                allocator,
+                &expanded,
+                template[index + 2 .. close],
+                match_span,
+                groups,
+                capture_names,
+                line,
+                line_span_start,
+            );
+            index = close + 1;
+            continue;
+        }
+
+        if (std.ascii.isDigit(next)) {
+            var end = index + 2;
+            while (end < template.len and std.ascii.isDigit(template[end])) end += 1;
+            try appendCaptureExpansion(
+                allocator,
+                &expanded,
+                template[index + 1 .. end],
+                match_span,
+                groups,
+                capture_names,
+                line,
+                line_span_start,
+            );
+            index = end;
+            continue;
+        }
+
+        if (isCaptureNameByte(next)) {
+            var end = index + 2;
+            while (end < template.len and isCaptureNameByte(template[end])) end += 1;
+            try appendCaptureExpansion(
+                allocator,
+                &expanded,
+                template[index + 1 .. end],
+                match_span,
+                groups,
+                capture_names,
+                line,
+                line_span_start,
+            );
+            index = end;
+            continue;
+        }
+
+        try expanded.append(allocator, '$');
+        index += 1;
+    }
+
+    return expanded.toOwnedSlice(allocator);
+}
+
+fn appendCaptureExpansion(
+    allocator: std.mem.Allocator,
+    expanded: *std.ArrayList(u8),
+    token: []const u8,
+    match_span: zigrep.search.report.Span,
+    groups: []const regex.Vm.Capture,
+    capture_names: []const ?[]const u8,
+    line: []const u8,
+    line_span_start: usize,
+) !void {
+    if (token.len == 0) return;
+
+    var capture: ?regex.Vm.Capture = null;
+
+    if (std.ascii.isDigit(token[0])) {
+        const index = std.fmt.parseUnsigned(usize, token, 10) catch return;
+        if (index == 0) {
+            capture = .{ .start = match_span.start, .end = match_span.end };
+        } else if (index <= groups.len) {
+            capture = groups[index - 1];
+        } else {
+            return;
+        }
+    } else {
+        for (capture_names, 0..) |name, index| {
+            if (name) |capture_name| {
+                if (std.mem.eql(u8, capture_name, token)) {
+                    capture = groups[index];
+                    break;
+                }
+            }
+        }
+        if (capture == null) return;
+    }
+
+    const found = capture.?;
+    const start = found.start orelse return;
+    const end = found.end orelse return;
+    if (end < start or start < line_span_start) return;
+
+    const relative_start = start - line_span_start;
+    const relative_end = end - line_span_start;
+    if (relative_end > line.len) return;
+
+    try expanded.appendSlice(allocator, line[relative_start..relative_end]);
+}
+
+fn isCaptureNameByte(byte: u8) bool {
+    return std.ascii.isAlphanumeric(byte) or byte == '_';
 }
 
 pub fn formatReport(

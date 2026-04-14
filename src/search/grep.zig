@@ -42,6 +42,11 @@ pub const MatchReport = struct {
     }
 };
 
+pub const CapturedMatchReport = struct {
+    report: MatchReport,
+    groups: []const regex.Vm.Capture,
+};
+
 const ByteAtom = union(enum) {
     literal: []u8,
     any_byte,
@@ -108,6 +113,7 @@ pub const Searcher = struct {
     engine: regex.Vm.MatchEngine,
     program: regex.Nfa.Program,
     byte_plan: ByteSearchPlan,
+    capture_names: []const ?[]const u8,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -147,6 +153,7 @@ pub const Searcher = struct {
                 .multiline = options.multiline,
                 .multiline_dotall = options.multiline_dotall,
             }),
+            .capture_names = try dupCaptureNames(allocator, hir.capture_names),
             // Case-folded patterns stay on the general VM path until planner
             // equivalence is proven for folded classes and Unicode-aware case
             // semantics.
@@ -159,7 +166,12 @@ pub const Searcher = struct {
 
     pub fn deinit(self: *Searcher) void {
         self.byte_plan.deinit(self.allocator);
+        freeCaptureNames(self.allocator, self.capture_names);
         self.program.deinit(self.allocator);
+    }
+
+    pub fn captureNames(self: *const Searcher) []const ?[]const u8 {
+        return self.capture_names;
     }
 
     pub fn reportFirstMatch(self: *Searcher, path: []const u8, haystack: []const u8) SearchError!?MatchReport {
@@ -219,6 +231,37 @@ pub const Searcher = struct {
             matched = true;
 
             const next_offset = nextMatchSearchOffset(haystack, report.match_span);
+            if (next_offset <= offset) break;
+            offset = next_offset;
+        }
+
+        return matched;
+    }
+
+    pub fn forEachCapturedMatchReport(
+        self: *Searcher,
+        path: []const u8,
+        haystack: []const u8,
+        context: anytype,
+        comptime emit: fn (@TypeOf(context), CapturedMatchReport) anyerror!void,
+    ) anyerror!bool {
+        var offset: usize = 0;
+        var matched = false;
+
+        while (offset <= haystack.len) {
+            const result = (try self.firstMatchFrom(haystack, offset)) orelse break;
+            defer result.match.deinit(self.allocator);
+
+            try emit(context, .{
+                .report = buildReport(path, haystack, result.match.span),
+                .groups = result.match.groups,
+            });
+            matched = true;
+
+            const next_offset = nextMatchSearchOffset(haystack, .{
+                .start = result.match.span.start.?,
+                .end = result.match.span.end.?,
+            });
             if (next_offset <= offset) break;
             offset = next_offset;
         }
@@ -318,6 +361,26 @@ fn escapeRegexLiteralAlloc(allocator: std.mem.Allocator, pattern: []const u8) ![
     }
 
     return escaped.toOwnedSlice(allocator);
+}
+
+fn dupCaptureNames(allocator: std.mem.Allocator, input: []const ?[]const u8) ![]const ?[]const u8 {
+    const duped = try allocator.alloc(?[]const u8, input.len);
+    errdefer allocator.free(duped);
+
+    for (input, 0..) |name, index| {
+        duped[index] = if (name) |capture_name|
+            try allocator.dupe(u8, capture_name)
+        else
+            null;
+    }
+    return duped;
+}
+
+fn freeCaptureNames(allocator: std.mem.Allocator, capture_names: []const ?[]const u8) void {
+    for (capture_names) |name| {
+        if (name) |capture_name| allocator.free(capture_name);
+    }
+    allocator.free(capture_names);
 }
 
 fn shouldFoldCase(pattern: []const u8, case_mode: CaseMode) bool {

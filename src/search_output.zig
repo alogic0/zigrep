@@ -6,6 +6,11 @@ const zigrep = struct {
 
 pub const OutputOptions = command.OutputOptions;
 
+pub const ReplacementSegment = struct {
+    match_span: zigrep.search.report.Span,
+    replacement: []const u8,
+};
+
 pub fn writeHeadingBlock(
     writer: *std.Io.Writer,
     path: []const u8,
@@ -84,10 +89,7 @@ pub fn writeReport(
     }
     if (wrote_prefix) try writer.writeByte(':');
     const display_slice = if (output.only_matching)
-        if (output.replacement) |replacement|
-            replacement
-        else
-            report.line[report.match_span.start - report.line_span.start .. report.match_span.end - report.line_span.start]
+        report.line[report.match_span.start - report.line_span.start .. report.match_span.end - report.line_span.start]
     else
         report.line;
     try writeDisplayLine(writer, display_slice);
@@ -101,8 +103,7 @@ pub fn writeReplacedLine(
     column_number: usize,
     line: []const u8,
     line_span_start: usize,
-    match_spans: []const zigrep.search.report.Span,
-    replacement: []const u8,
+    segments: []const ReplacementSegment,
     output: OutputOptions,
 ) !void {
     var wrote_prefix = false;
@@ -123,11 +124,11 @@ pub fn writeReplacedLine(
     if (wrote_prefix) try writer.writeByte(':');
 
     var cursor: usize = 0;
-    for (match_spans) |match_span| {
-        const relative_start = match_span.start - line_span_start;
-        const relative_end = match_span.end - line_span_start;
+    for (segments) |segment| {
+        const relative_start = segment.match_span.start - line_span_start;
+        const relative_end = segment.match_span.end - line_span_start;
         try writeDisplayLine(writer, line[cursor..relative_start]);
-        try writeDisplayLine(writer, replacement);
+        try writeDisplayLine(writer, segment.replacement);
         cursor = relative_end;
     }
     try writeDisplayLine(writer, line[cursor..]);

@@ -127,6 +127,64 @@ test "runCli replace works with only-matching mode" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli replace expands captures in only-matching mode" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "caps.txt",
+        .data = "foo bar\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--only-matching",
+        "-r",
+        "$2/$1/$0",
+        "(foo) (bar)",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:1:1:bar/foo/foo bar\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli replace expands named captures and escapes dollar" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "caps.txt",
+        .data = "foo bar\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--only-matching",
+        "-r",
+        "$$${second}-${first}",
+        "(?P<first>foo) (?P<second>bar)",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:1:1:$bar-foo\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 
 test "runCli honors max depth in recursive search" {
     const testing = std.testing;
