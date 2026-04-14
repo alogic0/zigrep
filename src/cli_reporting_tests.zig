@@ -982,7 +982,7 @@ test "runCli column remains when explicitly requested for one explicit file" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
-test "runCli heading preserves explicit heading behavior for one explicit file" {
+test "runCli heading on one explicit file follows ripgrep and suppresses the heading" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -1000,6 +1000,6 @@ test "runCli heading preserves explicit heading behavior for one explicit file" 
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "single.txt\nneedle one\n"));
+    try testing.expectEqualStrings("needle one\n", run.stdout);
     try testing.expectEqualStrings("", run.stderr);
 }

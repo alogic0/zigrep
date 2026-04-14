@@ -120,7 +120,7 @@ test "runCli multiline context mode expands around merged blocks" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt-tail\n"));
 }
 
-test "runCli multiline json mode emits per-match events with raw spans" {
+test "runCli multiline json mode emits ripgrep-style block events with submatches" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -143,14 +143,17 @@ test "runCli multiline json mode emits per-match events with raw spans" {
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"match\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_number\":1,\"column_number\":1"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line\":\"abc\\ndef\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_span\":{\"start\":0,\"end\":7}"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"match_span\":{\"start\":0,\"end\":7}"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_number\":3,\"column_number\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":{\"text\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"lines\":{\"text\":\"abc\\ndef\\nabc\\ndef\\n\"}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_number\":1,\"absolute_offset\":0"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"submatches\":["));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"start\":0,\"end\":7"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"start\":8,\"end\":15"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matched_lines\":4"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matches\":2"));
 }
 
-test "runCli multiline heading mode groups blocks by file" {
+test "runCli multiline heading on one explicit file follows ripgrep and suppresses the heading" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -163,14 +166,14 @@ test "runCli multiline heading mode groups blocks by file" {
             "def\n",
     });
 
-    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
-    defer testing.allocator.free(root_path);
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "multi.txt");
+    defer testing.allocator.free(file_path);
 
-    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "--heading", "abc\\ndef", root_path });
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "-U", "--heading", "abc\\ndef", file_path });
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "multi.txt\nabc\ndef\n"));
+    try testing.expectEqualStrings("abc\ndef\n", run.stdout);
 }
 
 test "runCli multiline mode keeps leftmost non-overlapping behavior for overlapping exact matches" {

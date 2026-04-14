@@ -96,30 +96,46 @@ pub fn writeFileOnlyMatchingMultiline(
 }
 
 pub fn writeMultilineJsonMatchEvent(
+    allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
     path: []const u8,
     haystack: []const u8,
-    match_info: MultilineMatchInfo,
     output: OutputOptions,
-) !void {
-    const display_slice = if (output.only_matching)
-        haystack[match_info.match_span.start..match_info.match_span.end]
-    else
-        haystack[match_info.display.block.block_span.start..match_info.display.block.block_span.end];
-    const line_span = if (output.only_matching)
-        match_info.match_span
-    else
-        match_info.display.block.block_span;
+) !ReportSummary {
+    _ = output;
+    const matches = try collectMultilineMatchesAlloc(allocator, searcher, path, haystack);
+    defer allocator.free(matches);
+    if (matches.len == 0) return .{};
 
-    try writer.writeAll("{\"type\":\"match\",\"data\":{");
-    try writer.writeAll("\"path\":");
-    try search_output.writeJsonString(writer, path);
-    try writer.print(",\"line_number\":{d},\"column_number\":{d}", .{ match_info.display.line_number, match_info.display.column_number });
-    try writer.writeAll(",\"line\":");
-    try search_output.writeJsonString(writer, display_slice);
-    try writer.print(",\"line_span\":{{\"start\":{d},\"end\":{d}}}", .{ line_span.start, line_span.end });
-    try writer.print(",\"match_span\":{{\"start\":{d},\"end\":{d}}}", .{ match_info.match_span.start, match_info.match_span.end });
-    try writer.writeAll("}}\n");
+    const merged = try mergeMultilineMatchesAlloc(allocator, matches);
+    defer allocator.free(merged);
+
+    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
+    defer allocator.free(line_spans);
+
+    var match_index: usize = 0;
+    var matched_lines: usize = 0;
+    for (merged) |info| {
+        while (match_index < matches.len and matches[match_index].display.block.start_line_index < info.block.start_line_index) {
+            match_index += 1;
+        }
+
+        var block_match_end = match_index;
+        while (block_match_end < matches.len and matches[block_match_end].display.block.end_line_index <= info.block.end_line_index) {
+            block_match_end += 1;
+        }
+
+        try writeMultilineJsonBlockEvent(writer, path, haystack, line_spans, info, matches[match_index..block_match_end]);
+        matched_lines += info.block.end_line_index - info.block.start_line_index + 1;
+        match_index = block_match_end;
+    }
+
+    return .{
+        .matched = true,
+        .matched_lines = matched_lines,
+        .matches = matches.len,
+    };
 }
 
 pub fn writeFileCountMultiline(
@@ -307,6 +323,42 @@ fn writeMultilineReportBlock(
         true,
         display_mode,
     );
+}
+
+fn writeMultilineJsonBlockEvent(
+    writer: *std.Io.Writer,
+    path: []const u8,
+    haystack: []const u8,
+    line_spans: []const zigrep.search.report.Span,
+    info: zigrep.search.report.DisplayBlockInfo,
+    block_matches: []const MultilineMatchInfo,
+) !void {
+    const block_start = line_spans[info.block.start_line_index].start;
+    const block_end = if (info.block.end_line_index + 1 < line_spans.len)
+        line_spans[info.block.end_line_index + 1].start
+    else
+        haystack.len;
+    const block_bytes = haystack[block_start..block_end];
+    const line_terminated = block_end > block_start and haystack[block_end - 1] == '\n';
+    const display_bytes = if (line_terminated) block_bytes[0 .. block_bytes.len - 1] else block_bytes;
+
+    try writer.writeAll("{\"type\":\"match\",\"data\":{");
+    try writer.writeAll("\"path\":");
+    try search_output.writeJsonTextValue(writer, path);
+    try writer.writeAll(",\"lines\":");
+    try search_output.writeJsonTextValueWithTerminator(writer, display_bytes, line_terminated);
+    try writer.print(",\"line_number\":{d},\"absolute_offset\":{d}", .{ info.line_number, block_start });
+    try writer.writeAll(",\"submatches\":[");
+    for (block_matches, 0..) |match_info, index| {
+        if (index != 0) try writer.writeByte(',');
+        const relative_start = match_info.match_span.start - block_start;
+        const relative_end = match_info.match_span.end - block_start;
+        try writer.writeAll("{\"match\":");
+        try search_output.writeJsonTextValue(writer, haystack[match_info.match_span.start..match_info.match_span.end]);
+        try writer.print(",\"start\":{d},\"end\":{d}", .{ relative_start, relative_end });
+        try writer.writeByte('}');
+    }
+    try writer.writeAll("]}}\n");
 }
 
 fn writeContextLine(

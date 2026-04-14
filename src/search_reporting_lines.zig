@@ -194,11 +194,7 @@ pub fn writeFileLines(
                 );
             }
             if (output_format == .json) {
-                const matches = try search_reporting_multiline.collectMultilineMatchesAlloc(allocator, searcher, path, decoded);
-                defer allocator.free(matches);
-                if (matches.len == 0) return .{};
-                for (matches) |match_info| try search_reporting_multiline.writeMultilineJsonMatchEvent(writer, path, decoded, match_info, output);
-                return .{ .matched = true, .matched_lines = matches.len, .matches = matches.len };
+                return search_reporting_multiline.writeMultilineJsonMatchEvent(allocator, writer, searcher, path, decoded, output);
             }
             return search_reporting_multiline.writeFileReportsMultiline(allocator, writer, searcher, path, decoded, output, display_mode);
         }
@@ -243,11 +239,7 @@ pub fn writeFileLines(
             );
         }
         if (output_format == .json) {
-            const matches = try search_reporting_multiline.collectMultilineMatchesAlloc(allocator, searcher, path, bytes);
-            defer allocator.free(matches);
-            if (matches.len == 0) return .{};
-            for (matches) |match_info| try search_reporting_multiline.writeMultilineJsonMatchEvent(writer, path, bytes, match_info, output);
-            return .{ .matched = true, .matched_lines = matches.len, .matches = matches.len };
+            return search_reporting_multiline.writeMultilineJsonMatchEvent(allocator, writer, searcher, path, bytes, output);
         }
         return search_reporting_multiline.writeFileReportsMultiline(allocator, writer, searcher, path, bytes, output, display_mode);
     }

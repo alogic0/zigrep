@@ -16,10 +16,14 @@ fn shouldUseExplicitSingleFileDefaults(options: CliOptions) bool {
     const traversal = options.traversal();
     const reporting = options.reporting();
     const hints = options.parseHints();
-    if (reporting.output.heading or isPathOnlyReportMode(reporting.report_mode) or reporting.output_format != .text) return false;
+    if (isPathOnlyReportMode(reporting.report_mode) or reporting.output_format != .text) return false;
     if (hints.used_default_path or traversal.paths.len != 1) return false;
 
-    const stat = std.fs.cwd().statFile(traversal.paths[0]) catch return false;
+    const stat = if (std.fs.path.isAbsolute(traversal.paths[0])) blk: {
+        const file = std.fs.openFileAbsolute(traversal.paths[0], .{}) catch return false;
+        defer file.close();
+        break :blk file.stat() catch return false;
+    } else std.fs.cwd().statFile(traversal.paths[0]) catch return false;
     return stat.kind == .file;
 }
 
@@ -31,6 +35,7 @@ pub fn effectivePathSearchOptions(options: CliOptions) CliOptions {
     if (!hints.filename_flag_seen) effective.output.with_filename = false;
     if (!hints.line_number_flag_seen) effective.output.line_number = false;
     if (!hints.column_number_flag_seen) effective.output.column_number = false;
+    effective.output.heading = false;
     return effective;
 }
 
