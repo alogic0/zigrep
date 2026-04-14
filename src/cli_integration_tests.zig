@@ -628,6 +628,75 @@ test "runCli files quiet suppresses output and returns candidate-file status" {
     try testing.expectEqualStrings("", miss.stderr);
 }
 
+test "runCli searches piped stdin when no explicit path is given" {
+    const testing = std.testing;
+
+    const run = try cli_test_support.runCliCapturedWithStdin(
+        testing.allocator,
+        &.{ "zigrep", "needle" },
+        "before\nneedle here\nafter\n",
+    );
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("2:1:needle here\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli stdin count omits filename by default" {
+    const testing = std.testing;
+
+    const run = try cli_test_support.runCliCapturedWithStdin(
+        testing.allocator,
+        &.{ "zigrep", "--count", "needle" },
+        "needle one\nskip\nneedle two\n",
+    );
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("2\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli stdin files-with-matches uses stdin path label" {
+    const testing = std.testing;
+
+    const run = try cli_test_support.runCliCapturedWithStdin(
+        testing.allocator,
+        &.{ "zigrep", "-l", "needle" },
+        "needle one\n",
+    );
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("stdin\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli stdin json uses stdin path label" {
+    const testing = std.testing;
+
+    const run = try cli_test_support.runCliCapturedWithStdin(
+        testing.allocator,
+        &.{ "zigrep", "--json", "needle" },
+        "needle one\n",
+    );
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":\"stdin\""));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli rejects files mode on piped stdin with no explicit path" {
+    const testing = std.testing;
+
+    try testing.expectError(
+        error.InvalidFlagCombination,
+        cli_test_support.runCliCapturedWithStdin(testing.allocator, &.{ "zigrep", "--files" }, "ignored\n"),
+    );
+}
+
 test "runCli ignore-case matches differing literal case" {
     const testing = std.testing;
 

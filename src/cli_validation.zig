@@ -55,6 +55,7 @@ fn finalizeRunParse(
         .pattern = pattern_info.pattern,
         .owned_pattern = pattern_info.owned_pattern,
         .paths = owned_paths,
+        .used_default_path = state.used_default_path,
         .globs = owned_globs,
         .pre_globs = owned_pre_globs,
         .ignore_files = owned_ignore_files,
@@ -82,6 +83,7 @@ fn finalizeRunParse(
         .context_after = state.context_after,
         .show_stats = pattern_info.show_stats,
         .quiet = state.quiet,
+        .filename_flag_seen = state.filename_flag_seen,
         .fixed_strings = pattern_info.fixed_strings,
         .list_files = state.list_files,
         .output = state.output,
@@ -98,7 +100,10 @@ fn normalizeState(
     if (state.unrestricted_level >= 1) state.no_ignore = true;
     if (state.unrestricted_level >= 2) state.include_hidden = true;
     if (state.unrestricted_level >= 3) state.binary_mode = .text;
-    if (buffers.paths.items.len == 0) try buffers.paths.append(allocator, ".");
+    if (buffers.paths.items.len == 0) {
+        try buffers.paths.append(allocator, ".");
+        state.used_default_path = true;
+    }
     if (state.output.heading) {
         state.output.with_filename = false;
     }

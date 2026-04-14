@@ -25,6 +25,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expectEqualStrings("needle", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings(".", opts.paths[0]);
+            try testing.expect(opts.used_default_path);
             try testing.expectEqual(@as(usize, 0), opts.globs.len);
             try testing.expectEqual(@as(usize, 0), opts.ignore_files.len);
             try testing.expect(!opts.include_hidden);
@@ -52,6 +53,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expectEqual(ReportMode.lines, opts.report_mode);
             try testing.expect(!opts.show_stats);
             try testing.expect(!opts.quiet);
+            try testing.expect(!opts.filename_flag_seen);
             try testing.expect(!opts.invert_match);
         },
         .help => unreachable,
@@ -108,6 +110,7 @@ test "parseArgs treats version-like args as positional after the pattern starts"
             try testing.expectEqualStrings("needle", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("--version", opts.paths[0]);
+            try testing.expect(!opts.used_default_path);
         },
         .help, .version, .type_list => return error.TestExpectedEqual,
     }
@@ -128,8 +131,29 @@ test "parseArgs treats help-like args as positional after terminator" {
             try testing.expectEqualStrings("--help", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings(".", opts.paths[0]);
+            try testing.expect(opts.used_default_path);
         },
         .help, .version, .type_list => return error.TestExpectedEqual,
+    }
+}
+
+test "parseArgs tracks explicit filename control" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-H", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.output.with_filename);
+            try testing.expect(opts.filename_flag_seen);
+            try testing.expect(!opts.used_default_path);
+        },
+        .help, .version, .type_list => unreachable,
     }
 }
 
@@ -601,11 +625,12 @@ test "runCli rejects unsupported multiline output combinations for now" {
     var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
     defer stderr_capture.deinit();
 
-    try testing.expectError(error.InvalidFlagCombination, cli_entry.runCli(
+    try testing.expectError(error.InvalidFlagCombination, cli_entry.runCliWithInput(
         testing.allocator,
         &stdout_capture.writer,
         &stderr_capture.writer,
         &.{ "zigrep", "-U", "--max-count", "1", "needle", "." },
+        null,
     ));
 }
 

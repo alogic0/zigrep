@@ -4,6 +4,7 @@ const zigrep = struct {
 };
 const command = @import("command.zig");
 const search_entry_runner = @import("search_entry_runner.zig");
+const search_execution = @import("search_execution.zig");
 const search_output = @import("search_output.zig");
 const search_parallel = @import("search_parallel.zig");
 const search_path_runner = @import("search_path_runner.zig");
@@ -23,6 +24,7 @@ pub const CliOptions = command.CliOptions;
 
 pub const SearchStats = search_result.SearchStats;
 pub const SearchResult = search_result.SearchResult;
+const stdin_label = "stdin";
 
 pub fn runSearch(
     allocator: std.mem.Allocator,
@@ -80,6 +82,78 @@ pub fn runSearch(
     }
     if (options.show_stats) try writeStats(stderr, result.stats);
     return if (result.matched) 0 else 1;
+}
+
+pub fn runStdinSearch(
+    allocator: std.mem.Allocator,
+    stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
+    options: CliOptions,
+    stdin_bytes: []const u8,
+) !u8 {
+    if (options.preprocessor != null or options.list_files) return error.InvalidFlagCombination;
+    if (options.multiline and
+        (options.invert_match or
+            options.max_count != null or
+            (options.output.heading and options.report_mode != .lines)))
+    {
+        return error.InvalidFlagCombination;
+    }
+    if (options.multiline_dotall and !options.multiline) return error.InvalidFlagCombination;
+
+    var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{
+        .case_mode = options.case_mode,
+        .fixed_strings = options.fixed_strings,
+        .multiline = options.multiline,
+        .multiline_dotall = options.multiline_dotall,
+    });
+    defer searcher.deinit();
+
+    const search_bytes = try search_execution.prepareSearchBytes(allocator, stdin_label, stdin_bytes, options);
+    defer if (search_bytes.ptr != stdin_bytes.ptr) allocator.free(search_bytes);
+
+    const effective_binary_output = if (options.search_compressed)
+        search_execution.decideBinaryBehavior(search_bytes, options.encoding, options.binary_mode) orelse {
+            const stats: SearchStats = .{ .skipped_binary_files = 1 };
+            if (options.show_stats) try writeStats(stderr, stats);
+            return 1;
+        }
+    else
+        search_execution.decideBinaryBehavior(stdin_bytes, options.encoding, options.binary_mode) orelse {
+            const stats: SearchStats = .{ .skipped_binary_files = 1 };
+            if (options.show_stats) try writeStats(stderr, stats);
+            return 1;
+        };
+
+    var effective_output = options.output;
+    if (!options.filename_flag_seen and options.report_mode != .files_with_matches and options.report_mode != .files_without_match) {
+        effective_output.with_filename = false;
+    }
+
+    const matched = try search_reporting.writeFileOutput(
+        allocator,
+        stdout,
+        &searcher,
+        stdin_label,
+        search_bytes,
+        options.encoding,
+        effective_binary_output,
+        options.invert_match,
+        effective_output,
+        options.output_format,
+        options.report_mode,
+        options.max_count,
+        options.context_before,
+        options.context_after,
+    );
+
+    const stats: SearchStats = .{
+        .searched_files = 1,
+        .matched_files = if (matched) 1 else 0,
+        .searched_bytes = search_bytes.len,
+    };
+    if (options.show_stats) try writeStats(stderr, stats);
+    return if (matched) 0 else 1;
 }
 
 pub fn searchEntriesSequential(

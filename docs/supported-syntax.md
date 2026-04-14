@@ -464,6 +464,14 @@ Status and warning note:
 - with `--files-with-matches` and `--files-without-match`, it uses file-selection semantics over binary files
 - `--binary` is currently rejected with `--count`, `--only-matching`, `--heading`, and `--json`
 
+Stdin note:
+
+- when no explicit path is given and stdin is piped, `zigrep` searches stdin instead of defaulting to `.`
+- normal line output and `--count` omit the filename prefix by default on stdin
+- path-oriented stdin output uses the label `stdin`
+- `--files-with-matches`, `--files-without-match`, `--json`, and `--null` use that `stdin` label when they need a path value
+- `--files` remains invalid on piped stdin because file-list mode is path traversal, not content search
+
 Output is line-oriented. When enabled, prefixes are emitted in this order:
 
 - file path
@@ -475,7 +483,6 @@ Output is line-oriented. When enabled, prefixes are emitted in this order:
 The current search tool does not yet implement:
 
 - `.gitignore` compatibility beyond the small internal ignore-rule subset
-- stdin search
 - replacement/substitution
 - full ripgrep flag compatibility
 

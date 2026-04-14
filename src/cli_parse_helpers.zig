@@ -119,6 +119,7 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
     }
     if (std.mem.eql(u8, arg, "-H") or std.mem.eql(u8, arg, "--with-filename")) {
         state.output.with_filename = true;
+        state.filename_flag_seen = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--count")) {
@@ -139,6 +140,7 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
     }
     if (std.mem.eql(u8, arg, "--no-filename")) {
         state.output.with_filename = false;
+        state.filename_flag_seen = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "--line-number")) {

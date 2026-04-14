@@ -80,8 +80,9 @@ pub fn executeParsedCommand(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
     parsed: ParseResult,
+    stdin_bytes: ?[]const u8,
 ) !u8 {
-    return cli_dispatch.executeParsedCommand(allocator, stdout, stderr, parsed);
+    return cli_dispatch.executeParsedCommand(allocator, stdout, stderr, parsed, stdin_bytes);
 }
 
 pub fn isUsageError(err: anyerror) bool {

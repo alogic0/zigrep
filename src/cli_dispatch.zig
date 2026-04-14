@@ -35,6 +35,7 @@ pub fn executeParsedCommand(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
     parsed: ParseResult,
+    stdin_bytes: ?[]const u8,
 ) !u8 {
     return switch (parsed) {
         .type_list => |opts| blk: {
@@ -43,7 +44,10 @@ pub fn executeParsedCommand(
             try search.types.writeTypeList(stdout, matcher);
             break :blk 0;
         },
-        .run => |opts| if (opts.list_files)
+        .run => |opts| if (stdin_bytes != null and opts.used_default_path) blk: {
+            if (opts.list_files) break :blk error.InvalidFlagCombination;
+            break :blk runner.runStdinSearch(allocator, stdout, stderr, opts, stdin_bytes.?);
+        } else if (opts.list_files)
             runner.runFileList(allocator, stdout, stderr, opts)
         else
             runner.runSearch(allocator, stdout, stderr, opts),

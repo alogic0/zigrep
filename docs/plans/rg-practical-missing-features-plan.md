@@ -50,14 +50,14 @@ work.
 
 ## Feature 2: Stdin Search
 
-- [ ] Add support for searching stdin when no path is given and input is piped.
-- [ ] Decide and document path labeling for stdin results.
+- [x] Add support for searching stdin when no path is given and input is piped.
+- [x] Decide and document path labeling for stdin results.
 - [ ] Keep stdin search behavior coherent with current reporting modes:
   - normal line output
   - `--count`
   - `--only-matching`
   - `--json`
-- [ ] Decide which path-oriented modes remain invalid or become meaningful with
+- [x] Decide which path-oriented modes remain invalid or become meaningful with
   stdin:
   - `--files`
   - `--files-with-matches`
@@ -122,9 +122,9 @@ work.
 ## Validation
 
 - [x] Add parser tests for each new flag surface.
-- [ ] Add integration coverage for the practical workflows that motivated the
+- [x] Add integration coverage for the practical workflows that motivated the
   feature.
-- [x] Run `zig build test`.
+- [ ] Run `zig build test`.
 
 ## Outcome
 

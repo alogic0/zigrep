@@ -41,6 +41,7 @@ pub const ParseState = struct {
     context_after: usize = 0,
     show_stats: bool = false,
     quiet: bool = false,
+    filename_flag_seen: bool = false,
     fixed_strings: bool = false,
     list_files: bool = false,
     output: OutputOptions = .{},
@@ -48,6 +49,7 @@ pub const ParseState = struct {
     report_mode: ReportMode = .lines,
     line_number_flag_seen: bool = false,
     column_number_flag_seen: bool = false,
+    used_default_path: bool = false,
     positional_pattern: ?[]const u8 = null,
     show_type_list: bool = false,
 };
