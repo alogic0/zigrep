@@ -15,6 +15,22 @@ const search_result = @import("search_result.zig");
 pub const CliOptions = command.CliOptions;
 pub const SearchResult = search_result.SearchResult;
 
+fn sortEntries(entries: []zigrep.search.walk.Entry, options: CliOptions) void {
+    if (options.sort_mode == .none or entries.len <= 1) return;
+
+    const Context = struct {
+        reverse: bool,
+    };
+    const lessThan = struct {
+        fn compare(context: Context, lhs: zigrep.search.walk.Entry, rhs: zigrep.search.walk.Entry) bool {
+            if (!context.reverse) return std.mem.lessThan(u8, lhs.path, rhs.path);
+            return std.mem.lessThan(u8, rhs.path, lhs.path);
+        }
+    }.compare;
+
+    std.sort.heap(zigrep.search.walk.Entry, entries, Context{ .reverse = options.sort_reverse }, lessThan);
+}
+
 pub fn searchPath(
     allocator: std.mem.Allocator,
     stdout: *std.Io.Writer,
@@ -60,9 +76,10 @@ pub fn searchPath(
         options.exclude_types,
     );
     defer allocator.free(filtered_entries);
+    sortEntries(@constCast(filtered_entries), options);
 
     const schedule = zigrep.search.schedule.plan(filtered_entries.len, .{
-        .requested_jobs = options.parallel_jobs,
+        .requested_jobs = if (options.sort_mode == .none) options.parallel_jobs else 1,
     });
     var result = if (schedule.parallel)
         try parallelFn(stdout, stderr, filtered_entries, options, schedule)
@@ -94,7 +111,7 @@ pub fn listPathFiles(
     const loaded_ignores = try search_filtering.loadIgnoreMatchers(allocator, root_path, options);
     defer search_filtering.deinitLoadedIgnores(allocator, loaded_ignores);
 
-    if (options.quiet) {
+    if (options.quiet and options.sort_mode == .none) {
         const QuietVisitor = struct {
             allocator: std.mem.Allocator,
             root_path: []const u8,
@@ -160,6 +177,11 @@ pub fn listPathFiles(
         options.exclude_types,
     );
     defer allocator.free(filtered_entries);
+    sortEntries(@constCast(filtered_entries), options);
+
+    if (options.quiet) {
+        return if (filtered_entries.len != 0) 1 else 0;
+    }
 
     var listed: usize = 0;
     for (filtered_entries) |entry| {

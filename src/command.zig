@@ -28,6 +28,11 @@ pub const ReportMode = enum {
     files_without_match,
 };
 
+pub const SortMode = enum {
+    none,
+    path,
+};
+
 pub const GlobSpec = struct {
     pattern: []const u8,
     case_insensitive: bool = false,
@@ -68,6 +73,8 @@ pub const CliOptions = struct {
     filename_flag_seen: bool = false,
     fixed_strings: bool = false,
     list_files: bool = false,
+    sort_mode: SortMode = .none,
+    sort_reverse: bool = false,
     output: OutputOptions = .{},
     output_format: OutputFormat = .text,
     report_mode: ReportMode = .lines,

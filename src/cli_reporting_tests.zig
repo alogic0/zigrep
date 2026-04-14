@@ -203,6 +203,34 @@ test "runCli glob mode supports case-insensitive globs" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli sort path orders matching files ascending" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "b.txt",
+        .data = "needle two\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.txt",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--sort", "path", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    const a_index = std.mem.indexOf(u8, run.stdout, "a.txt:1:1:needle one").?;
+    const b_index = std.mem.indexOf(u8, run.stdout, "b.txt:1:1:needle two").?;
+    try testing.expect(a_index < b_index);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli type include filter limits matches" {
     const testing = std.testing;
 

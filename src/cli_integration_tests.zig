@@ -87,6 +87,65 @@ test "runCli files mode supports case-insensitive glob filters" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli files mode supports ascending path sort" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "b.txt",
+        .data = "shown\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.txt",
+        .data = "shown\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "--sort", "path", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    const a_index = std.mem.indexOf(u8, run.stdout, "/a.txt\n").?;
+    const b_index = std.mem.indexOf(u8, run.stdout, "/b.txt\n").?;
+    try testing.expect(a_index < b_index);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli files quiet respects descending path sort" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "b.txt",
+        .data = "shown\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.txt",
+        .data = "shown\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const miss = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "--quiet", "--sortr", "path", "-g", "*.md", root_path });
+    defer miss.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 1), miss.exit_code);
+    try testing.expectEqualStrings("", miss.stdout);
+    try testing.expectEqualStrings("", miss.stderr);
+
+    const hit = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--files", "--quiet", "--sortr", "path", root_path });
+    defer hit.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 0), hit.exit_code);
+    try testing.expectEqualStrings("", hit.stdout);
+    try testing.expectEqualStrings("", hit.stderr);
+}
+
 test "runCli fixed-strings matches literal regex metacharacters" {
     const testing = std.testing;
 

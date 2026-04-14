@@ -74,10 +74,10 @@ work.
 
 ## Feature 3: Sorting Controls
 
-- [ ] Decide whether to support a small sorting surface for search output.
-- [ ] If yes, start with the smallest practical options for interactive use.
-- [ ] Keep sorting scoped to reported results, not to traversal internals.
-- [ ] Decide and document interactions with:
+- [x] Decide whether to support a small sorting surface for search output.
+- [x] If yes, start with the smallest practical options for interactive use.
+- [x] Keep sorting scoped to reported results, not to traversal internals.
+- [x] Decide and document interactions with:
   - `--files`
   - `--files-with-matches`
   - `--files-without-match`
@@ -124,7 +124,7 @@ work.
 - [x] Add parser tests for each new flag surface.
 - [x] Add integration coverage for the practical workflows that motivated the
   feature.
-- [ ] Run `zig build test`.
+- [x] Run `zig build test`.
 
 ## Outcome
 

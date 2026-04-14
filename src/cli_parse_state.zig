@@ -16,6 +16,7 @@ pub const OutputOptions = command.OutputOptions;
 pub const OutputFormat = command.OutputFormat;
 pub const BinaryMode = command.BinaryMode;
 pub const ReportMode = command.ReportMode;
+pub const SortMode = command.SortMode;
 pub const GlobSpec = command.GlobSpec;
 
 pub const ParseState = struct {
@@ -44,6 +45,8 @@ pub const ParseState = struct {
     filename_flag_seen: bool = false,
     fixed_strings: bool = false,
     list_files: bool = false,
+    sort_mode: SortMode = .none,
+    sort_reverse: bool = false,
     output: OutputOptions = .{},
     output_format: OutputFormat = .text,
     report_mode: ReportMode = .lines,

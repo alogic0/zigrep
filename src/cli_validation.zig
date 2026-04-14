@@ -86,6 +86,8 @@ fn finalizeRunParse(
         .filename_flag_seen = state.filename_flag_seen,
         .fixed_strings = pattern_info.fixed_strings,
         .list_files = state.list_files,
+        .sort_mode = state.sort_mode,
+        .sort_reverse = state.sort_reverse,
         .output = state.output,
         .output_format = state.output_format,
         .report_mode = state.report_mode,

@@ -480,6 +480,50 @@ test "parseArgs accepts case-insensitive glob flags" {
     }
 }
 
+test "parseArgs accepts sort flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--sort", "path", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(zigrep.command.SortMode.path, opts.sort_mode);
+            try testing.expect(!opts.sort_reverse);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs sortr overrides sort" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--sort", "path", "--sortr", "path", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(zigrep.command.SortMode.path, opts.sort_mode);
+            try testing.expect(opts.sort_reverse);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs rejects unknown sort mode" {
+    const testing = std.testing;
+
+    try testing.expectError(error.InvalidFlagValue, parseArgs(testing.allocator, &.{ "zigrep", "--sort", "modified", "needle", "src" }));
+}
+
 test "parseArgs accepts ignore control flags" {
     const testing = std.testing;
 

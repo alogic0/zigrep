@@ -326,3 +326,41 @@ test "runSearch output stays identical across allocator and output modes on mixe
         }
     }
 }
+
+test "runSearch sort path disables parallel reordering and sorts descending" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "b.txt",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stdout_capture.deinit();
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    const exit_code = try runner.runSearch(testing.allocator, &stdout_capture.writer, &stderr_capture.writer, .{
+        .pattern = "needle",
+        .paths = &.{root_path},
+        .parallel_jobs = 4,
+        .sort_mode = .path,
+        .sort_reverse = true,
+    });
+
+    try testing.expectEqual(@as(u8, 0), exit_code);
+    const a_index = std.mem.indexOf(u8, stdout_capture.written(), "a.txt:1:1:needle one").?;
+    const b_index = std.mem.indexOf(u8, stdout_capture.written(), "b.txt:1:1:needle two").?;
+    try testing.expect(b_index < a_index);
+    try testing.expectEqualStrings("", stderr_capture.written());
+}

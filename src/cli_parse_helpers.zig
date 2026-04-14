@@ -6,6 +6,7 @@ pub const CliError = cli_parse_state.CliError;
 pub const ParseState = cli_parse_state.ParseState;
 pub const ParseBuffers = cli_parse_state.ParseBuffers;
 pub const GlobSpec = cli_parse_state.GlobSpec;
+pub const SortMode = cli_parse_state.SortMode;
 
 pub const ScalarFlagResult = enum {
     unhandled,
@@ -202,6 +203,18 @@ pub fn handleValueFlag(
         try buffers.pre_globs.append(allocator, try requireNextArg(argv, index));
         return true;
     }
+    if (std.mem.eql(u8, arg, "--sort")) {
+        const mode = try parseSortMode(try requireNextArg(argv, index));
+        state.sort_mode = mode;
+        state.sort_reverse = false;
+        return true;
+    }
+    if (std.mem.eql(u8, arg, "--sortr")) {
+        const mode = try parseSortMode(try requireNextArg(argv, index));
+        state.sort_mode = mode;
+        state.sort_reverse = mode != .none;
+        return true;
+    }
     if (std.mem.eql(u8, arg, "-g") or std.mem.eql(u8, arg, "--glob")) {
         try buffers.globs.append(allocator, .{
             .pattern = try requireNextArg(argv, index),
@@ -270,6 +283,12 @@ fn parseEncoding(arg: []const u8) CliError!search.io.InputEncoding {
     if (std.ascii.eqlIgnoreCase(arg, "latin1")) return .latin1;
     if (std.ascii.eqlIgnoreCase(arg, "utf16le")) return .utf16le;
     if (std.ascii.eqlIgnoreCase(arg, "utf16be")) return .utf16be;
+    return error.InvalidFlagValue;
+}
+
+fn parseSortMode(arg: []const u8) CliError!SortMode {
+    if (std.mem.eql(u8, arg, "none")) return .none;
+    if (std.mem.eql(u8, arg, "path")) return .path;
     return error.InvalidFlagValue;
 }
 

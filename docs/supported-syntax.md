@@ -224,6 +224,7 @@ The current CLI supports:
 - Binary-file search controls with `--text` and `--binary`
 - Buffered or mmap-backed reads with `--buffered` and `--mmap`
 - Worker-count control with `-j` or `--threads`
+- Path-based result ordering with `--sort path` or `--sortr path`
 - Walk depth limiting with `--max-depth`
 - Context lines with `-A` / `--after-context`, `-B` / `--before-context`, and `-C` / `--context`
 - Matching-line limit with `-m` or `--max-count`
@@ -464,6 +465,17 @@ Status and warning note:
 - with `--files-with-matches` and `--files-without-match`, it uses file-selection semantics over binary files
 - `--binary` is currently rejected with `--count`, `--only-matching`, `--heading`, and `--json`
 
+Sort note:
+
+- `--sort path` sorts results by path in ascending order
+- `--sortr path` sorts results by path in descending order
+- `--sort none` and `--sortr none` disable sorting again
+- sorting is applied after filtering and before reporting
+- sorting currently supports path order only; timestamp-based sort modes are not implemented yet
+- sorting forces single-threaded reporting so output order stays stable
+- sorting applies to normal search output, `--files`, `--files-with-matches`, `--files-without-match`, `--count`, and `--json`
+- `--quiet` observes the sorted candidate order when sorting is enabled
+
 Stdin note:
 
 - when no explicit path is given and stdin is piped, `zigrep` searches stdin instead of defaulting to `.`
@@ -483,6 +495,7 @@ Output is line-oriented. When enabled, prefixes are emitted in this order:
 The current search tool does not yet implement:
 
 - `.gitignore` compatibility beyond the small internal ignore-rule subset
+- timestamp-based sorting controls
 - replacement/substitution
 - full ripgrep flag compatibility
 
