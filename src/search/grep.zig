@@ -16,6 +16,7 @@ pub const CaseMode = enum {
 
 pub const SearchOptions = struct {
     case_mode: CaseMode = .sensitive,
+    fixed_strings: bool = false,
     // Phase 1 multiline plumbing: these flags define the intended engine
     // surface, even though multiline execution is not wired yet.
     multiline: bool = false,
@@ -30,6 +31,7 @@ pub const MatchReport = struct {
     // Columns stay byte-oriented to match the rest of the current search layer.
     column_number: usize,
     line: []const u8,
+    line_terminated: bool,
     // This stays null in the normal path. It is only used when a caller needs
     // the line bytes to outlive a temporary transformed haystack.
     owned_line: ?[]u8 = null,
@@ -39,6 +41,11 @@ pub const MatchReport = struct {
     pub fn deinit(self: MatchReport, allocator: std.mem.Allocator) void {
         if (self.owned_line) |line| allocator.free(line);
     }
+};
+
+pub const CapturedMatchReport = struct {
+    report: MatchReport,
+    groups: []const regex.Vm.Capture,
 };
 
 const ByteAtom = union(enum) {
@@ -107,6 +114,7 @@ pub const Searcher = struct {
     engine: regex.Vm.MatchEngine,
     program: regex.Nfa.Program,
     byte_plan: ByteSearchPlan,
+    capture_names: []const ?[]const u8,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -117,7 +125,15 @@ pub const Searcher = struct {
             return error.InvalidMultilineOptions;
         }
 
-        var hir = try regex.compile(allocator, pattern, .{});
+        var owned_compile_pattern: ?[]u8 = null;
+        defer if (owned_compile_pattern) |owned| allocator.free(owned);
+
+        const compile_pattern: []const u8 = if (options.fixed_strings) blk: {
+            owned_compile_pattern = try escapeRegexLiteralAlloc(allocator, pattern);
+            break :blk owned_compile_pattern.?;
+        } else pattern;
+
+        var hir = try regex.compile(allocator, compile_pattern, .{});
         defer hir.deinit(allocator);
 
         const fold_case = shouldFoldCase(pattern, options.case_mode);
@@ -138,6 +154,7 @@ pub const Searcher = struct {
                 .multiline = options.multiline,
                 .multiline_dotall = options.multiline_dotall,
             }),
+            .capture_names = try dupCaptureNames(allocator, hir.capture_names),
             // Case-folded patterns stay on the general VM path until planner
             // equivalence is proven for folded classes and Unicode-aware case
             // semantics.
@@ -150,7 +167,12 @@ pub const Searcher = struct {
 
     pub fn deinit(self: *Searcher) void {
         self.byte_plan.deinit(self.allocator);
+        freeCaptureNames(self.allocator, self.capture_names);
         self.program.deinit(self.allocator);
+    }
+
+    pub fn captureNames(self: *const Searcher) []const ?[]const u8 {
+        return self.capture_names;
     }
 
     pub fn reportFirstMatch(self: *Searcher, path: []const u8, haystack: []const u8) SearchError!?MatchReport {
@@ -210,6 +232,37 @@ pub const Searcher = struct {
             matched = true;
 
             const next_offset = nextMatchSearchOffset(haystack, report.match_span);
+            if (next_offset <= offset) break;
+            offset = next_offset;
+        }
+
+        return matched;
+    }
+
+    pub fn forEachCapturedMatchReport(
+        self: *Searcher,
+        path: []const u8,
+        haystack: []const u8,
+        context: anytype,
+        comptime emit: fn (@TypeOf(context), CapturedMatchReport) anyerror!void,
+    ) anyerror!bool {
+        var offset: usize = 0;
+        var matched = false;
+
+        while (offset <= haystack.len) {
+            const result = (try self.firstMatchFrom(haystack, offset)) orelse break;
+            defer result.match.deinit(self.allocator);
+
+            try emit(context, .{
+                .report = buildReport(path, haystack, result.match.span),
+                .groups = result.match.groups,
+            });
+            matched = true;
+
+            const next_offset = nextMatchSearchOffset(haystack, .{
+                .start = result.match.span.start.?,
+                .end = result.match.span.end.?,
+            });
             if (next_offset <= offset) break;
             offset = next_offset;
         }
@@ -293,6 +346,43 @@ pub const Searcher = struct {
         return .{ .match = adjusted };
     }
 };
+
+fn escapeRegexLiteralAlloc(allocator: std.mem.Allocator, pattern: []const u8) ![]u8 {
+    var escaped: std.ArrayList(u8) = .empty;
+    defer escaped.deinit(allocator);
+
+    for (pattern) |byte| {
+        switch (byte) {
+            '\\', '.', '+', '*', '?', '(', ')', '[', ']', '{', '}', '|', '^', '$' => {
+                try escaped.append(allocator, '\\');
+                try escaped.append(allocator, byte);
+            },
+            else => try escaped.append(allocator, byte),
+        }
+    }
+
+    return escaped.toOwnedSlice(allocator);
+}
+
+fn dupCaptureNames(allocator: std.mem.Allocator, input: []const ?[]const u8) ![]const ?[]const u8 {
+    const duped = try allocator.alloc(?[]const u8, input.len);
+    errdefer allocator.free(duped);
+
+    for (input, 0..) |name, index| {
+        duped[index] = if (name) |capture_name|
+            try allocator.dupe(u8, capture_name)
+        else
+            null;
+    }
+    return duped;
+}
+
+fn freeCaptureNames(allocator: std.mem.Allocator, capture_names: []const ?[]const u8) void {
+    for (capture_names) |name| {
+        if (name) |capture_name| allocator.free(capture_name);
+    }
+    allocator.free(capture_names);
+}
 
 fn shouldFoldCase(pattern: []const u8, case_mode: CaseMode) bool {
     return switch (case_mode) {
@@ -522,6 +612,7 @@ fn buildReport(path: []const u8, haystack: []const u8, span: regex.Vm.Capture) M
         .line_number = line_info.line_number,
         .column_number = line_info.column_number,
         .line = haystack[line_info.line_span.start..line_info.line_span.end],
+        .line_terminated = line_info.line_span.end < haystack.len and haystack[line_info.line_span.end] == '\n',
         .line_span = line_info.line_span,
         .match_span = .{
             .start = match_start,

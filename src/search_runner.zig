@@ -4,7 +4,9 @@ const zigrep = struct {
 };
 const command = @import("command.zig");
 const search_entry_runner = @import("search_entry_runner.zig");
+const search_execution = @import("search_execution.zig");
 const search_output = @import("search_output.zig");
+const search_output_policy = @import("search_output_policy.zig");
 const search_parallel = @import("search_parallel.zig");
 const search_path_runner = @import("search_path_runner.zig");
 const search_reporting = @import("search_reporting.zig");
@@ -23,6 +25,7 @@ pub const CliOptions = command.CliOptions;
 
 pub const SearchStats = search_result.SearchStats;
 pub const SearchResult = search_result.SearchResult;
+const stdin_label = "stdin";
 
 pub fn runSearch(
     allocator: std.mem.Allocator,
@@ -30,22 +33,30 @@ pub fn runSearch(
     stderr: *std.Io.Writer,
     options: CliOptions,
 ) !u8 {
-    if (options.multiline and
-        (options.invert_match or
-            options.max_count != null or
-            (options.output.heading and options.report_mode != .lines)))
+    var total_timer = try std.time.Timer.start();
+    const traversal = options.traversal();
+    const matcher = options.matcher();
+    const reporting = options.reporting();
+    if (matcher.multiline and
+        (matcher.invert_match or
+            reporting.max_count != null or
+            (reporting.output.heading and reporting.report_mode != .lines)))
     {
         return error.InvalidFlagCombination;
     }
-    if (options.multiline_dotall and !options.multiline) return error.InvalidFlagCombination;
+    if (matcher.multiline_dotall and !matcher.multiline) return error.InvalidFlagCombination;
 
-    const type_matcher = try zigrep.search.types.init(allocator, options.type_adds);
+    const type_matcher = try zigrep.search.types.init(allocator, traversal.type_adds);
     defer type_matcher.deinit(allocator);
-    try zigrep.search.types.validateSelectedTypes(type_matcher, options.include_types, options.exclude_types);
+    try zigrep.search.types.validateSelectedTypes(type_matcher, traversal.include_types, traversal.exclude_types);
+
+    const effective_options = search_output_policy.effectivePathSearchOptions(options);
+    const effective_traversal = effective_options.traversal();
+    const effective_reporting = effective_options.reporting();
 
     var result: SearchResult = .{ .matched = false };
-    for (options.paths) |path| {
-        if (options.buffer_output) {
+    for (effective_traversal.paths) |path| {
+        if (effective_traversal.buffer_output) {
             var buffered_output: std.Io.Writer.Allocating = .init(allocator);
             defer buffered_output.deinit();
 
@@ -54,7 +65,7 @@ pub fn runSearch(
                 &buffered_output.writer,
                 stderr,
                 path,
-                options,
+                effective_options,
                 type_matcher,
                 searchEntriesSequential,
                 searchEntriesParallel,
@@ -70,7 +81,7 @@ pub fn runSearch(
             stdout,
             stderr,
             path,
-            options,
+            effective_options,
             type_matcher,
             searchEntriesSequential,
             searchEntriesParallel,
@@ -78,8 +89,131 @@ pub fn runSearch(
         if (path_result.matched) result.matched = true;
         result.stats.add(path_result.stats);
     }
-    if (options.show_stats) try writeStats(stderr, result.stats);
+    if (effective_options.output_format == .json) {
+        try search_output.writeJsonSummaryEvent(stdout, .{
+            .bytes_searched = result.stats.searched_bytes,
+            .bytes_printed = result.stats.printed_bytes,
+            .searches = result.stats.searched_files,
+            .searches_with_match = result.stats.matched_files,
+            .matched_lines = result.stats.matched_lines,
+            .matches = result.stats.matches,
+            .elapsed_ns = result.stats.elapsed_ns,
+            .elapsed_total_ns = total_timer.read(),
+        });
+    }
+    if (effective_reporting.show_stats) try writeStats(stderr, result.stats);
     return if (result.matched) 0 else 1;
+}
+
+pub fn runStdinSearch(
+    allocator: std.mem.Allocator,
+    stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
+    options: CliOptions,
+    stdin_bytes: []const u8,
+) !u8 {
+    var total_timer = try std.time.Timer.start();
+    const traversal = options.traversal();
+    const matcher = options.matcher();
+    const reporting = search_output_policy.effectiveStdinReporting(options);
+    if (traversal.preprocessor != null or traversal.list_files) return error.InvalidFlagCombination;
+    if (matcher.multiline and
+        (matcher.invert_match or
+            reporting.max_count != null or
+            (reporting.output.heading and reporting.report_mode != .lines)))
+    {
+        return error.InvalidFlagCombination;
+    }
+    if (matcher.multiline_dotall and !matcher.multiline) return error.InvalidFlagCombination;
+
+    var searcher = try zigrep.search.grep.Searcher.init(allocator, matcher.pattern, .{
+        .case_mode = matcher.case_mode,
+        .fixed_strings = matcher.fixed_strings,
+        .multiline = matcher.multiline,
+        .multiline_dotall = matcher.multiline_dotall,
+    });
+    defer searcher.deinit();
+
+    const search_bytes = try search_execution.prepareSearchBytes(allocator, stdin_label, stdin_bytes, traversal);
+    defer if (search_bytes.ptr != stdin_bytes.ptr) allocator.free(search_bytes);
+
+    const effective_binary_output = if (traversal.search_compressed)
+        search_execution.decideBinaryBehavior(search_bytes, matcher) orelse {
+            const stats: SearchStats = .{ .skipped_binary_files = 1 };
+            if (reporting.show_stats) try writeStats(stderr, stats);
+            return 1;
+        }
+    else
+        search_execution.decideBinaryBehavior(stdin_bytes, matcher) orelse {
+            const stats: SearchStats = .{ .skipped_binary_files = 1 };
+            if (reporting.show_stats) try writeStats(stderr, stats);
+            return 1;
+        };
+    const raw_text_output = search_execution.shouldRenderRawBinaryText(search_bytes, matcher);
+
+    var json_capture: std.Io.Writer.Allocating = .init(allocator);
+    defer json_capture.deinit();
+    const output_writer = if (reporting.output_format == .json) &json_capture.writer else stdout;
+    var search_timer = try std.time.Timer.start();
+
+    if (reporting.output_format == .json) {
+        try search_output.writeJsonBeginEvent(output_writer, stdin_label);
+    }
+
+    const report = try search_reporting.writeFileOutput(
+        allocator,
+        output_writer,
+        &searcher,
+        stdin_label,
+        search_bytes,
+        matcher.encoding,
+        effective_binary_output,
+        matcher.invert_match,
+        reporting.output,
+        reporting.output_format,
+        reporting.report_mode,
+        reporting.max_count,
+        reporting.context_before,
+        reporting.context_after,
+        search_output_policy.displayMode(raw_text_output),
+    );
+
+    if (reporting.output_format == .json) {
+        const pre_end_written = json_capture.written();
+        const elapsed_ns = search_timer.read();
+        try search_output.writeJsonEndEvent(output_writer, stdin_label, .{
+            .bytes_searched = search_bytes.len,
+            .bytes_printed = pre_end_written.len,
+            .searches = 1,
+            .searches_with_match = if (report.matched) 1 else 0,
+            .matched_lines = report.matched_lines,
+            .matches = report.matches,
+            .elapsed_ns = elapsed_ns,
+        });
+        try search_output.writeJsonSummaryEvent(output_writer, .{
+            .bytes_searched = search_bytes.len,
+            .bytes_printed = pre_end_written.len,
+            .searches = 1,
+            .searches_with_match = if (report.matched) 1 else 0,
+            .matched_lines = report.matched_lines,
+            .matches = report.matches,
+            .elapsed_ns = elapsed_ns,
+            .elapsed_total_ns = total_timer.read(),
+        });
+        try stdout.writeAll(json_capture.written());
+    }
+
+    const stats: SearchStats = .{
+        .searched_files = 1,
+        .matched_files = if (report.matched) 1 else 0,
+        .searched_bytes = search_bytes.len,
+        .printed_bytes = if (reporting.output_format == .json) json_capture.written().len else 0,
+        .matched_lines = report.matched_lines,
+        .matches = report.matches,
+        .elapsed_ns = if (reporting.output_format == .json) search_timer.read() else 0,
+    };
+    if (reporting.show_stats) try writeStats(stderr, stats);
+    return if (report.matched) 0 else 1;
 }
 
 pub fn searchEntriesSequential(
@@ -89,10 +223,18 @@ pub fn searchEntriesSequential(
     entries: []const zigrep.search.walk.Entry,
     options: CliOptions,
 ) !SearchResult {
-    var searcher = try zigrep.search.grep.Searcher.init(allocator, options.pattern, .{
-        .case_mode = options.case_mode,
-        .multiline = options.multiline,
-        .multiline_dotall = options.multiline_dotall,
+    const matcher = options.matcher();
+    const reporting = options.reporting();
+    const entry_options: search_entry_runner.EntrySearchOptions = .{
+        .traversal = options.traversal(),
+        .matcher = matcher,
+        .reporting = reporting,
+    };
+    var searcher = try zigrep.search.grep.Searcher.init(allocator, matcher.pattern, .{
+        .case_mode = matcher.case_mode,
+        .fixed_strings = matcher.fixed_strings,
+        .multiline = matcher.multiline,
+        .multiline_dotall = matcher.multiline_dotall,
     });
     defer searcher.deinit();
 
@@ -108,7 +250,7 @@ pub fn searchEntriesSequential(
             stderr,
             &searcher,
             entry,
-            options,
+            entry_options,
         );
         defer entry_output.deinit(file_allocator);
 
@@ -123,8 +265,17 @@ pub fn searchEntriesSequential(
 
         result.stats.searched_files += 1;
         result.stats.searched_bytes += entry_output.searched_bytes;
+        result.stats.printed_bytes += entry_output.printed_bytes;
+        result.stats.matched_lines += entry_output.matched_lines;
+        result.stats.matches += entry_output.matches;
+        result.stats.elapsed_ns += entry_output.elapsed_ns;
         if (entry_output.matched) {
-            if (options.output.heading) {
+            if (reporting.quiet) {
+                result.matched = true;
+                result.stats.matched_files += 1;
+                return result;
+            }
+            if (reporting.output.heading) {
                 try search_output.writeHeadingBlock(stdout, entry.path, entry_output.bytes.items, &wrote_heading_group);
             } else {
                 try stdout.writeAll(entry_output.bytes.items);
@@ -137,6 +288,33 @@ pub fn searchEntriesSequential(
     return result;
 }
 
+pub fn runFileList(
+    allocator: std.mem.Allocator,
+    stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
+    options: CliOptions,
+) !u8 {
+    const traversal = options.traversal();
+    const reporting = options.reporting();
+    const type_matcher = try zigrep.search.types.init(allocator, traversal.type_adds);
+    defer type_matcher.deinit(allocator);
+    try zigrep.search.types.validateSelectedTypes(type_matcher, traversal.include_types, traversal.exclude_types);
+
+    for (traversal.paths) |path| {
+        const listed = try search_path_runner.listPathFiles(
+            allocator,
+            stdout,
+            stderr,
+            path,
+            options,
+            type_matcher,
+        );
+        if (reporting.quiet and listed != 0) return 0;
+    }
+
+    return if (reporting.quiet) 1 else 0;
+}
+
 fn searchEntriesParallel(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
@@ -145,7 +323,7 @@ fn searchEntriesParallel(
     schedule: zigrep.search.schedule.Plan,
 ) !SearchResult {
     const worker_allocator = std.heap.smp_allocator;
-    if (schedule.worker_count <= 1) {
+    if (options.quiet or schedule.worker_count <= 1) {
         return searchEntriesSequential(worker_allocator, stdout, stderr, entries, options);
     }
     return search_parallel.searchEntriesParallel(stdout, stderr, entries, options, schedule);

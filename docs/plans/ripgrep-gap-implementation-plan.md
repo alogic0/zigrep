@@ -115,11 +115,13 @@ ecosystem features.
 
 ## Priority 4: Regex Surface Gaps
 
-- [ ] Add case-insensitive regex support in the native engine.
-  This is currently the single biggest regex usability gap.
+- [x] Add case-insensitive regex support in the native engine.
+  `zigrep` now supports `-i/--ignore-case` and `-S/--smart-case` in the native
+  engine via case-folded regex lowering.
 
-- [ ] Decide whether to support multiline search (`-U/--multiline` style).
-  This is a major ripgrep feature but has real architectural cost.
+- [x] Decide whether to support multiline search (`-U/--multiline` style).
+  `zigrep` now supports multiline search via `-U/--multiline`, with explicit
+  validation around combinations that remain intentionally unsupported.
 
 - [ ] Decide whether to support a richer regex fallback such as PCRE2-like
   functionality or to keep the current deliberate non-goal.

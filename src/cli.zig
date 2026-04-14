@@ -30,16 +30,18 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
     var buffers: ParseBuffers = .{};
     defer buffers.deinit(allocator);
     var stop_parsing_flags = false;
+    var positional_mode = false;
 
     var index: usize = 1;
     while (index < argv.len) : (index += 1) {
         const arg = argv[index];
-        if (!stop_parsing_flags and state.pattern == null and std.mem.eql(u8, arg, "--")) {
+        if (!stop_parsing_flags and !positional_mode and std.mem.eql(u8, arg, "--")) {
             stop_parsing_flags = true;
+            positional_mode = true;
             continue;
         }
 
-        if (!stop_parsing_flags and state.pattern == null and arg.len > 0 and arg[0] == '-') {
+        if (!stop_parsing_flags and !positional_mode and arg.len > 0 and arg[0] == '-') {
             switch (cli_parse_helpers.handleScalarFlag(&state, arg)) {
                 .help => return .help,
                 .version => return .version,
@@ -59,8 +61,9 @@ pub fn parseArgs(allocator: std.mem.Allocator, argv: []const []const u8) !ParseR
             return error.UnknownFlag;
         }
 
-        if (state.pattern == null) {
-            state.pattern = arg;
+        positional_mode = true;
+        if (!state.list_files and state.positional_pattern == null and buffers.explicit_patterns.items.len == 0) {
+            state.positional_pattern = arg;
         } else {
             try buffers.paths.append(allocator, arg);
         }
@@ -77,8 +80,9 @@ pub fn executeParsedCommand(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
     parsed: ParseResult,
+    stdin_bytes: ?[]const u8,
 ) !u8 {
-    return cli_dispatch.executeParsedCommand(allocator, stdout, stderr, parsed);
+    return cli_dispatch.executeParsedCommand(allocator, stdout, stderr, parsed, stdin_bytes);
 }
 
 pub fn isUsageError(err: anyerror) bool {
@@ -105,6 +109,10 @@ pub fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --no-config           ignore config file support for this run
         \\  --hidden              include hidden files
         \\  -u, --unrestricted    reduce filtering; repeat to include hidden and binary files
+        \\  --files               list candidate files after filtering
+        \\  -q, --quiet           suppress normal output and stop after the first result
+        \\  --sort MODE           sort results ascending by: none, path, modified, accessed, created
+        \\  --sortr MODE          sort results descending by: none, path, modified, accessed, created
         \\  -v, --invert-match    select non-matching lines instead of matching lines
         \\  --ignore-file PATH    load ignore rules from PATH
         \\  --no-ignore           disable ignore filtering
@@ -117,12 +125,16 @@ pub fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  --follow              follow symlinks
         \\  -i, --ignore-case     search case-insensitively
         \\  -S, --smart-case      use ignore-case unless the pattern has uppercase letters
+        \\  -F, --fixed-strings   treat the pattern as a literal string
+        \\  -e, --regexp PATTERN  provide the search pattern explicitly
+        \\  -r, --replace TEXT    print matches with each matched span replaced by TEXT
         \\  --text                search binary files and print normal match output
         \\  --binary              search binary files but suppress matching line content
         \\  -z, --search-zip      search gzip-compressed files too
         \\  --pre CMD             run CMD on each selected file path before searching
         \\  --pre-glob GLOB       apply --pre only to paths matching GLOB
         \\  -g, --glob GLOB       include or exclude paths by glob
+        \\  --iglob GLOB          include or exclude paths by case-insensitive glob
         \\  --buffered            use the simpler file-reading method
         \\  --mmap                use the faster file-reading method when possible
         \\  -E, --encoding ENC    force input encoding: auto, none, utf8, latin1, utf16le, utf16be

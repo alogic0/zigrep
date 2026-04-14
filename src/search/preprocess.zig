@@ -13,7 +13,7 @@ pub const Error = std.mem.Allocator.Error || error{
 pub fn shouldApply(command: ?[]const u8, globs: []const []const u8, path: []const u8) bool {
     if (command == null) return false;
     if (globs.len == 0) return true;
-    return glob.allowsPath(globs, path);
+    return glob.allowsPathStrings(globs, path);
 }
 
 pub fn runAlloc(

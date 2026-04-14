@@ -216,11 +216,15 @@ The current CLI supports:
 - Ignore controls with `--ignore-file`, `--no-ignore`, `--no-ignore-vcs`, and `--no-ignore-parent`
 - Symlink following with `--follow`
 - Case-insensitive search with `-i` / `--ignore-case` and `-S` / `--smart-case`
+- Literal search with `-F` / `--fixed-strings`
+- Explicit pattern passing with repeated `-e` / `--regexp`
 - Case-sensitive path glob filtering with repeated `-g` / `--glob`
 - File type filters with `-t`, `-T`, `--type-add`, and `--type-list`
+- Candidate-file listing with `--files`
 - Binary-file search controls with `--text` and `--binary`
 - Buffered or mmap-backed reads with `--buffered` and `--mmap`
 - Worker-count control with `-j` or `--threads`
+- Result ordering with `--sort` / `--sortr` for `path`, `modified`, and `accessed`
 - Walk depth limiting with `--max-depth`
 - Context lines with `-A` / `--after-context`, `-B` / `--before-context`, and `-C` / `--context`
 - Matching-line limit with `-m` or `--max-count`
@@ -229,12 +233,63 @@ The current CLI supports:
 - Non-matching-file output with `-L` or `--files-without-match`
 - Inverted line selection with `-v` or `--invert-match`
 - Match-only output with `-o` or `--only-matching`
+- Output-only replacement with `-r` or `--replace`
 - Newline-delimited JSON output with `--json`
 - NUL-delimited path output with `--null` for file-path reporting modes
 - Search summary output with `--stats`
+- Quiet mode with `-q` / `--quiet`
 - Grouped text output with `--heading`
 - Output toggles with `-H`/`--with-filename`, `--no-filename`, `-n`/`--line-number`, `--no-line-number`, `--column`, and `--no-column`
 - `--` to terminate flag parsing
+
+Code-search note:
+
+- `-F` or `--fixed-strings` treats the pattern literally instead of as regex syntax
+- `-e PATTERN` or `--regexp PATTERN` provides the pattern explicitly and is the intended way to search for patterns beginning with `-`
+- repeated `-e` flags are allowed and currently compose as one OR-style search
+- repeated `-e` also composes with `-F`; each explicit fixed string is escaped independently before search
+- `--files` lists candidate files after traversal, ignore filtering, glob filtering, hidden-file policy, symlink policy, and type filtering
+
+`--files` note:
+
+- `--files` is a path-only mode and does not compile or run a regex matcher
+- normal traversal and filtering flags still apply, including `--hidden`, `-u` / `-uu` / `-uuu`, `-g`, `-t`, and `-T`
+- `--null` applies to `--files`
+- `--stats` is a no-op with `--files`
+- match-oriented flags such as explicit patterns, `-F`, `-v`, `-l`, `-L`, context flags, JSON output, heading output, and line/column toggles are rejected in `--files` mode
+
+`--replace` note:
+
+- `-r` or `--replace` changes printed match output only and does not rewrite files
+- replacement expansion supports `$0`, numbered captures like `$1`, braced forms like `${1}`, named captures like `$name` or `${name}`, and `$$` for a literal `$`
+- unknown capture names or indexes expand to an empty string
+- replacement currently remains incompatible with non-text or non-line-oriented modes such as `--count`, `--json`, `-v`, and multiline search
+
+Filename default note:
+
+- when searching one explicit file path, text line output and `--only-matching` suppress filename, line-number, and column prefixes by default
+- `--count` already prints only the count value in that case
+- `-H` or `--with-filename` restores the filename prefix explicitly
+- `-n` or `--line-number` restores line numbers explicitly
+- `--column` restores columns explicitly and also implies line numbers
+- `--no-filename` still suppresses it explicitly
+- directory searches, multiple explicit paths, `--heading`, and stdin labeling keep their own existing behavior
+
+`--sort` note:
+
+- `--sort path` and `--sortr path` sort results by path in ascending or descending order
+- `--sort modified` and `--sortr modified` sort results by file modification time
+- `--sort accessed` and `--sortr accessed` sort results by file access time
+- timestamp sorts use path order as a deterministic tie-breaker
+- sorting stays in the collected result-ordering layer and forces single-threaded reporting
+- `created` is recognized as a sort mode but is currently rejected with an explicit creation-time-unavailable message on the current portable implementation surface
+
+`--quiet` note:
+
+- `-q` or `--quiet` suppresses normal stdout output
+- in normal search mode, exit code `0` still means at least one match and `1` means no matches
+- in `--files` mode, exit code `0` means at least one candidate file would be searched and `1` means none would be searched
+- `--files --quiet` stops after the first candidate file that survives filtering
 
 `--max-count` note:
 
@@ -263,17 +318,19 @@ Context mode note:
 
 `--json` note:
 
-- `--json` emits one newline-delimited JSON event per result
-- line and only-matching output emit `match` events
-- `--count` emits `count` events
-- `--files-with-matches` and `--files-without-match` emit `path` events
-- displayed line content uses the same escaping rules as text output, including `\xNN` escapes for invalid or unsafe bytes
-- this is a smaller event schema than ripgrep's full JSON format
+- `--json` emits newline-delimited JSON events only for normal line-report modes
+- line and only-matching output emit `begin`, `match`, `end`, and final `summary` events
+- `--count`, `--files-with-matches`, and `--files-without-match` currently fall back to normal text output, matching ripgrep more closely than the earlier custom JSON events
+- line-mode `match` events include nested `path.text`, `lines.text`, `line_number`, `absolute_offset`, and `submatches`
+- in line-mode JSON, `lines.text` keeps the full matched line payload, and `--only-matching` narrows the reported match through `submatches` instead of replacing the line payload
+- line-mode `end` and `summary` events include elapsed timing metadata with `secs`, `nanos`, and `human` fields
+- displayed JSON text content uses the same escaping rules as text output, including `\xNN` escapes for invalid or unsafe bytes
+- this is still smaller than ripgrep's full JSON schema, mainly in longer-tail metadata and exact field coverage
 
 `--null` note:
 
-- `--null` currently applies to `--files-with-matches` and `--files-without-match`
-- those modes emit matching or non-matching file paths terminated with `\0` instead of `\n`
+- `--null` currently applies to `--files`, `--files-with-matches`, and `--files-without-match`
+- those modes emit file paths terminated with `\0` instead of `\n`
 - `--null` is currently rejected with normal line output, count output, context output, and `--json`
 
 `--stats` note:
@@ -281,6 +338,7 @@ Context mode note:
 - `--stats` prints a compact search summary to stderr after the normal search output
 - the current summary includes searched file count, matched file count, searched byte count, and skipped binary-file count
 - `--stats` does not change normal exit codes or stdout search results
+- `--stats` is currently a no-op with `--files`, `--files-with-matches`, and `--files-without-match`
 
 `--heading` note:
 
@@ -327,11 +385,13 @@ Practical guidance:
 `--glob` note:
 
 - `-g GLOB` or `--glob GLOB` filters searched file paths relative to each root path
+- `--iglob GLOB` applies the same filtering but matches ASCII case-insensitively
 - repeated `-g` flags are allowed
+- repeated `--iglob` flags are allowed
+- `-g` and `--iglob` can be mixed, and each glob keeps its own case-sensitivity
 - a plain glob like `*.zig` includes matching paths
 - a bang-prefixed glob like `!main.zig` excludes matching paths
 - if any positive globs are present, `zigrep` treats them as an allow-list
-- matching is currently case-sensitive only; `--iglob` is not implemented yet
 
 File type note:
 
@@ -385,8 +445,8 @@ Current `--text` note:
 - planner-friendly empty capture groups like `a()b` are covered by that raw-byte path too
 - default mode now uses that same raw-byte matcher for text-like invalid UTF-8 files; `--text` mainly changes file-selection policy by disabling binary-file skipping
 - literal-only UTF-8 classes like `[ж]`, negated literal-only UTF-8 classes like `[^ж]`, small positive UTF-8 ranges like `[а-я]`, negated small UTF-8 ranges like `[^а-я]`, larger Unicode ranges like `[Ā-ӿ]`, `[^Ā-ӿ]`, or `[Ā-ӿ]+`, bare anchors like `^` or `$`, grouped alternation branches that use those anchored forms, and anchored grouped patterns like `(^ab)+c` are covered by that planner too while keeping normal anchor semantics; the remaining misses are broader regex shapes that still fall outside the planner
-- when a reported line contains invalid bytes or unsafe control bytes, the CLI prints those bytes as `\xNN` escapes instead of sending them raw to the terminal
-- this is still not full ripgrep-compatible encoding behavior
+- when `--text` is active on binary-containing input, text output now prints the matched line bytes raw, including NUL bytes, instead of escaping them as `\xNN`
+- normal non-`--text` text output and JSON output keep their existing escaping rules
 - the exact current rules are documented in [docs/invalid-utf8-semantics.md](invalid-utf8-semantics.md)
 
 Encoding note:
@@ -430,9 +490,37 @@ Status and warning note:
 `--binary` note:
 
 - `--binary` searches binary files but suppresses matching line content
-- in normal text output, a matching binary file prints `path: binary file matches`
+- in normal text output, a matching binary file prints `binary file matches (found "\0" byte around offset N)`
 - with `--files-with-matches` and `--files-without-match`, it uses file-selection semantics over binary files
 - `--binary` is currently rejected with `--count`, `--only-matching`, `--heading`, and `--json`
+
+Sort note:
+
+- `--sort path` sorts results by path in ascending order
+- `--sortr path` sorts results by path in descending order
+- `--sort none` and `--sortr none` disable sorting again
+- sorting is applied after filtering and before reporting
+- sorting currently supports path order only; timestamp-based sort modes are not implemented yet
+- sorting forces single-threaded reporting so output order stays stable
+- sorting applies to normal search output, `--files`, `--files-with-matches`, `--files-without-match`, `--count`, and `--json`
+- `--quiet` observes the sorted candidate order when sorting is enabled
+
+Replace note:
+
+- `-r TEXT` or `--replace TEXT` rewrites each matched span in printed text output to `TEXT`
+- replacement is currently output-only; it does not rewrite files on disk
+- replacement currently uses the replacement text literally
+- capture expansion such as `$1` or named-group replacement is not implemented yet
+- replacement works with normal text line output, `--only-matching`, `--heading`, context output, stdin search, and path sorting
+- replacement is rejected with `--count`, `--files-with-matches`, `--files-without-match`, `--json`, `-v` / `--invert-match`, multiline search, and binary-suppressed output
+
+Stdin note:
+
+- when no explicit path is given and stdin is piped, `zigrep` searches stdin instead of defaulting to `.`
+- normal line output, `--count`, and `--only-matching` omit the filename prefix by default on stdin
+- path-oriented stdin output uses the label `stdin`
+- `--files-with-matches`, `--files-without-match`, `--json`, and `--null` use that `stdin` label when they need a path value
+- `--files` remains invalid on piped stdin because file-list mode is path traversal, not content search
 
 Output is line-oriented. When enabled, prefixes are emitted in this order:
 
@@ -445,8 +533,8 @@ Output is line-oriented. When enabled, prefixes are emitted in this order:
 The current search tool does not yet implement:
 
 - `.gitignore` compatibility beyond the small internal ignore-rule subset
-- stdin search
-- replacement/substitution
+- timestamp-based sorting controls
+- capture-expanding replacement and file-rewriting substitution
 - full ripgrep flag compatibility
 
 ## Performance Model

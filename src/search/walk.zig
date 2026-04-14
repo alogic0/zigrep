@@ -18,6 +18,9 @@ pub const Entry = struct {
     path: []const u8,
     kind: EntryKind,
     depth: usize,
+    accessed_ns: i128,
+    modified_ns: i128,
+    changed_ns: i128,
 
     pub fn deinit(self: Entry, allocator: std.mem.Allocator) void {
         allocator.free(self.path);
@@ -26,6 +29,8 @@ pub const Entry = struct {
 
 pub const WalkError = error{
     OutOfMemory,
+    StopWalk,
+    CurrentWorkingDirectoryUnlinked,
 } || std.fs.Dir.OpenError || std.fs.Dir.StatFileError || std.fs.Dir.AccessError || std.fs.Dir.Iterator.Error || std.fs.Dir.RealPathError;
 
 const VisitedDirs = std.StringHashMapUnmanaged(void);
@@ -75,11 +80,15 @@ pub fn walk(
     const root_kind = try classifyPath(root_path);
     switch (root_kind) {
         .file => {
+            const stat = try std.fs.cwd().statFile(root_path);
             const owned = try allocator.dupe(u8, root_path);
             try visitor.visit(.{
                 .path = owned,
                 .kind = .file,
                 .depth = 0,
+                .accessed_ns = stat.atime,
+                .modified_ns = stat.mtime,
+                .changed_ns = stat.ctime,
             });
         },
         .directory => try walkDir(allocator, root_path, options, 0, false, &visited_dirs, visitor, warning_handler),
@@ -141,11 +150,21 @@ fn walkDir(
 
         switch (kind) {
             .file => {
+                const stat = std.fs.cwd().statFile(child_path) catch |err| {
+                    if (shouldWarnAndSkipTraversalError(err)) {
+                        warning_handler.warn(child_path, err);
+                        continue;
+                    }
+                    return err;
+                };
                 const owned = try allocator.dupe(u8, child_path);
                 try visitor.visit(.{
                     .path = owned,
                     .kind = .file,
                     .depth = child_depth,
+                    .accessed_ns = stat.atime,
+                    .modified_ns = stat.mtime,
+                    .changed_ns = stat.ctime,
                 });
             },
             .directory => {
@@ -183,11 +202,21 @@ fn walkFollowedPath(
     };
     switch (kind) {
         .file => {
+            const stat = std.fs.cwd().statFile(path) catch |err| {
+                if (allow_warn_skip and shouldWarnAndSkipTraversalError(err)) {
+                    warning_handler.warn(path, err);
+                    return;
+                }
+                return err;
+            };
             const owned = try allocator.dupe(u8, path);
             try visitor.visit(.{
                 .path = owned,
                 .kind = .file,
                 .depth = depth,
+                .accessed_ns = stat.atime,
+                .modified_ns = stat.mtime,
+                .changed_ns = stat.ctime,
             });
         },
         .directory => {
@@ -396,4 +425,42 @@ test "walk can warn and skip unreadable child directories" {
     try testing.expectEqual(@as(usize, 1), entries.len);
     try testing.expect(std.mem.endsWith(u8, entries[0].path, "visible.txt"));
     try testing.expect(std.mem.containsAtLeast(u8, warning_capture.written(), 1, "warning: skipping directory "));
+}
+
+test "walk visitor can stop traversal early" {
+    const testing = std.testing;
+
+    const StopAfterFirst = struct {
+        allocator: std.mem.Allocator,
+        count: *usize,
+
+        pub fn visit(self: @This(), entry: Entry) WalkError!void {
+            defer entry.deinit(self.allocator);
+            if (entry.kind != .file) return;
+            self.count.* += 1;
+            return error.StopWalk;
+        }
+    };
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("src/nested");
+    try tmp.dir.writeFile(.{ .sub_path = "one.txt", .data = "one" });
+    try tmp.dir.writeFile(.{ .sub_path = "src/two.txt", .data = "two" });
+    try tmp.dir.writeFile(.{ .sub_path = "src/nested/three.txt", .data = "three" });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    var count: usize = 0;
+    walk(testing.allocator, root_path, .{}, StopAfterFirst{
+        .allocator = testing.allocator,
+        .count = &count,
+    }, NoopWarningHandler{}) catch |err| switch (err) {
+        error.StopWalk => {},
+        else => return err,
+    };
+
+    try testing.expectEqual(@as(usize, 1), count);
 }

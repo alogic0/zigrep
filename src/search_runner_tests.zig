@@ -1,8 +1,8 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
+const search_reporting = zigrep.testing.search_reporting;
 
 const runner = zigrep.search_runner;
-const search_reporting = zigrep.search_reporting;
 const CliOptions = zigrep.command.CliOptions;
 
 test "runSearch parallel path preserves heading groups" {
@@ -89,7 +89,14 @@ test "searchEntriesSequential warns and skips unreadable files" {
     defer testing.allocator.free(missing_path);
 
     const entries = [_]zigrep.search.walk.Entry{
-        .{ .path = missing_path, .kind = .file, .depth = 0 },
+        .{
+            .path = missing_path,
+            .kind = .file,
+            .depth = 0,
+            .accessed_ns = 0,
+            .modified_ns = 0,
+            .changed_ns = 0,
+        },
     };
 
     const result = try runner.searchEntriesSequential(testing.allocator, &stdout_capture.writer, &stderr_capture.writer, &entries, .{
@@ -124,6 +131,7 @@ test "formatReport obeys output toggles" {
         .line_number = 3,
         .column_number = 7,
         .line = "matched line",
+        .line_terminated = false,
         .line_span = .{ .start = 0, .end = 12 },
         .match_span = .{ .start = 0, .end = 6 },
     };
@@ -146,6 +154,7 @@ test "formatReport escapes unsafe bytes in displayed lines" {
         .line_number = 1,
         .column_number = 4,
         .line = "aa\x00\xffneedle\x1b",
+        .line_terminated = false,
         .line_span = .{ .start = 0, .end = 11 },
         .match_span = .{ .start = 4, .end = 10 },
     };
@@ -325,4 +334,73 @@ test "runSearch output stays identical across allocator and output modes on mixe
             try testing.expectEqualStrings(expected_stderr.?, stderr_capture.written());
         }
     }
+}
+
+test "runSearch sort path disables parallel reordering and sorts descending" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.txt",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "b.txt",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stdout_capture.deinit();
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    const exit_code = try runner.runSearch(testing.allocator, &stdout_capture.writer, &stderr_capture.writer, .{
+        .pattern = "needle",
+        .paths = &.{root_path},
+        .parallel_jobs = 4,
+        .sort_mode = .path,
+        .sort_reverse = true,
+    });
+
+    try testing.expectEqual(@as(u8, 0), exit_code);
+    const a_index = std.mem.indexOf(u8, stdout_capture.written(), "a.txt:1:1:needle one").?;
+    const b_index = std.mem.indexOf(u8, stdout_capture.written(), "b.txt:1:1:needle two").?;
+    try testing.expect(b_index < a_index);
+    try testing.expectEqualStrings("", stderr_capture.written());
+}
+
+test "runSearch reports creation-time-unavailable sort" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.txt",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    var stdout_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stdout_capture.deinit();
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    try testing.expectError(error.CreationTimeUnavailable, runner.runSearch(
+        testing.allocator,
+        &stdout_capture.writer,
+        &stderr_capture.writer,
+        .{
+            .pattern = "needle",
+            .paths = &.{root_path},
+            .sort_mode = .created,
+        },
+    ));
 }

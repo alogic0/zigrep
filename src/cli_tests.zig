@@ -25,6 +25,7 @@ test "parseArgs defaults to current directory search" {
             try testing.expectEqualStrings("needle", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings(".", opts.paths[0]);
+            try testing.expect(opts.used_default_path);
             try testing.expectEqual(@as(usize, 0), opts.globs.len);
             try testing.expectEqual(@as(usize, 0), opts.ignore_files.len);
             try testing.expect(!opts.include_hidden);
@@ -40,6 +41,8 @@ test "parseArgs defaults to current directory search" {
             try testing.expect(!opts.multiline_dotall);
             try testing.expectEqual(@as(?usize, null), opts.parallel_jobs);
             try testing.expectEqual(@as(?usize, null), opts.max_depth);
+            try testing.expect(!opts.fixed_strings);
+            try testing.expect(!opts.list_files);
             try testing.expect(opts.output.with_filename);
             try testing.expect(opts.output.line_number);
             try testing.expect(opts.output.column_number);
@@ -49,6 +52,8 @@ test "parseArgs defaults to current directory search" {
             try testing.expectEqual(OutputFormat.text, opts.output_format);
             try testing.expectEqual(ReportMode.lines, opts.report_mode);
             try testing.expect(!opts.show_stats);
+            try testing.expect(!opts.quiet);
+            try testing.expect(!opts.filename_flag_seen);
             try testing.expect(!opts.invert_match);
         },
         .help => unreachable,
@@ -90,6 +95,20 @@ test "writeFatalError omits usage for runtime search errors" {
     try testing.expectEqualStrings("error: FileNotFound\n", stderr_capture.written());
 }
 
+test "writeFatalError prints ripgrep-like created-sort message" {
+    const testing = std.testing;
+
+    var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer stderr_capture.deinit();
+
+    try writeFatalError(&stderr_capture.writer, "zigrep", error.CreationTimeUnavailable);
+
+    try testing.expectEqualStrings(
+        "sorting by creation time isn't supported: creation time is not available on this platform currently\n",
+        stderr_capture.written(),
+    );
+}
+
 test "parseArgs treats version-like args as positional after the pattern starts" {
     const testing = std.testing;
 
@@ -105,6 +124,7 @@ test "parseArgs treats version-like args as positional after the pattern starts"
             try testing.expectEqualStrings("needle", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("--version", opts.paths[0]);
+            try testing.expect(!opts.used_default_path);
         },
         .help, .version, .type_list => return error.TestExpectedEqual,
     }
@@ -125,8 +145,29 @@ test "parseArgs treats help-like args as positional after terminator" {
             try testing.expectEqualStrings("--help", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings(".", opts.paths[0]);
+            try testing.expect(opts.used_default_path);
         },
         .help, .version, .type_list => return error.TestExpectedEqual,
+    }
+}
+
+test "parseArgs tracks explicit filename control" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-H", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.output.with_filename);
+            try testing.expect(opts.filename_flag_seen);
+            try testing.expect(!opts.used_default_path);
+        },
+        .help, .version, .type_list => unreachable,
     }
 }
 
@@ -169,6 +210,222 @@ test "parseArgs accepts numeric and formatting flags" {
             try testing.expect(!opts.output.column_number);
             try testing.expect(opts.output.only_matching);
             try testing.expectEqual(ReportMode.count, opts.report_mode);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs column implies line numbers" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--column", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.output.line_number);
+            try testing.expect(opts.output.column_number);
+            try testing.expect(opts.line_number_flag_seen);
+            try testing.expect(opts.column_number_flag_seen);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts fixed-string and explicit-pattern flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-F",
+        "-e",
+        "@import(\"search/root.zig\")",
+        "src",
+    });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(!opts.fixed_strings);
+            try testing.expectEqualStrings("(?:@import\\(\"search/root\\.zig\"\\))", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts replace flag" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-r",
+        "HIT",
+        "needle",
+        "src",
+    });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("HIT", opts.output.replacement.?);
+            try testing.expectEqualStrings("needle", opts.pattern);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts explicit patterns that begin with a dash" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-e", "-literal", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("-literal", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts files mode without a pattern" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--files", "--null", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.list_files);
+            try testing.expectEqualStrings("", opts.pattern);
+            try testing.expect(opts.output.null_path_terminator);
+            try testing.expect(!opts.show_stats);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs treats stats as a no-op in files mode" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--files", "--stats", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.list_files);
+            try testing.expect(!opts.show_stats);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts quiet mode" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--quiet", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(opts.quiet);
+            try testing.expectEqualStrings("needle", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs treats stats as a no-op in files-with-matches mode" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--stats", "-l", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(ReportMode.files_with_matches, opts.report_mode);
+            try testing.expect(!opts.show_stats);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts repeated explicit patterns as alternation" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-e", "foo", "-e", "bar", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("(?:foo)|(?:bar)", opts.pattern);
+            try testing.expectEqual(@as(usize, 1), opts.paths.len);
+            try testing.expectEqualStrings("src", opts.paths[0]);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts repeated fixed-string explicit patterns as escaped alternation" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "-F", "-e", "a.b", "-e", "[x]", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expect(!opts.fixed_strings);
+            try testing.expectEqualStrings("(?:a\\.b)|(?:\\[x\\])", opts.pattern);
             try testing.expectEqual(@as(usize, 1), opts.paths.len);
             try testing.expectEqualStrings("src", opts.paths[0]);
         },
@@ -250,12 +507,121 @@ test "parseArgs accepts repeated glob flags" {
     switch (parsed) {
         .run => |opts| {
             try testing.expectEqual(@as(usize, 2), opts.globs.len);
-            try testing.expectEqualStrings("*.zig", opts.globs[0]);
-            try testing.expectEqualStrings("!main.zig", opts.globs[1]);
+            try testing.expectEqualStrings("*.zig", opts.globs[0].pattern);
+            try testing.expect(!opts.globs[0].case_insensitive);
+            try testing.expectEqualStrings("!main.zig", opts.globs[1].pattern);
+            try testing.expect(!opts.globs[1].case_insensitive);
             try testing.expectEqualStrings("needle", opts.pattern);
         },
         .help, .version, .type_list => unreachable,
     }
+}
+
+test "parseArgs accepts case-insensitive glob flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--iglob", "*.zig", "--glob", "!main.zig", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(@as(usize, 2), opts.globs.len);
+            try testing.expectEqualStrings("*.zig", opts.globs[0].pattern);
+            try testing.expect(opts.globs[0].case_insensitive);
+            try testing.expectEqualStrings("!main.zig", opts.globs[1].pattern);
+            try testing.expect(!opts.globs[1].case_insensitive);
+            try testing.expectEqualStrings("needle", opts.pattern);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts sort flags" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--sort", "path", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(zigrep.command.SortMode.path, opts.sort_mode);
+            try testing.expect(!opts.sort_reverse);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs accepts timestamp sort modes" {
+    const testing = std.testing;
+
+    const modified = try parseArgs(testing.allocator, &.{ "zigrep", "--sort", "modified", "needle", "src" });
+    defer switch (modified) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+    switch (modified) {
+        .run => |opts| try testing.expectEqual(zigrep.command.SortMode.modified, opts.sort_mode),
+        .help, .version, .type_list => unreachable,
+    }
+
+    const accessed = try parseArgs(testing.allocator, &.{ "zigrep", "--sortr", "accessed", "needle", "src" });
+    defer switch (accessed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+    switch (accessed) {
+        .run => |opts| {
+            try testing.expectEqual(zigrep.command.SortMode.accessed, opts.sort_mode);
+            try testing.expect(opts.sort_reverse);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+
+    const created = try parseArgs(testing.allocator, &.{ "zigrep", "--sort", "created", "needle", "src" });
+    defer switch (created) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+    switch (created) {
+        .run => |opts| try testing.expectEqual(zigrep.command.SortMode.created, opts.sort_mode),
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs sortr overrides sort" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{ "zigrep", "--sort", "path", "--sortr", "path", "needle", "src" });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqual(zigrep.command.SortMode.path, opts.sort_mode);
+            try testing.expect(opts.sort_reverse);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
+test "parseArgs rejects unknown sort mode" {
+    const testing = std.testing;
+
+    try testing.expectError(error.InvalidFlagValue, parseArgs(testing.allocator, &.{ "zigrep", "--sort", "wat", "needle", "src" }));
 }
 
 test "parseArgs accepts ignore control flags" {
@@ -403,11 +769,12 @@ test "runCli rejects unsupported multiline output combinations for now" {
     var stderr_capture: std.Io.Writer.Allocating = .init(testing.allocator);
     defer stderr_capture.deinit();
 
-    try testing.expectError(error.InvalidFlagCombination, cli_entry.runCli(
+    try testing.expectError(error.InvalidFlagCombination, cli_entry.runCliWithInput(
         testing.allocator,
         &stdout_capture.writer,
         &stderr_capture.writer,
         &.{ "zigrep", "-U", "--max-count", "1", "needle", "." },
+        null,
     ));
 }
 
@@ -667,13 +1034,25 @@ test "parseArgs rejects invalid numeric flags" {
         "--null",
         "needle",
     }));
-    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+    const json_path_mode = try parseArgs(testing.allocator, &.{
         "zigrep",
         "--json",
         "--null",
         "-l",
         "needle",
-    }));
+    });
+    defer switch (json_path_mode) {
+        .run => |opts| opts.deinit(testing.allocator),
+        else => {},
+    };
+    switch (json_path_mode) {
+        .run => |opts| {
+            try testing.expectEqual(OutputFormat.text, opts.output_format);
+            try testing.expectEqual(ReportMode.files_with_matches, opts.report_mode);
+            try testing.expect(opts.output.null_path_terminator);
+        },
+        else => return error.TestUnexpectedResult,
+    }
     try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
         "zigrep",
         "--heading",
@@ -707,8 +1086,78 @@ test "parseArgs rejects invalid numeric flags" {
     }));
     try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
         "zigrep",
+        "--count",
+        "-r",
+        "HIT",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--json",
+        "-r",
+        "HIT",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-v",
+        "-r",
+        "HIT",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-U",
+        "-r",
+        "HIT",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
         "--pre-glob",
         "*.wrapped",
         "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "-F",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "-l",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "--json",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "-n",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "--column",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "--no-line-number",
+        "src",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--files",
+        "--no-column",
+        "src",
     }));
 }

@@ -1,7 +1,7 @@
 const std = @import("std");
 const zigrep = @import("zigrep");
 const cli_test_support = @import("cli_test_support.zig");
-const search_reporting = zigrep.search_reporting;
+const search_reporting = zigrep.testing.search_reporting;
 
 test "runCli prints every matching line from one file" {
     const testing = std.testing;
@@ -103,6 +103,88 @@ test "runCli only-matching mode respects max-count by matching line" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli replace works with only-matching mode" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one needle two\nneedle\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--only-matching", "-r", "HIT", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:HIT\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:12:HIT\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2:1:HIT\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli replace expands captures in only-matching mode" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "caps.txt",
+        .data = "foo bar\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--only-matching",
+        "-r",
+        "$2/$1/$0",
+        "(foo) (bar)",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:1:1:bar/foo/foo bar\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli replace expands named captures and escapes dollar" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "caps.txt",
+        .data = "foo bar\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "--only-matching",
+        "-r",
+        "$$${second}-${first}",
+        "(?P<first>foo) (?P<second>bar)",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:1:1:$bar-foo\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 
 test "runCli honors max depth in recursive search" {
     const testing = std.testing;
@@ -163,7 +245,7 @@ test "runCli can search binary files when text mode is enabled" {
     const searched = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "needle", root_path });
     defer searched.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), searched.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, searched.stdout, 1, "payload.bin:1:4:aa"));
+    try testing.expect(std.mem.containsAtLeast(u8, searched.stdout, 1, "payload.bin:1:4:aa\x00needle\x00bb\n"));
 }
 
 test "runCli binary mode reports binary matches without line content" {
@@ -184,7 +266,7 @@ test "runCli binary mode reports binary matches without line content" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "payload.bin: binary file matches\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "binary file matches (found \"\\0\" byte around offset 2)\n"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\\x00bb"));
     try testing.expectEqualStrings("", run.stderr);
 }
@@ -1190,7 +1272,7 @@ test "runCli skips control-heavy binary payloads by default but searches them wi
     const text_run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--text", "needle", root_path });
     defer text_run.deinit(testing.allocator);
     try testing.expectEqual(@as(u8, 0), text_run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, text_run.stdout, 1, "control-heavy.bin:1:9:\\x01\\x02\\x03\\x04\\x05\\x06\\x07\\x08needle"));
+    try testing.expect(std.mem.containsAtLeast(u8, text_run.stdout, 1, "control-heavy.bin:1:9:\x01\x02\x03\x04\x05\x06\x07\x08needle\n"));
 }
 
 test "runCli can search UTF-16LE BOM files in default mode" {
@@ -1370,9 +1452,10 @@ test "writeFileReports does not require owned line bytes for decoded multi-line 
         .{},
         .text,
         null,
+        .escaped,
     );
 
-    try testing.expect(matched);
+    try testing.expect(matched.matched);
     try testing.expectEqualStrings(
         "utf16.txt:1:1:needle one\n" ++
             "utf16.txt:3:1:needle two\n",
@@ -1442,9 +1525,10 @@ test "writeFileReports supports Unicode digit shorthand on full file contents" {
         .{},
         .text,
         null,
+        .escaped,
     );
 
-    try testing.expect(matched);
+    try testing.expect(matched.matched);
     try testing.expectEqualStrings(
         "sample.txt:1:1:a5b\n" ++
             "sample.txt:2:1:a١b\n",

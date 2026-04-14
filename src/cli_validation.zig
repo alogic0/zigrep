@@ -2,6 +2,7 @@ const std = @import("std");
 const command = @import("command.zig");
 const cli_dispatch = @import("cli_dispatch.zig");
 const cli_parse_state = @import("cli_parse_state.zig");
+const search_output_policy = @import("search_output_policy.zig");
 
 pub const CliError = cli_parse_state.CliError;
 pub const CliOptions = command.CliOptions;
@@ -35,6 +36,9 @@ fn finalizeRunParse(
     try normalizeState(allocator, state, buffers);
     try validateRunState(state, buffers);
 
+    const pattern_info = try buildPatternInfo(allocator, state, buffers);
+    errdefer if (pattern_info.owned_pattern) |pattern| allocator.free(pattern);
+
     const owned_paths = try buffers.paths.toOwnedSlice(allocator);
     errdefer allocator.free(owned_paths);
     const owned_globs = try buffers.globs.toOwnedSlice(allocator);
@@ -49,8 +53,10 @@ fn finalizeRunParse(
     errdefer allocator.free(owned_exclude_types);
 
     return .{ .run = .{
-        .pattern = state.pattern.?,
+        .pattern = pattern_info.pattern,
+        .owned_pattern = pattern_info.owned_pattern,
         .paths = owned_paths,
+        .used_default_path = state.used_default_path,
         .globs = owned_globs,
         .pre_globs = owned_pre_globs,
         .ignore_files = owned_ignore_files,
@@ -76,7 +82,15 @@ fn finalizeRunParse(
         .max_count = state.max_count,
         .context_before = state.context_before,
         .context_after = state.context_after,
-        .show_stats = state.show_stats,
+        .show_stats = pattern_info.show_stats,
+        .quiet = state.quiet,
+        .filename_flag_seen = state.filename_flag_seen,
+        .line_number_flag_seen = state.line_number_flag_seen,
+        .column_number_flag_seen = state.column_number_flag_seen,
+        .fixed_strings = pattern_info.fixed_strings,
+        .list_files = state.list_files,
+        .sort_mode = state.sort_mode,
+        .sort_reverse = state.sort_reverse,
         .output = state.output,
         .output_format = state.output_format,
         .report_mode = state.report_mode,
@@ -88,20 +102,37 @@ fn normalizeState(
     state: *ParseState,
     buffers: *ParseBuffers,
 ) !void {
-    if (state.pattern == null) return error.MissingPattern;
     if (state.unrestricted_level >= 1) state.no_ignore = true;
     if (state.unrestricted_level >= 2) state.include_hidden = true;
     if (state.unrestricted_level >= 3) state.binary_mode = .text;
-    if (buffers.paths.items.len == 0) try buffers.paths.append(allocator, ".");
-    if (state.output.heading) {
-        state.output.with_filename = false;
+    if (buffers.paths.items.len == 0) {
+        try buffers.paths.append(allocator, ".");
+        state.used_default_path = true;
     }
+    state.output_format = search_output_policy.normalizedOutputFormat(state.output_format, state.report_mode);
+    state.output = search_output_policy.normalizedOutputOptions(state.output);
 }
 
 fn validateRunState(
     state: *const ParseState,
     buffers: *const ParseBuffers,
 ) CliError!void {
+    if (state.list_files) {
+        if (state.positional_pattern != null or buffers.explicit_patterns.items.len != 0 or state.fixed_strings or state.invert_match or state.search_compressed or
+            state.preprocessor != null or state.multiline or state.multiline_dotall or
+            state.max_count != null or state.context_before != 0 or state.context_after != 0 or
+            state.output_format != .text or state.report_mode != .lines or
+            state.output.only_matching or state.output.heading or state.binary_mode != .skip or
+            state.case_mode != .sensitive or state.encoding != .auto or
+            state.line_number_flag_seen or state.column_number_flag_seen)
+        {
+            return error.InvalidFlagCombination;
+        }
+        return;
+    }
+
+    if (state.positional_pattern != null and buffers.explicit_patterns.items.len != 0) return error.InvalidFlagCombination;
+    if (state.positional_pattern == null and buffers.explicit_patterns.items.len == 0) return error.MissingPattern;
     if (state.preprocessor == null and buffers.pre_globs.items.len != 0) return error.InvalidFlagCombination;
     if (state.multiline_dotall and !state.multiline) return error.InvalidFlagCombination;
     if ((state.context_before != 0 or state.context_after != 0) and
@@ -126,4 +157,118 @@ fn validateRunState(
     {
         return error.InvalidFlagCombination;
     }
+    if (state.output.replacement != null and
+        (state.output_format != .text or state.report_mode != .lines or
+            state.invert_match or state.multiline or state.multiline_dotall or
+            state.binary_mode == .suppress))
+    {
+        return error.InvalidFlagCombination;
+    }
+}
+
+const PatternInfo = struct {
+    pattern: []const u8,
+    owned_pattern: ?[]u8 = null,
+    fixed_strings: bool,
+    show_stats: bool,
+};
+
+fn buildPatternInfo(
+    allocator: std.mem.Allocator,
+    state: *const ParseState,
+    buffers: *const ParseBuffers,
+) !PatternInfo {
+    if (state.list_files) {
+        return .{
+            .pattern = "",
+            .fixed_strings = false,
+            .show_stats = false,
+        };
+    }
+
+    if (buffers.explicit_patterns.items.len == 0) {
+        if (state.fixed_strings) {
+            const escaped = try escapeRegexLiteralAlloc(allocator, state.positional_pattern.?);
+            return .{
+                .pattern = escaped,
+                .owned_pattern = escaped,
+                .fixed_strings = false,
+                .show_stats = state.show_stats and !isPathOnlyReportMode(state.report_mode),
+            };
+        }
+        return .{
+            .pattern = state.positional_pattern.?,
+            .fixed_strings = false,
+            .show_stats = state.show_stats and !isPathOnlyReportMode(state.report_mode),
+        };
+    }
+
+    if (buffers.explicit_patterns.items.len == 1 and !state.fixed_strings) {
+        return .{
+            .pattern = buffers.explicit_patterns.items[0],
+            .fixed_strings = false,
+            .show_stats = state.show_stats and !isPathOnlyReportMode(state.report_mode),
+        };
+    }
+
+    const combined = try composeAlternationPatternAlloc(allocator, buffers.explicit_patterns.items, state.fixed_strings);
+    return .{
+        .pattern = combined,
+        .owned_pattern = combined,
+        .fixed_strings = false,
+        .show_stats = state.show_stats and !isPathOnlyReportMode(state.report_mode),
+    };
+}
+
+fn composeAlternationPatternAlloc(
+    allocator: std.mem.Allocator,
+    patterns: []const []const u8,
+    fixed_strings: bool,
+) ![]u8 {
+    var combined: std.ArrayList(u8) = .empty;
+    defer combined.deinit(allocator);
+
+    for (patterns, 0..) |pattern, index| {
+        if (index != 0) try combined.append(allocator, '|');
+        try combined.appendSlice(allocator, "(?:");
+        if (fixed_strings) {
+            try appendEscapedRegexLiteral(&combined, allocator, pattern);
+        } else {
+            try combined.appendSlice(allocator, pattern);
+        }
+        try combined.append(allocator, ')');
+    }
+
+    return combined.toOwnedSlice(allocator);
+}
+
+fn escapeRegexLiteralAlloc(allocator: std.mem.Allocator, pattern: []const u8) ![]u8 {
+    var escaped: std.ArrayList(u8) = .empty;
+    defer escaped.deinit(allocator);
+
+    try appendEscapedRegexLiteral(&escaped, allocator, pattern);
+    return escaped.toOwnedSlice(allocator);
+}
+
+fn appendEscapedRegexLiteral(
+    out: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    pattern: []const u8,
+) !void {
+    for (pattern) |byte| {
+        switch (byte) {
+            '\\', '.', '+', '*', '?', '(', ')', '[', ']', '{', '}', '|', '^', '$' => {
+                try out.append(allocator, '\\');
+                try out.append(allocator, byte);
+            },
+            else => try out.append(allocator, byte),
+        }
+    }
+}
+
+fn isPathOnlyReportMode(report_mode: command.ReportMode) bool {
+    return switch (report_mode) {
+        .files_with_matches, .files_without_match => true,
+        .lines, .count => false,
+    };
 }

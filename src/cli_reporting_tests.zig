@@ -122,6 +122,83 @@ test "runCli context mode respects max-count" {
     try testing.expectEqualStrings("", run.stderr);
 }
 
+test "runCli replace rewrites every match occurrence in a matching line" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "-r", "HIT", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:1:1:HIT one HIT two\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli replace works with context mode and leaves context lines untouched" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ctx.txt",
+        .data =
+            "before\n" ++
+            "needle one needle two\n" ++
+            "after\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "-C", "1", "-r", "HIT", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-1-before\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt:2:1:HIT one HIT two\n"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "ctx.txt-3-after\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli replace expands numbered captures in matching lines" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "caps.txt",
+        .data = "foo bar\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{
+        "zigrep",
+        "-r",
+        "X$2-$1-$0",
+        "(foo) (bar)",
+        root_path,
+    });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "caps.txt:1:1:Xbar-foo-foo bar\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
 test "runCli glob mode filters files by positive glob" {
     const testing = std.testing;
 
@@ -173,6 +250,61 @@ test "runCli glob mode supports negative globs" {
     try testing.expectEqual(@as(u8, 0), run.exit_code);
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt:1:1:needle one"));
     try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "main.txt:1:1:needle two"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli glob mode supports case-insensitive globs" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "Keep.ZIG",
+        .data = "needle one\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "skip.md",
+        .data = "needle two\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--iglob", "*.zig", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "Keep.ZIG:1:1:needle one"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "skip.md"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli sort path orders matching files ascending" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "b.txt",
+        .data = "needle two\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "a.txt",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--sort", "path", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    const a_index = std.mem.indexOf(u8, run.stdout, "a.txt:1:1:needle one").?;
+    const b_index = std.mem.indexOf(u8, run.stdout, "b.txt:1:1:needle two").?;
+    try testing.expect(a_index < b_index);
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -532,15 +664,52 @@ test "runCli json mode emits match events" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"begin\""));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"match\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"end\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"summary\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":{\"text\":"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line_number\":1"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"line\":\"needle one\""));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"lines\":{\"text\":\"needle one\\n\"}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"submatches\":["));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matched_lines\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matches\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"bytes_printed\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"elapsed\":{\"secs\":"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"elapsed_total\":{\"secs\":"));
     try testing.expectEqualStrings("", run.stderr);
 }
 
-test "runCli json count mode emits count events" {
+test "runCli json only-matching mode keeps full line payload and submatch offsets" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "xxneedle yy\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--json", "--only-matching", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"lines\":{\"text\":\"xxneedle yy\\n\"}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"absolute_offset\":0"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"start\":2,\"end\":8"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"match\":{\"text\":\"needle\"}"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matched_lines\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"matches\":1"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"elapsed\":{\"secs\":"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli json count mode falls back to text count output" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -558,10 +727,8 @@ test "runCli json count mode emits count events" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"path\":"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt"));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"count\":2"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
     try testing.expectEqualStrings("", run.stderr);
 }
 
@@ -598,7 +765,7 @@ test "runCli stats mode prints search summary to stderr" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "warnings_emitted=0"));
 }
 
-test "runCli json count mode can emit stats on stderr" {
+test "runCli json count mode falls back to text and can emit stats on stderr" {
     const testing = std.testing;
 
     var tmp = std.testing.tmpDir(.{});
@@ -623,9 +790,32 @@ test "runCli json count mode can emit stats on stderr" {
     defer run.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u8, 0), run.exit_code);
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
-    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\"count\":2"));
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt:2\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"count\""));
     try testing.expect(std.mem.containsAtLeast(u8, run.stderr, 1, "stats: searched_files=1"));
+}
+
+test "runCli json files-with-matches mode falls back to text path output" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "many.txt",
+        .data = "needle one\n",
+    });
+
+    const root_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(root_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--json", "--files-with-matches", "needle", root_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "many.txt\n"));
+    try testing.expect(!std.mem.containsAtLeast(u8, run.stdout, 1, "\"type\":\"path\""));
+    try testing.expectEqualStrings("", run.stderr);
 }
 
 test "runCli heading mode groups matches by file" {
@@ -653,5 +843,159 @@ test "runCli heading mode groups matches by file" {
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "one.txt\n1:1:needle one\n"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "two.txt\n2:1:needle two\n"));
     try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "\n\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli suppresses filename by default for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("needle one\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli count suppresses filename by default for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\nneedle two\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--count", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("2\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli with-filename preserves filename for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "-H", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "single.txt:needle one\n"));
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli only-matching suppresses all prefixes by default for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\nneedle two\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--only-matching", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("needle\nneedle\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli line-number remains when explicitly requested for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\nneedle two\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "-n", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("1:needle one\n2:needle two\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli column remains when explicitly requested for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\nneedle two\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--column", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expectEqualStrings("1:1:needle one\n2:1:needle two\n", run.stdout);
+    try testing.expectEqualStrings("", run.stderr);
+}
+
+test "runCli heading preserves explicit heading behavior for one explicit file" {
+    const testing = std.testing;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "single.txt",
+        .data = "needle one\n",
+    });
+
+    const file_path = try tmp.dir.realpathAlloc(testing.allocator, "single.txt");
+    defer testing.allocator.free(file_path);
+
+    const run = try cli_test_support.runCliCaptured(testing.allocator, &.{ "zigrep", "--heading", "needle", file_path });
+    defer run.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0), run.exit_code);
+    try testing.expect(std.mem.containsAtLeast(u8, run.stdout, 1, "single.txt\n1:1:needle one\n"));
     try testing.expectEqualStrings("", run.stderr);
 }

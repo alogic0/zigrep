@@ -5,6 +5,8 @@ const search = @import("search/root.zig");
 pub const CliError = cli_parse_state.CliError;
 pub const ParseState = cli_parse_state.ParseState;
 pub const ParseBuffers = cli_parse_state.ParseBuffers;
+pub const GlobSpec = cli_parse_state.GlobSpec;
+pub const SortMode = cli_parse_state.SortMode;
 
 pub const ScalarFlagResult = enum {
     unhandled,
@@ -40,8 +42,16 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
         state.output_format = .json;
         return .handled;
     }
+    if (std.mem.eql(u8, arg, "--files")) {
+        state.list_files = true;
+        return .handled;
+    }
     if (std.mem.eql(u8, arg, "--stats")) {
         state.show_stats = true;
+        return .handled;
+    }
+    if (std.mem.eql(u8, arg, "-q") or std.mem.eql(u8, arg, "--quiet")) {
+        state.quiet = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "--null")) {
@@ -70,6 +80,10 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
     }
     if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--ignore-case")) {
         state.case_mode = .insensitive;
+        return .handled;
+    }
+    if (std.mem.eql(u8, arg, "-F") or std.mem.eql(u8, arg, "--fixed-strings")) {
+        state.fixed_strings = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "-S") or std.mem.eql(u8, arg, "--smart-case")) {
@@ -106,6 +120,7 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
     }
     if (std.mem.eql(u8, arg, "-H") or std.mem.eql(u8, arg, "--with-filename")) {
         state.output.with_filename = true;
+        state.filename_flag_seen = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--count")) {
@@ -126,22 +141,29 @@ pub fn handleScalarFlag(state: *ParseState, arg: []const u8) ScalarFlagResult {
     }
     if (std.mem.eql(u8, arg, "--no-filename")) {
         state.output.with_filename = false;
+        state.filename_flag_seen = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "--line-number")) {
         state.output.line_number = true;
+        state.line_number_flag_seen = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "--no-line-number")) {
         state.output.line_number = false;
+        state.line_number_flag_seen = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "--column")) {
+        state.output.line_number = true;
         state.output.column_number = true;
+        state.line_number_flag_seen = true;
+        state.column_number_flag_seen = true;
         return .handled;
     }
     if (std.mem.eql(u8, arg, "--no-column")) {
         state.output.column_number = false;
+        state.column_number_flag_seen = true;
         return .handled;
     }
     return .unhandled;
@@ -155,6 +177,14 @@ pub fn handleValueFlag(
     index: *usize,
     arg: []const u8,
 ) !bool {
+    if (std.mem.eql(u8, arg, "-e") or std.mem.eql(u8, arg, "--regexp")) {
+        try buffers.explicit_patterns.append(allocator, try requireNextArg(argv, index));
+        return true;
+    }
+    if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--replace")) {
+        state.output.replacement = try requireNextArg(argv, index);
+        return true;
+    }
     if (std.mem.eql(u8, arg, "--ignore-file")) {
         try buffers.ignore_files.append(allocator, try requireNextArg(argv, index));
         return true;
@@ -179,8 +209,30 @@ pub fn handleValueFlag(
         try buffers.pre_globs.append(allocator, try requireNextArg(argv, index));
         return true;
     }
+    if (std.mem.eql(u8, arg, "--sort")) {
+        const mode = try parseSortMode(try requireNextArg(argv, index));
+        state.sort_mode = mode;
+        state.sort_reverse = false;
+        return true;
+    }
+    if (std.mem.eql(u8, arg, "--sortr")) {
+        const mode = try parseSortMode(try requireNextArg(argv, index));
+        state.sort_mode = mode;
+        state.sort_reverse = mode != .none;
+        return true;
+    }
     if (std.mem.eql(u8, arg, "-g") or std.mem.eql(u8, arg, "--glob")) {
-        try buffers.globs.append(allocator, try requireNextArg(argv, index));
+        try buffers.globs.append(allocator, .{
+            .pattern = try requireNextArg(argv, index),
+            .case_insensitive = false,
+        });
+        return true;
+    }
+    if (std.mem.eql(u8, arg, "--iglob")) {
+        try buffers.globs.append(allocator, .{
+            .pattern = try requireNextArg(argv, index),
+            .case_insensitive = true,
+        });
         return true;
     }
     if (std.mem.eql(u8, arg, "-E") or std.mem.eql(u8, arg, "--encoding")) {
@@ -237,6 +289,15 @@ fn parseEncoding(arg: []const u8) CliError!search.io.InputEncoding {
     if (std.ascii.eqlIgnoreCase(arg, "latin1")) return .latin1;
     if (std.ascii.eqlIgnoreCase(arg, "utf16le")) return .utf16le;
     if (std.ascii.eqlIgnoreCase(arg, "utf16be")) return .utf16be;
+    return error.InvalidFlagValue;
+}
+
+fn parseSortMode(arg: []const u8) CliError!SortMode {
+    if (std.mem.eql(u8, arg, "none")) return .none;
+    if (std.mem.eql(u8, arg, "path")) return .path;
+    if (std.mem.eql(u8, arg, "modified")) return .modified;
+    if (std.mem.eql(u8, arg, "accessed")) return .accessed;
+    if (std.mem.eql(u8, arg, "created")) return .created;
     return error.InvalidFlagValue;
 }
 
