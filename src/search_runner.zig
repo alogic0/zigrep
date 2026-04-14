@@ -6,6 +6,7 @@ const command = @import("command.zig");
 const search_entry_runner = @import("search_entry_runner.zig");
 const search_execution = @import("search_execution.zig");
 const search_output = @import("search_output.zig");
+const search_output_policy = @import("search_output_policy.zig");
 const search_parallel = @import("search_parallel.zig");
 const search_path_runner = @import("search_path_runner.zig");
 const search_reporting = @import("search_reporting.zig");
@@ -25,32 +26,6 @@ pub const CliOptions = command.CliOptions;
 pub const SearchStats = search_result.SearchStats;
 pub const SearchResult = search_result.SearchResult;
 const stdin_label = "stdin";
-
-fn isPathOnlyReportMode(mode: ReportMode) bool {
-    return mode == .files_with_matches or mode == .files_without_match;
-}
-
-fn shouldUseExplicitSingleFileDefaults(options: CliOptions) bool {
-    const reporting = options.reporting();
-    const hints = options.parseHints();
-    const traversal = options.traversal();
-    if (reporting.output.heading or isPathOnlyReportMode(reporting.report_mode) or reporting.output_format != .text) return false;
-    if (hints.used_default_path or traversal.paths.len != 1) return false;
-
-    const stat = std.fs.cwd().statFile(traversal.paths[0]) catch return false;
-    return stat.kind == .file;
-}
-
-fn applyExplicitSingleFileOutputDefaults(options: CliOptions) CliOptions {
-    var effective = options;
-    const hints = options.parseHints();
-    if (!shouldUseExplicitSingleFileDefaults(options)) return effective;
-
-    if (!hints.filename_flag_seen) effective.output.with_filename = false;
-    if (!hints.line_number_flag_seen) effective.output.line_number = false;
-    if (!hints.column_number_flag_seen) effective.output.column_number = false;
-    return effective;
-}
 
 pub fn runSearch(
     allocator: std.mem.Allocator,
@@ -75,7 +50,7 @@ pub fn runSearch(
     defer type_matcher.deinit(allocator);
     try zigrep.search.types.validateSelectedTypes(type_matcher, traversal.include_types, traversal.exclude_types);
 
-    const effective_options = applyExplicitSingleFileOutputDefaults(options);
+    const effective_options = search_output_policy.effectivePathSearchOptions(options);
     const effective_traversal = effective_options.traversal();
     const effective_reporting = effective_options.reporting();
 
@@ -140,8 +115,7 @@ pub fn runStdinSearch(
     var total_timer = try std.time.Timer.start();
     const traversal = options.traversal();
     const matcher = options.matcher();
-    const reporting = options.reporting();
-    const hints = options.parseHints();
+    const reporting = search_output_policy.effectiveStdinReporting(options);
     if (traversal.preprocessor != null or traversal.list_files) return error.InvalidFlagCombination;
     if (matcher.multiline and
         (matcher.invert_match or
@@ -177,11 +151,6 @@ pub fn runStdinSearch(
         };
     const raw_text_output = search_execution.shouldRenderRawBinaryText(search_bytes, matcher);
 
-    var effective_output = reporting.output;
-    if (!hints.filename_flag_seen and reporting.report_mode != .files_with_matches and reporting.report_mode != .files_without_match) {
-        effective_output.with_filename = false;
-    }
-
     var json_capture: std.Io.Writer.Allocating = .init(allocator);
     defer json_capture.deinit();
     const output_writer = if (reporting.output_format == .json) &json_capture.writer else stdout;
@@ -200,13 +169,13 @@ pub fn runStdinSearch(
         matcher.encoding,
         effective_binary_output,
         matcher.invert_match,
-        effective_output,
+        reporting.output,
         reporting.output_format,
         reporting.report_mode,
         reporting.max_count,
         reporting.context_before,
         reporting.context_after,
-        if (raw_text_output) .raw else .escaped,
+        search_output_policy.displayMode(raw_text_output),
     );
 
     if (reporting.output_format == .json) {

@@ -6,6 +6,7 @@ const command = @import("command.zig");
 const search_reporting = @import("search_reporting.zig");
 const search_execution = @import("search_execution.zig");
 const search_output = @import("search_output.zig");
+const search_output_policy = @import("search_output_policy.zig");
 
 // Per-file search execution.
 // This module owns file reads, preprocessing/decoding preparation, binary
@@ -119,7 +120,7 @@ pub fn searchEntryToOwnedOutput(
         reporting.max_count,
         reporting.context_before,
         reporting.context_after,
-        if (raw_text_output) .raw else .escaped,
+        search_output_policy.displayMode(raw_text_output),
     );
     const report = matched;
 

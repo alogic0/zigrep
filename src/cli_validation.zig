@@ -2,6 +2,7 @@ const std = @import("std");
 const command = @import("command.zig");
 const cli_dispatch = @import("cli_dispatch.zig");
 const cli_parse_state = @import("cli_parse_state.zig");
+const search_output_policy = @import("search_output_policy.zig");
 
 pub const CliError = cli_parse_state.CliError;
 pub const CliOptions = command.CliOptions;
@@ -108,12 +109,8 @@ fn normalizeState(
         try buffers.paths.append(allocator, ".");
         state.used_default_path = true;
     }
-    if (state.output_format == .json and state.report_mode != .lines) {
-        state.output_format = .text;
-    }
-    if (state.output.heading) {
-        state.output.with_filename = false;
-    }
+    state.output_format = search_output_policy.normalizedOutputFormat(state.output_format, state.report_mode);
+    state.output = search_output_policy.normalizedOutputOptions(state.output);
 }
 
 fn validateRunState(

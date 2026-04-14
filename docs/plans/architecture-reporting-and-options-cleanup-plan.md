@@ -89,14 +89,14 @@ The main issues to address are:
 
 ## Phase 3: Centralize Output Policy
 
-- [ ] Create one internal output-policy layer that owns decisions such as:
+- [x] Create one internal output-policy layer that owns decisions such as:
   - explicit single-file defaults
   - JSON fallback behavior for non-line modes
   - raw binary text display policy
   - filename/line/column default interactions
-- [ ] Make `src/search_runner.zig` stop carrying output-policy branches that
+- [x] Make `src/search_runner.zig` stop carrying output-policy branches that
   are really reporting decisions.
-- [ ] Keep `src/search_output.zig` focused on serialization and formatting, not
+- [x] Keep `src/search_output.zig` focused on serialization and formatting, not
   policy selection.
 
 ### Phase 3 Guidance
@@ -153,7 +153,7 @@ The main issues to address are:
 
 - [x] 1. Remove output-derived stats aggregation
 - [x] 2. Introduce narrower internal option groupings
-- [ ] 3. Centralize output-policy decisions
+- [x] 3. Centralize output-policy decisions
 - [ ] 4. Split reporting by report family
 - [ ] 5. Re-check root and test boundary pressure
 
