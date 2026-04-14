@@ -94,13 +94,13 @@ work.
 
 ## Feature 4: Replacement / Substitution
 
-- [ ] Decide whether substitution belongs in `zigrep`’s intended CLI scope.
-- [ ] If yes, define the smallest supported surface:
+- [x] Decide whether substitution belongs in `zigrep`’s intended CLI scope.
+- [x] If yes, define the smallest supported surface:
   - literal replacement only
   - regex replacement without backreferences
   - regex replacement with capture expansion
-- [ ] Decide whether substitution is output-only, file-rewriting, or both.
-- [ ] Keep file mutation out of scope unless explicitly designed and isolated.
+- [x] Decide whether substitution is output-only, file-rewriting, or both.
+- [x] Keep file mutation out of scope unless explicitly designed and isolated.
 
 ### Design Guidance
 
@@ -112,12 +112,12 @@ work.
 
 ## Cross-Cutting Constraints
 
-- [ ] Keep new work aligned with the current architecture:
+- [x] Keep new work aligned with the current architecture:
   - traversal and filtering stay in the search path layer
   - reporting stays separate from filtering
   - command dispatch stays explicit
-- [ ] Avoid introducing broad new abstractions before there is a concrete need.
-- [ ] Prefer narrow extensions of the current command model and search pipeline.
+- [x] Avoid introducing broad new abstractions before there is a concrete need.
+- [x] Prefer narrow extensions of the current command model and search pipeline.
 
 ## Validation
 

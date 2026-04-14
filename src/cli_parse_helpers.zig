@@ -179,6 +179,10 @@ pub fn handleValueFlag(
         try buffers.explicit_patterns.append(allocator, try requireNextArg(argv, index));
         return true;
     }
+    if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--replace")) {
+        state.output.replacement = try requireNextArg(argv, index);
+        return true;
+    }
     if (std.mem.eql(u8, arg, "--ignore-file")) {
         try buffers.ignore_files.append(allocator, try requireNextArg(argv, index));
         return true;

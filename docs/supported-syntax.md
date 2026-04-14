@@ -233,6 +233,7 @@ The current CLI supports:
 - Non-matching-file output with `-L` or `--files-without-match`
 - Inverted line selection with `-v` or `--invert-match`
 - Match-only output with `-o` or `--only-matching`
+- Output-only literal replacement with `-r` or `--replace`
 - Newline-delimited JSON output with `--json`
 - NUL-delimited path output with `--null` for file-path reporting modes
 - Search summary output with `--stats`
@@ -476,6 +477,15 @@ Sort note:
 - sorting applies to normal search output, `--files`, `--files-with-matches`, `--files-without-match`, `--count`, and `--json`
 - `--quiet` observes the sorted candidate order when sorting is enabled
 
+Replace note:
+
+- `-r TEXT` or `--replace TEXT` rewrites each matched span in printed text output to `TEXT`
+- replacement is currently output-only; it does not rewrite files on disk
+- replacement currently uses the replacement text literally
+- capture expansion such as `$1` or named-group replacement is not implemented yet
+- replacement works with normal text line output, `--only-matching`, `--heading`, context output, stdin search, and path sorting
+- replacement is rejected with `--count`, `--files-with-matches`, `--files-without-match`, `--json`, `-v` / `--invert-match`, multiline search, and binary-suppressed output
+
 Stdin note:
 
 - when no explicit path is given and stdin is piped, `zigrep` searches stdin instead of defaulting to `.`
@@ -496,7 +506,7 @@ The current search tool does not yet implement:
 
 - `.gitignore` compatibility beyond the small internal ignore-rule subset
 - timestamp-based sorting controls
-- replacement/substitution
+- capture-expanding replacement and file-rewriting substitution
 - full ripgrep flag compatibility
 
 ## Performance Model

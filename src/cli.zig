@@ -127,6 +127,7 @@ pub fn writeUsage(writer: *std.Io.Writer, argv0: []const u8) !void {
         \\  -S, --smart-case      use ignore-case unless the pattern has uppercase letters
         \\  -F, --fixed-strings   treat the pattern as a literal string
         \\  -e, --regexp PATTERN  provide the search pattern explicitly
+        \\  -r, --replace TEXT    print matches with each matched span replaced by TEXT
         \\  --text                search binary files and print normal match output
         \\  --binary              search binary files but suppress matching line content
         \\  -z, --search-zip      search gzip-compressed files too

@@ -155,6 +155,13 @@ fn validateRunState(
     {
         return error.InvalidFlagCombination;
     }
+    if (state.output.replacement != null and
+        (state.output_format != .text or state.report_mode != .lines or
+            state.invert_match or state.multiline or state.multiline_dotall or
+            state.binary_mode == .suppress))
+    {
+        return error.InvalidFlagCombination;
+    }
 }
 
 const PatternInfo = struct {

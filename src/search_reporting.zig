@@ -12,6 +12,14 @@ const search_output = @import("search_output.zig");
 const OutputOptions = command.OutputOptions;
 const OutputFormat = command.OutputFormat;
 const ReportMode = command.ReportMode;
+
+const ReplacedLine = struct {
+    line_number: usize,
+    column_number: usize,
+    line: []const u8,
+    line_span: zigrep.search.report.Span,
+    match_spans: []zigrep.search.report.Span,
+};
 pub fn writeFileReports(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
@@ -23,6 +31,9 @@ pub fn writeFileReports(
     output_format: OutputFormat,
     max_count: ?usize,
 ) !bool {
+    if (output.replacement != null and !output.only_matching) {
+        return writeFileReportsReplacing(allocator, writer, searcher, path, bytes, encoding, output, max_count);
+    }
     if (output.only_matching) {
         std.debug.assert(max_count == null or max_count.? > 0);
     }
@@ -98,6 +109,86 @@ pub fn writeFileReports(
     };
 }
 
+fn writeFileReportsReplacing(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    bytes: []const u8,
+    encoding: zigrep.search.io.InputEncoding,
+    output: OutputOptions,
+    max_count: ?usize,
+) !bool {
+    const haystack = if (try zigrep.search.io.decodeToUtf8Alloc(allocator, bytes, encoding)) |decoded|
+        decoded
+    else
+        bytes;
+    defer if (haystack.ptr != bytes.ptr) allocator.free(haystack);
+
+    var lines: std.ArrayList(ReplacedLine) = .empty;
+    defer {
+        for (lines.items) |line| allocator.free(line.match_spans);
+        lines.deinit(allocator);
+    }
+
+    const Collector = struct {
+        allocator: std.mem.Allocator,
+        lines: *std.ArrayList(ReplacedLine),
+        max_count: ?usize,
+
+        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
+            if (self.lines.items.len != 0 and self.lines.items[self.lines.items.len - 1].line_span.start == report.line_span.start) {
+                var current = &self.lines.items[self.lines.items.len - 1];
+                current.match_spans = try self.allocator.realloc(current.match_spans, current.match_spans.len + 1);
+                current.match_spans[current.match_spans.len - 1] = report.match_span;
+                return;
+            }
+
+            if (self.max_count) |limit| {
+                if (self.lines.items.len >= limit) return error.MaxCountReached;
+            }
+
+            const spans = try self.allocator.alloc(zigrep.search.report.Span, 1);
+            spans[0] = report.match_span;
+            try self.lines.append(self.allocator, .{
+                .line_number = report.line_number,
+                .column_number = report.column_number,
+                .line = report.line,
+                .line_span = report.line_span,
+                .match_spans = spans,
+            });
+        }
+    };
+
+    var collector = Collector{
+        .allocator = allocator,
+        .lines = &lines,
+        .max_count = max_count,
+    };
+
+    _ = searcher.forEachMatchReport(path, haystack, &collector, Collector.emit) catch |err| switch (err) {
+        error.MaxCountReached => true,
+        else => return err,
+    };
+
+    if (lines.items.len == 0) return false;
+
+    for (lines.items) |line| {
+        try search_output.writeReplacedLine(
+            writer,
+            path,
+            line.line_number,
+            line.column_number,
+            line.line,
+            line.line_span.start,
+            line.match_spans,
+            output.replacement.?,
+            output,
+        );
+    }
+    return true;
+}
+
 fn writeContextLine(
     writer: *std.Io.Writer,
     path: []const u8,
@@ -131,6 +222,9 @@ fn writeFileReportsWithContext(
     context_before: usize,
     context_after: usize,
 ) !bool {
+    if (output.replacement != null) {
+        return writeFileReportsWithContextReplacing(allocator, writer, searcher, path, haystack, output, max_count, context_before, context_after);
+    }
     const IterationStop = error{MaxCountReached};
 
     const MatchLine = struct {
@@ -207,6 +301,113 @@ fn writeFileReportsWithContext(
 
         if (matched_indexes[line_index]) |match_index| {
             try search_output.writeReport(writer, matched_lines.items[match_index].report, output);
+        } else {
+            try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output);
+        }
+    }
+
+    return true;
+}
+
+fn writeFileReportsWithContextReplacing(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    searcher: *zigrep.search.grep.Searcher,
+    path: []const u8,
+    haystack: []const u8,
+    output: OutputOptions,
+    max_count: ?usize,
+    context_before: usize,
+    context_after: usize,
+) !bool {
+    var matched_lines: std.ArrayList(ReplacedLine) = .empty;
+    defer {
+        for (matched_lines.items) |line| allocator.free(line.match_spans);
+        matched_lines.deinit(allocator);
+    }
+
+    const Collector = struct {
+        allocator: std.mem.Allocator,
+        items: *std.ArrayList(ReplacedLine),
+        max_count: ?usize,
+
+        fn emit(self: *@This(), report: zigrep.search.grep.MatchReport) !void {
+            if (self.items.items.len != 0 and self.items.items[self.items.items.len - 1].line_span.start == report.line_span.start) {
+                var current = &self.items.items[self.items.items.len - 1];
+                current.match_spans = try self.allocator.realloc(current.match_spans, current.match_spans.len + 1);
+                current.match_spans[current.match_spans.len - 1] = report.match_span;
+                return;
+            }
+
+            if (self.max_count) |limit| {
+                if (self.items.items.len >= limit) return error.MaxCountReached;
+            }
+
+            const spans = try self.allocator.alloc(zigrep.search.report.Span, 1);
+            spans[0] = report.match_span;
+            try self.items.append(self.allocator, .{
+                .line_number = report.line_number,
+                .column_number = report.column_number,
+                .line = report.line,
+                .line_span = report.line_span,
+                .match_spans = spans,
+            });
+        }
+    };
+
+    var collector = Collector{
+        .allocator = allocator,
+        .items = &matched_lines,
+        .max_count = max_count,
+    };
+
+    _ = searcher.forEachMatchReport(path, haystack, &collector, Collector.emit) catch |err| switch (err) {
+        error.MaxCountReached => true,
+        else => return err,
+    };
+
+    if (matched_lines.items.len == 0) return false;
+
+    const line_spans = try zigrep.search.report.collectLineSpansAlloc(allocator, haystack);
+    defer allocator.free(line_spans);
+
+    const include = try allocator.alloc(bool, line_spans.len);
+    defer allocator.free(include);
+    @memset(include, false);
+
+    const matched_indexes = try allocator.alloc(?usize, line_spans.len);
+    defer allocator.free(matched_indexes);
+    @memset(matched_indexes, null);
+
+    for (matched_lines.items, 0..) |match_line, match_index| {
+        const line_index = match_line.line_number - 1;
+        matched_indexes[line_index] = match_index;
+        const start = line_index -| context_before;
+        const end = @min(line_index + context_after + 1, line_spans.len);
+        for (start..end) |idx| include[idx] = true;
+    }
+
+    var previous_included: ?usize = null;
+    for (line_spans, 0..) |line_span, line_index| {
+        if (!include[line_index]) continue;
+        if (previous_included) |prev| {
+            if (line_index > prev + 1) try writer.writeAll("--\n");
+        }
+        previous_included = line_index;
+
+        if (matched_indexes[line_index]) |match_index| {
+            const line = matched_lines.items[match_index];
+            try search_output.writeReplacedLine(
+                writer,
+                path,
+                line.line_number,
+                line.column_number,
+                line.line,
+                line.line_span.start,
+                line.match_spans,
+                output.replacement.?,
+                output,
+            );
         } else {
             try writeContextLine(writer, path, line_index + 1, haystack[line_span.start..line_span.end], output);
         }

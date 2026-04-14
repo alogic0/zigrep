@@ -230,6 +230,31 @@ test "parseArgs accepts fixed-string and explicit-pattern flags" {
     }
 }
 
+test "parseArgs accepts replace flag" {
+    const testing = std.testing;
+
+    const parsed = try parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-r",
+        "HIT",
+        "needle",
+        "src",
+    });
+    defer switch (parsed) {
+        .run => |opts| opts.deinit(testing.allocator),
+        .type_list => |opts| opts.deinit(testing.allocator),
+        .help, .version => {},
+    };
+
+    switch (parsed) {
+        .run => |opts| {
+            try testing.expectEqualStrings("HIT", opts.output.replacement.?);
+            try testing.expectEqualStrings("needle", opts.pattern);
+        },
+        .help, .version, .type_list => unreachable,
+    }
+}
+
 test "parseArgs accepts explicit patterns that begin with a dash" {
     const testing = std.testing;
 
@@ -970,6 +995,34 @@ test "parseArgs rejects invalid numeric flags" {
         "zigrep",
         "--binary",
         "--json",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--count",
+        "-r",
+        "HIT",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "--json",
+        "-r",
+        "HIT",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-v",
+        "-r",
+        "HIT",
+        "needle",
+    }));
+    try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{
+        "zigrep",
+        "-U",
+        "-r",
+        "HIT",
         "needle",
     }));
     try testing.expectError(error.InvalidFlagCombination, parseArgs(testing.allocator, &.{

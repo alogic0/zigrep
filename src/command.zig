@@ -8,6 +8,7 @@ pub const OutputOptions = struct {
     only_matching: bool = false,
     null_path_terminator: bool = false,
     heading: bool = false,
+    replacement: ?[]const u8 = null,
 };
 
 pub const OutputFormat = enum {
